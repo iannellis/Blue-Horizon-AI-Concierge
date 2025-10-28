@@ -1,0 +1,6 @@
+promo_id,name,description,discount_type,discount_value,min_stay,applicable_room_types,start_date,end_date,blackout_dates,terms_conditions,booking_code,status
+PR000001,Early Bird Special,Book 60 days in advance and save 20% on your stay,Percentage,20,0,"Standard, Deluxe, Suite",2025-01-21,2025-05-24,,Cancellation policies apply; please refer to the booking confirmation.,PROMO4797,Ended
+PR000002,Weekend Getaway,Special weekend rates including breakfast and spa credit,Package,15,2,"Deluxe, Suite",2025-01-19,2025-03-12,,Advance booking required; subject to availability.,PROMO8026,Scheduled
+PR000003,Summer Sale,Enjoy 25% off during summer months,Percentage,25,3,All,2025-01-08,2025-05-12,,Advance booking required; subject to availability.,PROMO4398,Ended
+PR000004,Long Stay Discount,Stay 7 nights or more and receive 30% off,Percentage,30,7,All,2025-01-11,2025-07-04,,Promotional rates are non-refundable and non-transferable.,PROMO8571,Scheduled
+PR000005,Spa Package,$200 spa credit with minimum 2-night stay,Fixed Amount,200,2,"Deluxe, Suite, Presidential Suite",2025-01-31,2025-05-04,2025-01-04,Advance booking required; subject to availability.,PROMO1558,Active

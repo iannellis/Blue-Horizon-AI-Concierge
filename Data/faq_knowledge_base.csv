@@ -1,0 +1,21 @@
+faq_id,category,subcategory,question,answer,keywords,last_updated,helpful_votes,views
+FAQ000001,booking,reservations,How do I make a reservation?,"You can make a reservation through our website, mobile app, or by calling our reservation desk. We accept all major credit cards.","book, reserve, reservation, booking",2024-03-09,957,3813
+FAQ000002,booking,check-in/out,What is the check-in/check-out time?,Check-in time is 3:00 PM and check-out time is 11:00 AM local time.,"check in, check out, arrival, departure",2024-10-15,967,2793
+FAQ000003,booking,modifications,Can I modify my booking?,"Yes, you can modify your booking through our website or by contacting our reservation desk at least 24 hours before check-in.","change, modify, update, edit",2024-12-05,443,1929
+FAQ000004,booking,cancellations,What is the cancellation policy?,Free cancellation is available up to 48 hours before check-in. Later cancellations may incur charges.,"cancel, refund, cancellation",2024-05-20,611,1300
+FAQ000005,booking,special requests,Do you offer early check-in/late check-out?,"Subject to availability, early check-in and late check-out can be arranged for an additional fee.","early check-in, late check-out, extended stay",2024-12-18,239,3954
+FAQ000006,amenities,facilities,What amenities are included?,"Our hotel offers complimentary Wi-Fi, fitness center, pool, spa, restaurant, and 24-hour room service.","amenities, facilities, services",2024-10-24,855,1860
+FAQ000007,amenities,dining,Is breakfast included?,"Yes, breakfast is included with most room rates. Please check your booking details.","breakfast, dining, restaurant",2024-01-10,365,1943
+FAQ000008,amenities,wellness,Do you have a fitness center?,"Yes, our fitness center is open 24/7 and features modern equipment and free weights.","fitness, gym, exercise",2024-10-05,988,1471
+FAQ000009,amenities,business,Is there a swimming pool?,"Yes, we have both indoor and outdoor pools open from 6:00 AM to 10:00 PM.","pool, swimming, recreation",2024-10-15,400,2881
+FAQ000010,amenities,recreation,Do you offer spa services?,"Our full-service spa offers massages, facials, and body treatments. Advance booking is recommended.","spa, wellness, treatments",2024-01-07,145,766
+FAQ000011,services,room service,Is room service available?,Room service is available 24/7 with a full menu during restaurant hours and a limited menu overnight.,"room service, dining, food",2024-04-05,708,2133
+FAQ000012,services,housekeeping,Do you offer laundry service?,"Yes, same-day laundry and dry-cleaning services are available Monday through Saturday.","laundry, cleaning, housekeeping",2024-09-16,126,249
+FAQ000013,services,concierge,Is there a business center?,"Our business center is open 24/7 and offers computers, printing, and meeting rooms.","business, work, office",2024-05-25,925,1604
+FAQ000014,services,transportation,Do you provide airport transfers?,"Yes, we offer airport shuttle service for a fee. Please book at least 24 hours in advance.","airport, shuttle, transfer",2024-11-27,743,1621
+FAQ000015,services,business,Is parking available?,We offer both self-parking and valet parking services. Charges apply.,"parking, valet, car",2024-02-03,721,1975
+FAQ000016,policies,pet policy,What is your pet policy?,We welcome pets under 25 pounds for an additional fee. Please notify us in advance.,"pets, animals, dogs, cats",2024-07-17,639,4327
+FAQ000017,policies,smoking policy,Do you have smoking rooms?,All our rooms are non-smoking. Smoking is only permitted in designated outdoor areas.,"smoking, non-smoking, tobacco",2024-01-31,703,2992
+FAQ000018,policies,payment policy,What forms of payment do you accept?,"We accept all major credit cards, debit cards, and cash with a security deposit.","payment, credit card, cash",2024-10-30,799,2778
+FAQ000019,policies,age requirements,Is there a minimum age to check in?,Guests must be 18 or older to check in. Valid ID required.,"age, check-in, requirements",2024-01-09,662,4150
+FAQ000020,policies,luggage policy,What is your luggage storage policy?,Complimentary luggage storage is available before check-in and after check-out.,"luggage, storage, bags",2024-06-20,127,213

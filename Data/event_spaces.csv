@@ -1,0 +1,5 @@
+space_id,name,location,capacity,square_feet,price_per_hour,features,layout_options,min_booking_hours,availability,catering_available,setup_time,cleanup_time,accessibility
+ES000001,Grand Ballroom,Main Floor,500,10000,1000,"Stage, Dance Floor, Premium AV System, Chandeliers, Private Entrance","Theater, Banquet, Classroom, Reception",2,7:00-23:00,True,60,60,Full ADA Compliance
+ES000002,Conference Room A,Business Level,100,2000,300,"Projector, Video Conference System, Whiteboard, Executive Chairs","Boardroom, U-Shape, Classroom",1,24/7,True,30,30,Full ADA Compliance
+ES000003,Garden Terrace,Outdoor,200,5000,500,"Garden Views, Covered Area, Outdoor Lighting, Heat Lamps","Reception, Banquet, Ceremony",1,7:00-23:00,True,30,30,Partial Accessibility
+ES000004,Rooftop Lounge,Top Floor,150,3000,600,"Ocean View, Bar Area, Lounge Furniture, Sound System","Reception, Cocktail, Lounge",1,7:00-23:00,True,30,30,Full ADA Compliance

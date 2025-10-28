@@ -1,0 +1,26 @@
+service_id,service_type,name,description,duration_minutes,price,department,booking_required,min_notice_hours
+SV000001,Spa Treatment,Spa Treatment - 120 min,Swedish massage for 120 minutes using Modern techniques with Herbal Products. Improved Circulation.,120,264.98,Spa & Wellness,True,4
+SV000002,Spa Treatment,Spa Treatment - 60 min,Luxurious 60-minute Deep Tissue treatment featuring Herbal Products and Traditional methods. Improved Circulation.,60,232.03,Spa & Wellness,True,4
+SV000003,Spa Treatment,Spa Treatment - 120 min,Premium Deep Tissue experience for 120 minutes incorporating Western massage with Luxury Oils. Relaxation.,120,251.99,Spa & Wellness,True,24
+SV000004,Spa Treatment,Spa Treatment - 90 min,Luxurious 90-minute Hot Stone treatment featuring Essential Oils and Western methods. Stress Relief.,90,157.55,Spa & Wellness,True,1
+SV000005,Personal Training,Personal Training - 60 min,Custom 60-minute HIIT workout emphasizing Core. Weight Management.,60,133.13,Fitness Center,True,4
+SV000006,Personal Training,Personal Training - 30 min,Personalized HIIT training for 30 minutes targeting Lower Body. Improved Strength.,30,138.75,Fitness Center,True,4
+SV000007,Personal Training,Personal Training - 60 min,Personalized Functional Fitness training for 60 minutes targeting Lower Body. Enhanced Endurance.,60,82.2,Fitness Center,True,24
+SV000008,Personal Training,Personal Training - 60 min,Custom 60-minute Strength Training workout emphasizing Full Body. Better Flexibility.,60,143.7,Fitness Center,True,2
+SV000009,Wellness Consultation,Wellness Consultation - 60 min,In-depth Wellness Strategy session for 60 minutes addressing Sleep Improvement. Personalized Plan.,60,94.86,Spa & Wellness,True,1
+SV000010,Wellness Consultation,Wellness Consultation - 45 min,Comprehensive 45-minute Nutrition Planning assessment targeting Diet Optimization. Actionable Goals.,45,109.6,Spa & Wellness,True,2
+SV000011,Wellness Consultation,Wellness Consultation - 60 min,Comprehensive 60-minute Lifestyle Assessment assessment targeting Work-Life Balance. Actionable Goals.,60,130.29,Spa & Wellness,True,4
+SV000012,Wellness Consultation,Wellness Consultation - 45 min,In-depth Wellness Strategy session for 45 minutes addressing Work-Life Balance. Expert Guidance.,45,118.17,Spa & Wellness,True,1
+SV000013,Massage Therapy,Massage Therapy - 30 min,30-minute Recovery massage using Trigger Point techniques. Focus on Full Body for Pain Relief.,30,91.32,Spa & Wellness,True,24
+SV000014,Massage Therapy,Massage Therapy - 90 min,Specialized Sports Massage therapy session for 90 minutes with Myofascial Release approach. Pain Relief.,90,157.61,Spa & Wellness,True,24
+SV000015,Massage Therapy,Massage Therapy - 60 min,Specialized Recovery therapy session for 60 minutes with Deep Tissue approach. Improved Mobility.,60,159.75,Spa & Wellness,True,4
+SV000016,Massage Therapy,Massage Therapy - 90 min,Targeted 90-minute Recovery treatment employing Myofascial Release methods for Problem Areas. Improved Mobility.,90,117.71,Spa & Wellness,True,1
+SV000017,Fitness Assessment,Fitness Assessment - 60 min,Professional 60-minute Movement Screening analyzing Flexibility. Program Optimization.,60,116.08,Fitness Center,True,24
+SV000018,Fitness Assessment,Fitness Assessment - 60 min,Professional 60-minute Comprehensive Fitness Test analyzing Strength Metrics. Progress Tracking.,60,88.23,Fitness Center,True,2
+SV000019,Fitness Assessment,Fitness Assessment - 60 min,Detailed Movement Screening assessment for 60 minutes examining Cardio Capacity. Program Optimization.,60,74.6,Fitness Center,True,24
+SV000020,Fitness Assessment,Fitness Assessment - 60 min,Professional 60-minute Performance Evaluation analyzing Overall Fitness. Program Optimization.,60,60.63,Fitness Center,True,4
+SV000021,Group Fitness Class,Group Fitness Class - 45 min,Dynamic HIIT session for 45 minutes targeting Cardio. Social Interaction.,45,48.11,Fitness Center,True,24
+SV000022,Group Fitness Class,Group Fitness Class - 60 min,Energetic 60-minute HIIT class focusing on Strength. Social Interaction.,60,43.88,Fitness Center,True,2
+SV000023,Group Fitness Class,Group Fitness Class - 60 min,Energetic 60-minute Boot Camp class focusing on Flexibility. Group Motivation.,60,25.21,Fitness Center,True,4
+SV000024,Group Fitness Class,Group Fitness Class - 45 min,Engaging 45-minute Pilates class emphasizing Strength. Group Motivation.,45,30.93,Fitness Center,True,1
+SV000025,Group Fitness Class,Group Fitness Class - 45 min,Engaging 45-minute Yoga class emphasizing Full Body Workout. Expert Guidance.,45,40.18,Fitness Center,True,2

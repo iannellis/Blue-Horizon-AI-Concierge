@@ -1,0 +1,1001 @@
+staff_id,first_name,last_name,email,phone,hire_date,department,position,schedule,certifications
+ST000001,Melissa,Davis,melissa.davis@bluehorizon.com,(969)432-1482x1480,2022-07-24 03:17:39,Security,Security Manager,Night,
+ST000002,Lauren,Hooper,lauren.hooper@bluehorizon.com,889-257-8085x08557,2021-07-08 01:05:20,Maintenance,Engineer,Afternoon,
+ST000003,Holly,Owens,holly.owens@bluehorizon.com,178.127.9118x4786,2023-03-27 20:04:45,Front Desk,Guest Relations Manager,Afternoon,
+ST000004,Kathryn,Brock,kathryn.brock@bluehorizon.com,075.768.1729x927,2020-03-22 02:32:30,Administration,Accountant,Afternoon,"Hospitality Management, Security License, First Aid"
+ST000005,Brandy,Burke,brandy.burke@bluehorizon.com,131.302.7014,2021-02-26 04:11:22,Maintenance,Engineer,Night,"Massage Therapy License, First Aid"
+ST000006,Emily,Hodges,emily.hodges@bluehorizon.com,0468708848,2022-06-22 08:11:36,Front Desk,Concierge,Night,"First Aid, Food Safety"
+ST000007,Samantha,Alvarado,samantha.alvarado@bluehorizon.com,133.012.0156,2022-07-28 15:19:04,Administration,Accountant,Night,
+ST000008,Robert,Rivas,robert.rivas@bluehorizon.com,001-420-261-1838x3928,2024-11-17 16:36:24,Food & Beverage,Server,Afternoon,
+ST000009,Ryan,Brown,ryan.brown@bluehorizon.com,443.831.8558x908,2021-03-13 04:12:07,Front Desk,Guest Relations Manager,Night,
+ST000010,Brian,Jones,brian.jones@bluehorizon.com,001-758-530-1565x01289,2021-02-16 20:15:37,Front Desk,Concierge,Afternoon,
+ST000011,Kristen,Brown,kristen.brown@bluehorizon.com,+1-856-256-4067,2024-08-29 07:16:06,Maintenance,Engineer,Morning,
+ST000012,Sean,Garcia,sean.garcia@bluehorizon.com,(949)056-0148x4588,2020-03-11 21:56:31,Administration,Accountant,Night,"CPR, Food Safety"
+ST000013,Andrew,Sparks,andrew.sparks@bluehorizon.com,(942)194-3186x3788,2020-05-30 15:02:23,Administration,Administrative Assistant,Rotating,
+ST000014,James,Olson,james.olson@bluehorizon.com,001-607-123-1015x64301,2023-05-21 07:30:08,Housekeeping,Housekeeper,Night,
+ST000015,Carolyn,Haney,carolyn.haney@bluehorizon.com,513.112.1498x88550,2021-07-21 06:21:30,Security,Security Supervisor,Night,
+ST000016,Mark,Smith,mark.smith@bluehorizon.com,148.407.6916,2024-03-26 20:04:28,Front Desk,Guest Relations Manager,Night,
+ST000017,Scott,Perkins,scott.perkins@bluehorizon.com,(959)250-5902,2023-07-02 14:49:35,Front Desk,Concierge,Night,"Security License, CPR, Food Safety"
+ST000018,Matthew,Martinez,matthew.martinez@bluehorizon.com,(280)858-8814,2021-05-10 14:08:17,Maintenance,Engineer,Rotating,
+ST000019,Melissa,Garcia,melissa.garcia@bluehorizon.com,(532)753-0554x31344,2021-10-24 02:35:53,Security,Security Supervisor,Morning,"Sommelier, CPR, Security License"
+ST000020,Ryan,Goodwin,ryan.goodwin@bluehorizon.com,+1-958-928-6559x06900,2024-05-26 12:12:48,Administration,HR Specialist,Night,
+ST000021,Kevin,Santiago,kevin.santiago@bluehorizon.com,039-133-4148,2021-04-05 08:05:28,Spa & Wellness,Massage Therapist,Rotating,
+ST000022,Eric,Miller,eric.miller@bluehorizon.com,(806)828-5564x0038,2023-05-11 13:55:18,Housekeeping,Housekeeper,Rotating,
+ST000023,Maria,Wilson,maria.wilson@bluehorizon.com,001-922-785-5019x824,2022-03-05 17:19:31,Front Desk,Concierge,Morning,"CPR, Sommelier"
+ST000024,Hannah,Freeman,hannah.freeman@bluehorizon.com,612.688.0002x454,2022-12-19 01:30:08,Front Desk,Guest Relations Manager,Night,
+ST000025,Erica,Bradley,erica.bradley@bluehorizon.com,+1-304-771-5551x3936,2024-08-20 08:48:33,Administration,Accountant,Rotating,
+ST000026,Breanna,Santiago,breanna.santiago@bluehorizon.com,(210)424-3989x50203,2021-04-05 07:37:54,Administration,HR Specialist,Afternoon,
+ST000027,Nicholas,Anderson,nicholas.anderson@bluehorizon.com,4649692475,2022-07-16 01:56:34,Security,Security Manager,Afternoon,
+ST000028,Richard,Crawford,richard.crawford@bluehorizon.com,131-680-8602x244,2020-05-07 19:34:00,Front Desk,Receptionist,Rotating,
+ST000029,Daniel,Salinas,daniel.salinas@bluehorizon.com,7147348490,2020-06-14 08:20:20,Housekeeping,Manager,Rotating,
+ST000030,Christopher,Payne,christopher.payne@bluehorizon.com,621-855-5001x661,2020-02-13 21:04:30,Food & Beverage,Server,Night,
+ST000031,Yolanda,Burns,yolanda.burns@bluehorizon.com,353-139-8653x43169,2021-11-05 01:09:59,Food & Beverage,Server,Rotating,
+ST000032,Monica,Faulkner,monica.faulkner@bluehorizon.com,001-572-328-8907x726,2023-09-07 05:03:14,Security,Security Supervisor,Morning,
+ST000033,Danielle,Farrell,danielle.farrell@bluehorizon.com,314-322-8847x283,2024-10-12 07:19:04,Spa & Wellness,Wellness Coach,Afternoon,
+ST000034,Jason,Webb,jason.webb@bluehorizon.com,922.816.6175,2022-04-01 07:55:50,Food & Beverage,Server,Afternoon,
+ST000035,Claire,Harris,claire.harris@bluehorizon.com,(448)230-5051,2023-08-30 04:21:46,Spa & Wellness,Wellness Coach,Night,Sommelier
+ST000036,Margaret,Moore,margaret.moore@bluehorizon.com,091-366-9811x9825,2020-11-13 06:01:46,Maintenance,Maintenance Technician,Afternoon,Hospitality Management
+ST000037,James,Salinas,james.salinas@bluehorizon.com,077-624-9723x1346,2024-07-05 10:29:16,Food & Beverage,Bartender,Afternoon,
+ST000038,Brandon,Calderon,brandon.calderon@bluehorizon.com,001-974-938-9390x40127,2022-07-21 15:33:09,Housekeeping,Supervisor,Rotating,
+ST000039,Lisa,Macias,lisa.macias@bluehorizon.com,(976)399-5061x0521,2023-07-31 08:32:52,Maintenance,Maintenance Technician,Afternoon,
+ST000040,Kevin,Robinson,kevin.robinson@bluehorizon.com,+1-460-550-8738x086,2024-11-27 07:38:14,Food & Beverage,Restaurant Manager,Afternoon,
+ST000041,Albert,Berry,albert.berry@bluehorizon.com,001-924-418-7077x118,2022-07-05 17:42:37,Administration,Accountant,Rotating,
+ST000042,Benjamin,Acosta,benjamin.acosta@bluehorizon.com,001-825-369-3899x623,2020-10-19 22:15:35,Security,Security Manager,Morning,Hospitality Management
+ST000043,Scott,Berger,scott.berger@bluehorizon.com,610.386.3055x1596,2021-02-28 07:42:26,Spa & Wellness,Spa Attendant,Afternoon,
+ST000044,John,Marquez,john.marquez@bluehorizon.com,995.459.4232x04206,2022-07-01 09:42:19,Administration,Accountant,Night,
+ST000045,Sonya,Terry,sonya.terry@bluehorizon.com,729.226.1456,2023-02-03 08:10:09,Food & Beverage,Kitchen Staff,Morning,
+ST000046,Jacob,Herrera,jacob.herrera@bluehorizon.com,992-656-2080x03490,2020-07-18 17:33:36,Front Desk,Concierge,Morning,
+ST000047,James,Rosales,james.rosales@bluehorizon.com,813.159.7772,2020-04-17 12:56:31,Administration,Administrative Assistant,Morning,"First Aid, CPR, Massage Therapy License"
+ST000048,James,Williams,james.williams@bluehorizon.com,668-082-1688x3323,2021-10-27 18:31:57,Maintenance,Engineer,Morning,Massage Therapy License
+ST000049,Steven,Mason,steven.mason@bluehorizon.com,001-152-400-8768,2021-07-14 07:58:13,Security,Security Officer,Rotating,
+ST000050,Gregory,Garrett,gregory.garrett@bluehorizon.com,514-264-6929,2021-07-17 05:40:35,Administration,HR Specialist,Morning,
+ST000051,Jacob,Hernandez,jacob.hernandez@bluehorizon.com,4452643285,2021-06-30 08:10:24,Maintenance,Engineer,Night,"CPR, Food Safety"
+ST000052,Ashley,Brown,ashley.brown@bluehorizon.com,881.985.4783x3905,2022-10-25 01:05:13,Housekeeping,Manager,Rotating,
+ST000053,Emily,Evans,emily.evans@bluehorizon.com,2874554744,2020-05-28 14:43:27,Maintenance,Supervisor,Afternoon,
+ST000054,William,Vaughn,william.vaughn@bluehorizon.com,+1-307-636-6050,2022-06-11 09:14:49,Front Desk,Guest Relations Manager,Rotating,
+ST000055,Lisa,Brown,lisa.brown@bluehorizon.com,867.656.9255,2021-02-26 04:27:42,Food & Beverage,Server,Afternoon,
+ST000056,Timothy,Curtis,timothy.curtis@bluehorizon.com,413-322-7633,2024-05-02 08:50:49,Spa & Wellness,Spa Attendant,Rotating,Massage Therapy License
+ST000057,Michael,Casey,michael.casey@bluehorizon.com,(129)713-2754x50234,2020-12-03 01:08:17,Front Desk,Receptionist,Afternoon,
+ST000058,Reginald,Cummings,reginald.cummings@bluehorizon.com,(933)817-2024,2023-01-06 06:27:38,Administration,Administrative Assistant,Night,
+ST000059,Thomas,Berg,thomas.berg@bluehorizon.com,428-535-9882x37365,2021-11-01 12:30:56,Housekeeping,Housekeeper,Morning,
+ST000060,Mallory,Thomas,mallory.thomas@bluehorizon.com,+1-890-542-7873,2024-07-01 10:41:10,Housekeeping,Supervisor,Afternoon,
+ST000061,Pamela,Baker,pamela.baker@bluehorizon.com,(959)268-1738,2022-09-27 13:57:08,Security,Security Manager,Afternoon,
+ST000062,Ashley,Dennis,ashley.dennis@bluehorizon.com,+1-289-838-9013x8607,2024-01-28 17:16:16,Security,Security Officer,Afternoon,
+ST000063,Janet,Rodgers,janet.rodgers@bluehorizon.com,690.809.9752x769,2022-12-27 11:58:37,Maintenance,Maintenance Technician,Rotating,
+ST000064,Michael,Castaneda,michael.castaneda@bluehorizon.com,(857)216-1530,2023-08-29 11:04:30,Housekeeping,Housekeeper,Morning,"First Aid, Hospitality Management"
+ST000065,Daniel,Anderson,daniel.anderson@bluehorizon.com,944-443-5343x740,2024-10-25 11:18:06,Spa & Wellness,Spa Attendant,Rotating,Massage Therapy License
+ST000066,Rebecca,French,rebecca.french@bluehorizon.com,001-177-012-0867x19003,2024-01-03 03:19:44,Spa & Wellness,Massage Therapist,Night,"Food Safety, Security License, First Aid"
+ST000067,Randall,Nichols,randall.nichols@bluehorizon.com,(771)907-4853x8743,2022-06-14 09:26:34,Housekeeping,Supervisor,Morning,
+ST000068,James,Alvarez,james.alvarez@bluehorizon.com,177-874-3480x783,2020-03-29 15:09:50,Front Desk,Guest Relations Manager,Morning,
+ST000069,Melinda,Hill,melinda.hill@bluehorizon.com,(262)847-7315x9680,2023-05-05 14:04:30,Food & Beverage,Chef,Morning,
+ST000070,Stephanie,Vazquez,stephanie.vazquez@bluehorizon.com,(282)247-1114,2021-11-23 20:49:25,Housekeeping,Manager,Night,
+ST000071,Heidi,Finley,heidi.finley@bluehorizon.com,562-509-0157x5280,2024-01-12 13:11:47,Spa & Wellness,Massage Therapist,Morning,
+ST000072,Kristen,Nicholson,kristen.nicholson@bluehorizon.com,799.915.1534x83630,2022-05-24 09:40:58,Administration,Accountant,Night,
+ST000073,Kenneth,Mcdonald,kenneth.mcdonald@bluehorizon.com,323-829-4368,2023-03-26 09:54:21,Housekeeping,Housekeeper,Night,CPR
+ST000074,Kristen,Williams,kristen.williams@bluehorizon.com,986-722-4585x1474,2024-06-23 19:02:56,Food & Beverage,Restaurant Manager,Morning,
+ST000075,Kimberly,Wiley,kimberly.wiley@bluehorizon.com,773-864-9080x9437,2023-10-09 08:24:18,Food & Beverage,Restaurant Manager,Morning,
+ST000076,Kimberly,Norton,kimberly.norton@bluehorizon.com,852-648-5287x9983,2024-05-20 22:32:03,Food & Beverage,Kitchen Staff,Night,
+ST000077,Paul,Harris,paul.harris@bluehorizon.com,001-063-159-5291x7707,2023-08-25 01:51:32,Administration,HR Specialist,Morning,
+ST000078,Ashley,Hernandez,ashley.hernandez@bluehorizon.com,424.136.5897x9864,2022-06-03 08:28:30,Spa & Wellness,Spa Attendant,Night,"First Aid, CPR"
+ST000079,Jeffrey,Greer,jeffrey.greer@bluehorizon.com,(602)370-2289x528,2024-11-07 22:39:55,Spa & Wellness,Spa Attendant,Rotating,
+ST000080,Philip,Allison,philip.allison@bluehorizon.com,001-841-272-0243x5035,2024-02-19 17:24:36,Maintenance,Engineer,Afternoon,
+ST000081,Jamie,Gill,jamie.gill@bluehorizon.com,0559184526,2020-05-23 17:42:44,Housekeeping,Manager,Night,
+ST000082,Betty,Stewart,betty.stewart@bluehorizon.com,701.880.3619x921,2020-03-03 12:52:24,Security,Security Supervisor,Morning,
+ST000083,Allison,Gutierrez,allison.gutierrez@bluehorizon.com,394.493.2759x129,2022-01-23 01:37:23,Front Desk,Guest Relations Manager,Afternoon,"First Aid, Food Safety, Security License"
+ST000084,Melanie,Ross,melanie.ross@bluehorizon.com,389-710-2338,2024-09-22 21:16:12,Maintenance,Maintenance Technician,Afternoon,
+ST000085,Justin,Foley,justin.foley@bluehorizon.com,429-839-5756x064,2021-05-14 20:35:27,Maintenance,Maintenance Technician,Night,"Hospitality Management, CPR"
+ST000086,Joseph,Camacho,joseph.camacho@bluehorizon.com,(035)189-2027,2023-03-18 09:42:17,Food & Beverage,Server,Morning,
+ST000087,Mary,Dixon,mary.dixon@bluehorizon.com,(288)598-0860x1004,2022-08-03 06:55:38,Spa & Wellness,Massage Therapist,Rotating,CPR
+ST000088,Jeffery,Hunter,jeffery.hunter@bluehorizon.com,774.332.3594,2021-02-07 07:33:36,Administration,Administrative Assistant,Morning,
+ST000089,Heather,Shaw,heather.shaw@bluehorizon.com,306-478-8418x56825,2022-01-22 22:11:50,Front Desk,Concierge,Rotating,
+ST000090,Ricardo,Chan,ricardo.chan@bluehorizon.com,(061)244-5622,2021-06-30 10:14:32,Spa & Wellness,Wellness Coach,Morning,
+ST000091,Kevin,Mason,kevin.mason@bluehorizon.com,(799)660-3477x746,2024-01-16 13:39:15,Administration,Administrative Assistant,Rotating,
+ST000092,Christian,Martinez,christian.martinez@bluehorizon.com,752.972.8078x76629,2020-01-14 06:15:58,Security,Security Supervisor,Rotating,
+ST000093,Isabel,Stephens,isabel.stephens@bluehorizon.com,+1-664-589-0282x958,2022-09-10 09:31:59,Security,Security Supervisor,Afternoon,
+ST000094,Brett,Monroe,brett.monroe@bluehorizon.com,864-973-6437x54374,2020-12-30 02:41:40,Maintenance,Supervisor,Rotating,"CPR, Food Safety"
+ST000095,Sophia,Bishop,sophia.bishop@bluehorizon.com,253-742-8839,2024-01-14 05:45:04,Food & Beverage,Chef,Morning,
+ST000096,Deborah,Sloan,deborah.sloan@bluehorizon.com,703.190.7377x38602,2024-06-25 12:34:09,Maintenance,Maintenance Technician,Afternoon,
+ST000097,Charles,Park,charles.park@bluehorizon.com,(087)258-0109,2021-06-16 21:04:13,Front Desk,Concierge,Night,"First Aid, Massage Therapy License, Hospitality Management"
+ST000098,Robert,Bennett,robert.bennett@bluehorizon.com,511.476.4695,2024-03-29 13:51:22,Food & Beverage,Restaurant Manager,Rotating,
+ST000099,Monica,Case,monica.case@bluehorizon.com,(966)780-3198x86991,2020-04-06 04:50:33,Food & Beverage,Bartender,Night,
+ST000100,David,Harris,david.harris@bluehorizon.com,001-882-161-5995x6542,2021-06-22 16:15:25,Maintenance,Maintenance Technician,Night,"Massage Therapy License, Food Safety, Sommelier"
+ST000101,Jane,Johnson,jane.johnson@bluehorizon.com,6629818991,2024-04-05 20:14:40,Housekeeping,Manager,Rotating,
+ST000102,Matthew,King,matthew.king@bluehorizon.com,(504)101-4521x4177,2022-07-03 23:25:54,Security,Security Officer,Night,
+ST000103,Tyler,Cardenas,tyler.cardenas@bluehorizon.com,(491)881-3003x67993,2020-05-05 21:37:52,Spa & Wellness,Wellness Coach,Night,
+ST000104,Charles,Lloyd,charles.lloyd@bluehorizon.com,942-457-4747,2023-05-05 04:03:43,Security,Security Supervisor,Morning,
+ST000105,Cynthia,Orr,cynthia.orr@bluehorizon.com,413-222-8582,2021-11-16 19:41:35,Spa & Wellness,Spa Attendant,Rotating,Food Safety
+ST000106,Christina,Knight,christina.knight@bluehorizon.com,(881)520-4876x989,2022-03-24 01:05:31,Food & Beverage,Bartender,Morning,"CPR, First Aid"
+ST000107,Barbara,Williams,barbara.williams@bluehorizon.com,+1-016-889-1039,2023-09-29 03:53:00,Administration,Accountant,Night,
+ST000108,Michelle,White,michelle.white@bluehorizon.com,+1-424-784-9780x10200,2022-06-22 19:59:12,Front Desk,Guest Relations Manager,Rotating,Sommelier
+ST000109,Shelly,Torres,shelly.torres@bluehorizon.com,958.479.2595x326,2022-10-18 08:49:07,Housekeeping,Housekeeper,Morning,
+ST000110,Mike,Francis,mike.francis@bluehorizon.com,001-431-182-0398,2023-05-19 02:40:45,Administration,Accountant,Rotating,
+ST000111,Michele,Johnson,michele.johnson@bluehorizon.com,932-613-8973x5254,2021-09-11 04:55:56,Security,Security Supervisor,Afternoon,Food Safety
+ST000112,Timothy,Jackson,timothy.jackson@bluehorizon.com,860-156-4540x9761,2022-08-07 12:27:59,Maintenance,Supervisor,Morning,Sommelier
+ST000113,Thomas,Copeland,thomas.copeland@bluehorizon.com,+1-765-595-3900,2022-07-12 13:20:59,Security,Security Supervisor,Afternoon,
+ST000114,Gary,Francis,gary.francis@bluehorizon.com,001-909-217-7277x60229,2020-11-25 14:44:51,Housekeeping,Housekeeper,Night,
+ST000115,Stacy,Edwards,stacy.edwards@bluehorizon.com,+1-031-537-9385x55307,2022-09-18 16:17:21,Front Desk,Guest Relations Manager,Morning,"First Aid, Food Safety"
+ST000116,Matthew,Adams,matthew.adams@bluehorizon.com,+1-358-479-4873,2022-06-09 11:30:32,Security,Security Officer,Afternoon,Hospitality Management
+ST000117,Edward,Reed,edward.reed@bluehorizon.com,808.255.8826x17388,2020-05-03 01:36:38,Maintenance,Maintenance Technician,Morning,
+ST000118,Barry,Gibson,barry.gibson@bluehorizon.com,214.050.0596x8658,2023-01-28 23:05:32,Food & Beverage,Chef,Morning,
+ST000119,David,Jones,david.jones@bluehorizon.com,348-400-8843x477,2024-07-13 21:16:43,Housekeeping,Manager,Rotating,
+ST000120,Nicole,Daniels,nicole.daniels@bluehorizon.com,228-514-5099x50053,2022-01-31 13:13:12,Security,Security Supervisor,Morning,"Hospitality Management, Food Safety, Sommelier"
+ST000121,Charles,Stuart,charles.stuart@bluehorizon.com,(657)302-6803x4313,2023-05-08 07:41:33,Spa & Wellness,Wellness Coach,Night,
+ST000122,John,Thomas,john.thomas@bluehorizon.com,(203)621-8311x6278,2022-02-23 15:20:08,Maintenance,Supervisor,Afternoon,
+ST000123,Patricia,Taylor,patricia.taylor@bluehorizon.com,381-878-0669x6610,2023-12-01 03:35:56,Front Desk,Guest Relations Manager,Night,
+ST000124,Anna,Mccoy,anna.mccoy@bluehorizon.com,(431)614-6908x1462,2022-11-04 01:39:20,Maintenance,Engineer,Night,Massage Therapy License
+ST000125,Thomas,Murphy,thomas.murphy@bluehorizon.com,+1-795-834-3948x006,2023-03-14 13:24:52,Maintenance,Maintenance Technician,Afternoon,
+ST000126,Kristin,Gomez,kristin.gomez@bluehorizon.com,(446)608-2707x6216,2020-10-09 11:44:23,Spa & Wellness,Massage Therapist,Afternoon,
+ST000127,Mariah,Roy,mariah.roy@bluehorizon.com,712.145.6641,2023-05-03 23:06:24,Security,Security Manager,Afternoon,
+ST000128,Michelle,Cooper,michelle.cooper@bluehorizon.com,001-395-417-2759x883,2020-12-13 05:39:12,Front Desk,Guest Relations Manager,Night,Food Safety
+ST000129,Amanda,Martin,amanda.martin@bluehorizon.com,835-538-2249,2022-09-23 05:42:05,Administration,Administrative Assistant,Rotating,
+ST000130,John,Cunningham,john.cunningham@bluehorizon.com,238-192-5590x2297,2022-11-13 23:46:29,Housekeeping,Supervisor,Morning,"Massage Therapy License, Food Safety, Security License"
+ST000131,Casey,Nguyen,casey.nguyen@bluehorizon.com,001-324-984-5310,2023-07-15 05:38:00,Food & Beverage,Chef,Night,"CPR, Massage Therapy License"
+ST000132,Heather,Wilson,heather.wilson@bluehorizon.com,001-551-572-5920x2032,2024-04-04 15:09:38,Front Desk,Guest Relations Manager,Afternoon,
+ST000133,Ryan,Wilson,ryan.wilson@bluehorizon.com,0893148110,2020-07-30 01:09:22,Administration,Administrative Assistant,Rotating,
+ST000134,Valerie,Crawford,valerie.crawford@bluehorizon.com,980-717-4957,2021-12-26 10:56:41,Food & Beverage,Restaurant Manager,Night,
+ST000135,Shannon,Dickerson,shannon.dickerson@bluehorizon.com,624-892-2626,2022-07-17 00:36:16,Front Desk,Guest Relations Manager,Night,"Sommelier, First Aid"
+ST000136,Daniel,Velez,daniel.velez@bluehorizon.com,830.566.2976,2020-11-09 11:27:51,Security,Security Supervisor,Night,"CPR, Hospitality Management"
+ST000137,Ryan,Shannon,ryan.shannon@bluehorizon.com,616-542-3881x0253,2024-03-09 13:02:13,Front Desk,Concierge,Night,"First Aid, Food Safety, Hospitality Management"
+ST000138,Brenda,Grimes,brenda.grimes@bluehorizon.com,(534)419-8497x10309,2023-03-16 09:50:05,Security,Security Supervisor,Afternoon,
+ST000139,Deborah,Rodriguez,deborah.rodriguez@bluehorizon.com,367-282-2535,2024-06-12 07:21:40,Front Desk,Guest Relations Manager,Afternoon,
+ST000140,Gabriella,Lopez,gabriella.lopez@bluehorizon.com,+1-802-990-8683x1578,2023-04-29 23:59:54,Front Desk,Concierge,Rotating,
+ST000141,Miranda,Walker,miranda.walker@bluehorizon.com,888-197-0798,2023-10-19 21:16:21,Security,Security Supervisor,Morning,
+ST000142,Fernando,Ward,fernando.ward@bluehorizon.com,113-219-4217x2269,2024-06-06 06:20:10,Spa & Wellness,Spa Attendant,Rotating,
+ST000143,Jeffrey,Roth,jeffrey.roth@bluehorizon.com,001-831-760-5721x4659,2020-03-07 19:31:01,Spa & Wellness,Wellness Coach,Afternoon,
+ST000144,Evan,Montoya,evan.montoya@bluehorizon.com,894.960.6536x4608,2022-11-03 08:35:17,Spa & Wellness,Spa Attendant,Rotating,"Food Safety, First Aid, CPR"
+ST000145,Sandra,Strickland,sandra.strickland@bluehorizon.com,573-062-4173x9311,2023-12-12 11:13:10,Housekeeping,Housekeeper,Rotating,
+ST000146,Joshua,Rodriguez,joshua.rodriguez@bluehorizon.com,(365)577-2670x3781,2022-03-01 05:20:21,Administration,HR Specialist,Afternoon,
+ST000147,Shannon,Lewis,shannon.lewis@bluehorizon.com,+1-703-138-9059x09663,2022-11-19 07:06:23,Spa & Wellness,Massage Therapist,Rotating,
+ST000148,Anthony,Bennett,anthony.bennett@bluehorizon.com,001-019-851-5394,2021-01-05 00:29:27,Housekeeping,Housekeeper,Afternoon,
+ST000149,Cynthia,Scott,cynthia.scott@bluehorizon.com,+1-997-157-7075,2020-04-14 22:55:47,Food & Beverage,Bartender,Morning,
+ST000150,Amy,Little,amy.little@bluehorizon.com,(131)524-2061,2024-11-19 11:29:25,Security,Security Officer,Morning,
+ST000151,Stephanie,Alexander,stephanie.alexander@bluehorizon.com,6153698076,2020-04-16 18:49:58,Front Desk,Guest Relations Manager,Morning,"Food Safety, CPR"
+ST000152,James,Wright,james.wright@bluehorizon.com,+1-054-619-6775x30404,2023-12-18 22:58:45,Front Desk,Concierge,Night,Food Safety
+ST000153,Christopher,Ryan,christopher.ryan@bluehorizon.com,001-916-792-8430x54100,2022-08-13 17:30:13,Food & Beverage,Restaurant Manager,Night,
+ST000154,Jeffrey,Evans,jeffrey.evans@bluehorizon.com,276.655.2216,2024-08-14 22:49:10,Housekeeping,Supervisor,Night,"Massage Therapy License, Food Safety"
+ST000155,Donald,Graham,donald.graham@bluehorizon.com,341-275-9155,2023-03-03 20:51:36,Administration,Administrative Assistant,Night,
+ST000156,Todd,Rodriguez,todd.rodriguez@bluehorizon.com,327-354-0218x832,2024-09-06 07:26:58,Administration,Accountant,Morning,
+ST000157,Cheryl,Mcintosh,cheryl.mcintosh@bluehorizon.com,(594)224-1223,2022-03-03 08:29:33,Maintenance,Supervisor,Morning,
+ST000158,Parker,Kim,parker.kim@bluehorizon.com,017-391-8040,2024-03-11 06:42:09,Security,Security Supervisor,Night,"Food Safety, Hospitality Management, Sommelier"
+ST000159,Amanda,Harrison,amanda.harrison@bluehorizon.com,517.432.2249x4764,2021-09-24 02:54:28,Maintenance,Engineer,Rotating,"Food Safety, First Aid"
+ST000160,Antonio,Blackwell,antonio.blackwell@bluehorizon.com,(843)406-2468x1279,2020-07-30 10:48:28,Administration,Administrative Assistant,Night,
+ST000161,David,Miller,david.miller@bluehorizon.com,+1-210-092-6638,2023-11-16 09:50:49,Maintenance,Supervisor,Afternoon,"Sommelier, Food Safety"
+ST000162,Rebecca,Moore,rebecca.moore@bluehorizon.com,034.136.6314x3111,2022-04-13 20:39:37,Administration,Accountant,Rotating,
+ST000163,Eric,Kerr,eric.kerr@bluehorizon.com,555.540.6404,2023-09-05 21:09:32,Maintenance,Maintenance Technician,Morning,
+ST000164,John,Franklin,john.franklin@bluehorizon.com,+1-142-201-7660,2024-10-08 02:41:32,Front Desk,Concierge,Morning,
+ST000165,Mark,Martin,mark.martin@bluehorizon.com,+1-682-669-6962x73292,2024-01-08 02:58:48,Food & Beverage,Server,Morning,"Hospitality Management, Food Safety"
+ST000166,Bradley,Rosales,bradley.rosales@bluehorizon.com,(248)644-7641x831,2020-07-16 10:24:51,Maintenance,Supervisor,Morning,
+ST000167,Jessica,Jimenez,jessica.jimenez@bluehorizon.com,001-976-745-1367,2024-08-30 06:34:45,Maintenance,Maintenance Technician,Night,
+ST000168,Theresa,Rodriguez,theresa.rodriguez@bluehorizon.com,001-378-522-3174x2473,2021-12-15 12:26:11,Maintenance,Engineer,Night,"Security License, Food Safety, Hospitality Management"
+ST000169,David,Garcia,david.garcia@bluehorizon.com,+1-991-026-6959,2024-09-19 08:02:23,Maintenance,Supervisor,Morning,
+ST000170,Jason,Mullins,jason.mullins@bluehorizon.com,555.242.9408,2021-08-16 13:23:58,Front Desk,Guest Relations Manager,Afternoon,
+ST000171,Christopher,Page,christopher.page@bluehorizon.com,906.360.9271x61297,2020-07-06 04:08:58,Food & Beverage,Bartender,Rotating,Massage Therapy License
+ST000172,Dylan,Martinez,dylan.martinez@bluehorizon.com,(493)968-5305,2022-02-06 01:45:53,Security,Security Supervisor,Afternoon,"Massage Therapy License, Security License, Sommelier"
+ST000173,Robert,Marsh,robert.marsh@bluehorizon.com,669-202-0821,2024-02-10 20:39:09,Spa & Wellness,Wellness Coach,Night,"Hospitality Management, First Aid, Sommelier"
+ST000174,Edward,Carroll,edward.carroll@bluehorizon.com,794-976-5764x49678,2021-09-11 14:24:43,Spa & Wellness,Wellness Coach,Morning,
+ST000175,Jason,Brown,jason.brown@bluehorizon.com,080-745-4359,2024-09-19 07:23:11,Security,Security Manager,Afternoon,"Sommelier, Food Safety"
+ST000176,Anthony,Bishop,anthony.bishop@bluehorizon.com,(162)676-9156x0277,2024-04-04 23:26:48,Spa & Wellness,Wellness Coach,Afternoon,"Massage Therapy License, Food Safety"
+ST000177,Jane,Marshall,jane.marshall@bluehorizon.com,317.465.2914,2022-01-08 14:45:29,Maintenance,Engineer,Afternoon,
+ST000178,Debra,Rodriguez,debra.rodriguez@bluehorizon.com,(775)241-1156x308,2024-09-15 03:50:57,Security,Security Manager,Afternoon,
+ST000179,Matthew,Jensen,matthew.jensen@bluehorizon.com,001-481-513-0603x82936,2024-01-03 12:18:39,Spa & Wellness,Wellness Coach,Afternoon,
+ST000180,Jason,Harvey,jason.harvey@bluehorizon.com,623-352-1671x2266,2021-10-06 06:20:54,Security,Security Supervisor,Morning,
+ST000181,Brianna,Baker,brianna.baker@bluehorizon.com,(066)198-0268,2020-06-10 13:51:02,Front Desk,Receptionist,Afternoon,
+ST000182,Lisa,Martin,lisa.martin@bluehorizon.com,886-524-7126x80983,2020-06-05 23:52:58,Maintenance,Engineer,Morning,"Security License, CPR, First Aid"
+ST000183,Adam,Stanley,adam.stanley@bluehorizon.com,+1-907-787-0839x0729,2021-12-18 06:40:29,Front Desk,Receptionist,Afternoon,
+ST000184,April,Ramirez,april.ramirez@bluehorizon.com,383-839-4416x5507,2022-10-12 17:16:34,Administration,Administrative Assistant,Rotating,"Massage Therapy License, First Aid, Hospitality Management"
+ST000185,Sandra,Hart,sandra.hart@bluehorizon.com,811.777.9710x7395,2020-01-15 08:19:21,Maintenance,Supervisor,Rotating,
+ST000186,Jeremy,Gilbert,jeremy.gilbert@bluehorizon.com,9130892762,2020-05-04 23:08:33,Housekeeping,Housekeeper,Morning,
+ST000187,Brittany,Clarke,brittany.clarke@bluehorizon.com,001-295-500-3195x98809,2023-02-11 09:43:47,Food & Beverage,Bartender,Rotating,"Massage Therapy License, Security License, CPR"
+ST000188,April,Davila,april.davila@bluehorizon.com,(794)216-6317x294,2021-09-30 14:01:23,Maintenance,Supervisor,Afternoon,
+ST000189,William,Thompson,william.thompson@bluehorizon.com,864.533.0369x69758,2024-02-14 03:52:12,Maintenance,Engineer,Morning,
+ST000190,Christian,Johnson,christian.johnson@bluehorizon.com,9545914738,2022-03-11 08:08:44,Housekeeping,Housekeeper,Morning,
+ST000191,Christian,Collins,christian.collins@bluehorizon.com,196-985-5990x46048,2022-05-13 16:14:48,Spa & Wellness,Spa Attendant,Rotating,
+ST000192,Mark,Mitchell,mark.mitchell@bluehorizon.com,(458)283-3782x4969,2024-11-08 20:53:28,Administration,HR Specialist,Afternoon,
+ST000193,Tina,Thompson,tina.thompson@bluehorizon.com,001-250-216-5696x678,2024-04-04 17:22:49,Housekeeping,Housekeeper,Morning,"Security License, Massage Therapy License"
+ST000194,Christine,Lee,christine.lee@bluehorizon.com,(089)431-4063,2022-06-15 09:00:32,Housekeeping,Supervisor,Night,
+ST000195,Kayla,Ayala,kayla.ayala@bluehorizon.com,(632)589-4360x93627,2020-09-16 12:55:38,Administration,Accountant,Night,
+ST000196,Theresa,Saunders,theresa.saunders@bluehorizon.com,(534)382-9999,2024-10-23 11:10:23,Administration,Administrative Assistant,Night,
+ST000197,Nicolas,Robbins,nicolas.robbins@bluehorizon.com,(350)274-3366x932,2022-06-07 06:29:11,Administration,Accountant,Morning,
+ST000198,Courtney,Davis,courtney.davis@bluehorizon.com,+1-325-912-0350,2021-11-09 04:37:33,Food & Beverage,Server,Afternoon,Security License
+ST000199,Justin,Pugh,justin.pugh@bluehorizon.com,001-419-395-1502,2023-12-02 03:39:10,Front Desk,Guest Relations Manager,Afternoon,
+ST000200,Charles,Arnold,charles.arnold@bluehorizon.com,(966)427-2864x559,2020-05-03 07:58:36,Security,Security Manager,Afternoon,"Hospitality Management, Security License"
+ST000201,Elizabeth,Yoder,elizabeth.yoder@bluehorizon.com,+1-206-830-2321x31647,2024-03-17 00:30:02,Spa & Wellness,Spa Attendant,Morning,
+ST000202,David,Torres,david.torres@bluehorizon.com,001-366-538-4652,2021-11-20 02:57:23,Housekeeping,Manager,Night,
+ST000203,Michelle,Galloway,michelle.galloway@bluehorizon.com,(643)181-5643x5986,2021-10-20 17:33:10,Food & Beverage,Restaurant Manager,Morning,
+ST000204,Kimberly,Douglas,kimberly.douglas@bluehorizon.com,928.470.1637,2020-10-02 15:34:15,Front Desk,Concierge,Morning,
+ST000205,Holly,Calhoun,holly.calhoun@bluehorizon.com,(327)295-8050x17867,2021-01-02 22:17:22,Administration,HR Specialist,Morning,
+ST000206,Bruce,Nguyen,bruce.nguyen@bluehorizon.com,(913)177-6830,2022-08-07 21:03:42,Security,Security Supervisor,Morning,
+ST000207,Marcus,Patrick,marcus.patrick@bluehorizon.com,9949094458,2023-10-01 23:51:15,Housekeeping,Supervisor,Afternoon,
+ST000208,Sara,Sanders,sara.sanders@bluehorizon.com,077.345.4853,2023-12-31 11:14:50,Maintenance,Maintenance Technician,Morning,
+ST000209,Austin,Carrillo,austin.carrillo@bluehorizon.com,(040)437-5622x65318,2021-09-23 18:21:36,Security,Security Supervisor,Morning,"Security License, Hospitality Management, Massage Therapy License"
+ST000210,Maria,Mcgrath,maria.mcgrath@bluehorizon.com,928-647-6105x400,2024-05-18 22:56:20,Spa & Wellness,Massage Therapist,Rotating,
+ST000211,Aimee,Singleton,aimee.singleton@bluehorizon.com,001-538-919-0235x23845,2022-09-08 03:12:38,Security,Security Supervisor,Rotating,
+ST000212,James,Vega,james.vega@bluehorizon.com,226-549-9146,2023-08-22 08:27:46,Food & Beverage,Chef,Afternoon,
+ST000213,Alexandria,Walters,alexandria.walters@bluehorizon.com,5470247473,2022-12-18 06:10:40,Food & Beverage,Kitchen Staff,Night,
+ST000214,Sheila,Manning,sheila.manning@bluehorizon.com,(938)686-2300x340,2024-01-01 04:03:45,Security,Security Officer,Afternoon,
+ST000215,Stephanie,Howard,stephanie.howard@bluehorizon.com,714.404.3286x4310,2021-06-14 14:08:11,Security,Security Supervisor,Rotating,
+ST000216,Jonathan,Watts,jonathan.watts@bluehorizon.com,+1-096-249-8259x56467,2022-01-12 06:24:35,Spa & Wellness,Massage Therapist,Night,
+ST000217,Gabriella,Collins,gabriella.collins@bluehorizon.com,+1-048-585-2679,2021-05-22 00:49:15,Housekeeping,Housekeeper,Morning,"Sommelier, Food Safety, First Aid"
+ST000218,Melissa,Guerra,melissa.guerra@bluehorizon.com,364.527.1439x411,2023-10-17 00:28:06,Maintenance,Supervisor,Night,"Massage Therapy License, First Aid, Hospitality Management"
+ST000219,James,Chavez,james.chavez@bluehorizon.com,001-925-478-8778x296,2021-11-17 18:49:02,Spa & Wellness,Wellness Coach,Morning,
+ST000220,Roger,Ramos,roger.ramos@bluehorizon.com,+1-344-701-0395,2021-04-25 08:58:55,Administration,Administrative Assistant,Afternoon,
+ST000221,John,Salazar,john.salazar@bluehorizon.com,001-485-703-7450x3660,2020-06-16 14:05:04,Food & Beverage,Bartender,Afternoon,
+ST000222,George,Collier,george.collier@bluehorizon.com,+1-617-639-7819,2023-04-01 03:48:57,Spa & Wellness,Spa Attendant,Night,
+ST000223,Cole,Mooney,cole.mooney@bluehorizon.com,+1-631-888-3324x68401,2021-12-14 08:08:55,Food & Beverage,Bartender,Rotating,
+ST000224,Brian,Wilson,brian.wilson@bluehorizon.com,+1-658-803-0383x674,2023-08-19 05:31:27,Spa & Wellness,Spa Attendant,Night,
+ST000225,Donald,Kelly,donald.kelly@bluehorizon.com,+1-528-863-2219x7737,2023-09-15 20:00:47,Spa & Wellness,Wellness Coach,Morning,
+ST000226,Pamela,Dawson,pamela.dawson@bluehorizon.com,696-882-5927,2022-11-12 12:59:11,Security,Security Officer,Rotating,
+ST000227,Amber,Carney,amber.carney@bluehorizon.com,(257)870-9248x13795,2022-01-07 09:38:36,Spa & Wellness,Wellness Coach,Rotating,
+ST000228,Lori,Smith,lori.smith@bluehorizon.com,+1-541-461-3945x520,2021-05-16 02:57:53,Food & Beverage,Bartender,Night,
+ST000229,Kenneth,Blevins,kenneth.blevins@bluehorizon.com,+1-339-358-7988x221,2023-12-11 15:03:31,Security,Security Manager,Night,"Hospitality Management, Massage Therapy License, Food Safety"
+ST000230,Randall,Lee,randall.lee@bluehorizon.com,779.531.3491,2024-09-29 02:54:55,Food & Beverage,Bartender,Morning,"Massage Therapy License, Sommelier"
+ST000231,Joe,Pittman,joe.pittman@bluehorizon.com,3200610582,2023-08-04 01:28:56,Housekeeping,Housekeeper,Night,
+ST000232,Steven,Crosby,steven.crosby@bluehorizon.com,001-888-251-9230x9415,2021-03-04 08:35:43,Administration,Administrative Assistant,Morning,"Hospitality Management, Security License"
+ST000233,Darren,Lewis,darren.lewis@bluehorizon.com,+1-141-774-1881x1563,2021-07-23 20:06:24,Food & Beverage,Bartender,Rotating,
+ST000234,Thomas,Silva,thomas.silva@bluehorizon.com,(979)686-5634x113,2023-04-15 06:26:34,Maintenance,Supervisor,Rotating,
+ST000235,Michelle,Sharp,michelle.sharp@bluehorizon.com,+1-871-390-7125x32469,2023-10-29 23:39:42,Housekeeping,Manager,Night,Security License
+ST000236,Megan,Douglas,megan.douglas@bluehorizon.com,+1-908-349-8774,2020-06-03 02:43:52,Administration,Accountant,Morning,
+ST000237,Andrew,Lee,andrew.lee@bluehorizon.com,+1-066-303-9789x86271,2020-10-13 11:25:52,Maintenance,Maintenance Technician,Afternoon,
+ST000238,Lisa,Santos,lisa.santos@bluehorizon.com,679-422-3300,2021-07-27 17:09:10,Administration,Accountant,Afternoon,
+ST000239,Dennis,Franklin,dennis.franklin@bluehorizon.com,+1-556-178-1212x0483,2023-02-16 22:02:40,Housekeeping,Housekeeper,Rotating,
+ST000240,Daniel,Meyer,daniel.meyer@bluehorizon.com,3637743851,2022-08-31 05:59:22,Front Desk,Concierge,Morning,"Hospitality Management, CPR, Sommelier"
+ST000241,Rebecca,Hawkins,rebecca.hawkins@bluehorizon.com,(909)599-2566,2024-01-17 19:00:29,Spa & Wellness,Wellness Coach,Rotating,
+ST000242,Leslie,Ellis,leslie.ellis@bluehorizon.com,9106508653,2022-07-25 13:42:06,Front Desk,Concierge,Night,
+ST000243,Shaun,Johnson,shaun.johnson@bluehorizon.com,+1-566-377-2572x466,2020-08-21 08:53:26,Food & Beverage,Bartender,Morning,
+ST000244,Terrence,Owens,terrence.owens@bluehorizon.com,(251)092-5785,2024-11-15 03:16:21,Security,Security Supervisor,Night,
+ST000245,Cody,Rice,cody.rice@bluehorizon.com,(435)277-4979,2021-09-11 01:49:53,Housekeeping,Supervisor,Rotating,
+ST000246,Michael,Ross,michael.ross@bluehorizon.com,+1-010-960-0843x58736,2024-09-04 06:19:18,Spa & Wellness,Wellness Coach,Rotating,
+ST000247,Anthony,Matthews,anthony.matthews@bluehorizon.com,001-704-757-0019,2023-08-14 18:51:41,Administration,Administrative Assistant,Afternoon,
+ST000248,Monique,Mcgrath,monique.mcgrath@bluehorizon.com,+1-420-414-7871x11041,2023-12-23 04:53:10,Front Desk,Guest Relations Manager,Morning,
+ST000249,Elijah,Martinez,elijah.martinez@bluehorizon.com,(004)791-9791,2021-01-28 16:46:42,Maintenance,Supervisor,Rotating,
+ST000250,Alexander,Hanna,alexander.hanna@bluehorizon.com,594-391-3025,2024-12-15 06:17:32,Housekeeping,Supervisor,Morning,
+ST000251,Billy,Gilmore,billy.gilmore@bluehorizon.com,106.221.6459,2024-04-24 04:43:21,Maintenance,Engineer,Morning,CPR
+ST000252,Kristen,Morton,kristen.morton@bluehorizon.com,811.102.7405x54342,2021-12-02 18:56:30,Spa & Wellness,Wellness Coach,Morning,
+ST000253,Jacob,Evans,jacob.evans@bluehorizon.com,921.737.1732,2024-11-02 12:43:45,Security,Security Manager,Morning,"Sommelier, Massage Therapy License"
+ST000254,Roberto,Dudley,roberto.dudley@bluehorizon.com,001-699-895-3154x18348,2021-12-30 21:19:49,Food & Beverage,Kitchen Staff,Night,
+ST000255,Jerry,Jackson,jerry.jackson@bluehorizon.com,1877765899,2024-03-01 20:31:49,Spa & Wellness,Wellness Coach,Rotating,
+ST000256,Kenneth,Weiss,kenneth.weiss@bluehorizon.com,+1-420-939-7422x99313,2023-04-30 21:17:56,Maintenance,Supervisor,Morning,Security License
+ST000257,Brian,Jacobs,brian.jacobs@bluehorizon.com,001-929-756-6852x739,2020-12-14 01:10:15,Administration,HR Specialist,Morning,
+ST000258,Jennifer,Jackson,jennifer.jackson@bluehorizon.com,320-663-4752x1503,2022-09-10 16:23:00,Food & Beverage,Chef,Morning,"First Aid, Massage Therapy License"
+ST000259,Roberto,Long,roberto.long@bluehorizon.com,621-223-8870x10675,2020-10-14 04:36:49,Maintenance,Maintenance Technician,Afternoon,
+ST000260,April,Moran,april.moran@bluehorizon.com,+1-836-358-8708x8795,2024-05-12 17:58:05,Front Desk,Guest Relations Manager,Night,
+ST000261,Rodney,Butler,rodney.butler@bluehorizon.com,867.499.3545x6799,2024-11-05 03:31:03,Food & Beverage,Kitchen Staff,Morning,CPR
+ST000262,Kayla,Miller,kayla.miller@bluehorizon.com,+1-392-234-5076x1390,2023-06-19 22:03:48,Spa & Wellness,Massage Therapist,Morning,
+ST000263,Jeffery,Hayes,jeffery.hayes@bluehorizon.com,0375145029,2021-12-14 00:15:27,Spa & Wellness,Spa Attendant,Night,
+ST000264,George,Lucas,george.lucas@bluehorizon.com,784-781-5580x3602,2021-12-25 03:06:07,Spa & Wellness,Massage Therapist,Morning,
+ST000265,Joann,Rogers,joann.rogers@bluehorizon.com,001-042-473-4427x9439,2024-09-04 02:26:27,Front Desk,Guest Relations Manager,Morning,
+ST000266,Mary,Ross,mary.ross@bluehorizon.com,046-048-8913,2023-08-15 13:44:09,Security,Security Manager,Rotating,"CPR, Security License"
+ST000267,Jennifer,Moore,jennifer.moore@bluehorizon.com,(867)391-2597,2020-02-15 19:48:04,Spa & Wellness,Wellness Coach,Night,
+ST000268,Joseph,Santos,joseph.santos@bluehorizon.com,390-705-4406x09950,2021-04-24 05:35:51,Food & Beverage,Server,Night,
+ST000269,Edward,Blackburn,edward.blackburn@bluehorizon.com,(012)253-0306,2022-01-29 22:01:03,Food & Beverage,Bartender,Morning,
+ST000270,Alexis,Dennis,alexis.dennis@bluehorizon.com,194-035-6397x88541,2022-01-18 23:25:46,Spa & Wellness,Spa Attendant,Morning,
+ST000271,Amanda,Allen,amanda.allen@bluehorizon.com,+1-951-034-8877x47361,2020-11-13 14:07:50,Security,Security Officer,Night,
+ST000272,Tammy,Collins,tammy.collins@bluehorizon.com,001-009-328-2610x82411,2022-08-30 11:59:36,Food & Beverage,Kitchen Staff,Afternoon,"Hospitality Management, Security License, Massage Therapy License"
+ST000273,Tammy,Thompson,tammy.thompson@bluehorizon.com,807-921-0764x448,2020-05-18 12:43:18,Front Desk,Concierge,Rotating,
+ST000274,Gina,Smith,gina.smith@bluehorizon.com,001-186-245-3043x969,2024-06-22 07:10:14,Front Desk,Concierge,Morning,
+ST000275,Matthew,Hernandez,matthew.hernandez@bluehorizon.com,001-794-583-3210x07068,2022-02-13 09:35:58,Housekeeping,Supervisor,Rotating,"Security License, CPR"
+ST000276,Danielle,Campbell,danielle.campbell@bluehorizon.com,+1-203-204-6544x053,2021-10-19 23:35:09,Housekeeping,Supervisor,Afternoon,
+ST000277,Kim,Huffman,kim.huffman@bluehorizon.com,9574328156,2024-04-19 17:43:19,Administration,HR Specialist,Rotating,
+ST000278,Charles,Ford,charles.ford@bluehorizon.com,001-966-006-2536x3829,2022-03-14 23:32:47,Spa & Wellness,Massage Therapist,Rotating,Security License
+ST000279,Randy,Spence,randy.spence@bluehorizon.com,716-999-6917x8278,2023-12-13 07:56:13,Security,Security Manager,Afternoon,
+ST000280,Julie,Campbell,julie.campbell@bluehorizon.com,(071)917-0599x6173,2020-10-30 08:59:34,Food & Beverage,Chef,Afternoon,"Sommelier, First Aid, CPR"
+ST000281,Jamie,Roberts,jamie.roberts@bluehorizon.com,001-234-367-4713x06198,2021-04-04 03:49:01,Housekeeping,Supervisor,Morning,
+ST000282,Adam,Frey,adam.frey@bluehorizon.com,0649594981,2023-11-05 09:14:46,Housekeeping,Housekeeper,Morning,"Massage Therapy License, Hospitality Management"
+ST000283,Stephanie,Zamora,stephanie.zamora@bluehorizon.com,255.957.8332,2020-09-28 10:36:34,Spa & Wellness,Spa Attendant,Rotating,
+ST000284,Robert,Sanchez,robert.sanchez@bluehorizon.com,003-914-0594x609,2020-05-07 20:02:11,Housekeeping,Supervisor,Afternoon,"Hospitality Management, Food Safety"
+ST000285,Michele,Rodriguez,michele.rodriguez@bluehorizon.com,782.416.3723,2020-07-23 22:19:56,Housekeeping,Housekeeper,Night,
+ST000286,Anita,Wong,anita.wong@bluehorizon.com,373.279.9095,2024-04-20 02:27:46,Maintenance,Maintenance Technician,Rotating,
+ST000287,Michael,Briggs,michael.briggs@bluehorizon.com,001-479-384-7502x8856,2022-08-25 01:02:45,Spa & Wellness,Spa Attendant,Afternoon,"Sommelier, Massage Therapy License, Food Safety"
+ST000288,Lisa,Williamson,lisa.williamson@bluehorizon.com,(419)097-5801x145,2024-10-21 17:19:38,Maintenance,Engineer,Afternoon,"Security License, Sommelier, Hospitality Management"
+ST000289,Robin,Lopez,robin.lopez@bluehorizon.com,474.684.9754x6984,2021-12-02 16:31:03,Maintenance,Engineer,Night,
+ST000290,James,Coleman,james.coleman@bluehorizon.com,001-564-657-2546,2023-02-18 08:07:13,Spa & Wellness,Spa Attendant,Afternoon,
+ST000291,Michael,Raymond,michael.raymond@bluehorizon.com,446-277-5396x84818,2024-12-06 02:29:42,Maintenance,Supervisor,Afternoon,
+ST000292,James,Hatfield,james.hatfield@bluehorizon.com,311.238.9176,2023-06-19 02:09:17,Spa & Wellness,Spa Attendant,Night,
+ST000293,Amanda,Payne,amanda.payne@bluehorizon.com,027.643.4814x597,2024-10-12 05:02:41,Front Desk,Concierge,Afternoon,
+ST000294,Zachary,Harper,zachary.harper@bluehorizon.com,287-898-6142,2020-08-28 11:15:36,Housekeeping,Supervisor,Rotating,
+ST000295,Kenneth,Chavez,kenneth.chavez@bluehorizon.com,(700)927-6790,2023-11-21 10:44:49,Administration,Administrative Assistant,Night,
+ST000296,Kevin,Little,kevin.little@bluehorizon.com,001-322-672-8691,2022-12-27 18:18:23,Security,Security Supervisor,Rotating,
+ST000297,Judy,Ward,judy.ward@bluehorizon.com,850.761.4530x5147,2023-03-28 10:21:57,Spa & Wellness,Spa Attendant,Morning,CPR
+ST000298,David,Swanson,david.swanson@bluehorizon.com,692-467-9859,2022-07-16 05:04:14,Spa & Wellness,Massage Therapist,Rotating,"Massage Therapy License, Security License, Food Safety"
+ST000299,Doris,Howell,doris.howell@bluehorizon.com,000-253-9559,2022-06-19 09:36:43,Front Desk,Receptionist,Night,
+ST000300,Stacey,Hart,stacey.hart@bluehorizon.com,+1-563-398-5266x20448,2023-10-15 07:36:41,Maintenance,Engineer,Night,"Food Safety, Hospitality Management"
+ST000301,Teresa,Sanchez,teresa.sanchez@bluehorizon.com,431-170-3281x7628,2021-09-03 09:46:11,Security,Security Supervisor,Morning,
+ST000302,Emily,Wells,emily.wells@bluehorizon.com,971.930.4885x343,2021-05-17 04:24:56,Security,Security Supervisor,Afternoon,
+ST000303,Preston,Bennett,preston.bennett@bluehorizon.com,760-084-7390,2022-11-08 15:35:38,Maintenance,Engineer,Rotating,
+ST000304,Maria,Salazar,maria.salazar@bluehorizon.com,001-368-279-8638,2024-08-23 01:15:55,Maintenance,Maintenance Technician,Rotating,
+ST000305,Michelle,Bullock,michelle.bullock@bluehorizon.com,+1-656-786-2024x85958,2023-04-17 09:23:39,Housekeeping,Housekeeper,Afternoon,CPR
+ST000306,Kim,Mcclain,kim.mcclain@bluehorizon.com,8623041662,2023-09-30 16:54:29,Food & Beverage,Bartender,Afternoon,
+ST000307,Johnny,Short,johnny.short@bluehorizon.com,228-396-0610x51519,2023-04-20 08:38:45,Administration,Accountant,Night,
+ST000308,Tammie,Foster,tammie.foster@bluehorizon.com,(884)956-8646x78586,2023-02-27 16:44:50,Administration,HR Specialist,Night,Sommelier
+ST000309,Danielle,Davis,danielle.davis@bluehorizon.com,317-479-5357x28042,2022-08-31 14:45:08,Food & Beverage,Kitchen Staff,Night,
+ST000310,Teresa,Cantu,teresa.cantu@bluehorizon.com,(442)553-9693x536,2024-07-19 21:29:23,Maintenance,Supervisor,Afternoon,
+ST000311,Karen,Williams,karen.williams@bluehorizon.com,+1-717-575-8652x0395,2020-08-28 13:42:02,Maintenance,Maintenance Technician,Night,
+ST000312,Dawn,Anderson,dawn.anderson@bluehorizon.com,001-343-098-7535x67071,2024-06-05 02:48:22,Housekeeping,Manager,Afternoon,"CPR, Security License, Sommelier"
+ST000313,Robert,Lee,robert.lee@bluehorizon.com,(236)951-5339,2021-07-12 00:52:35,Food & Beverage,Restaurant Manager,Night,CPR
+ST000314,Eric,Garcia,eric.garcia@bluehorizon.com,+1-741-199-5646x27550,2024-05-05 20:11:18,Front Desk,Guest Relations Manager,Afternoon,
+ST000315,Michelle,Baker,michelle.baker@bluehorizon.com,001-629-262-6183x281,2024-11-18 22:58:53,Housekeeping,Housekeeper,Morning,
+ST000316,Jessica,Anderson,jessica.anderson@bluehorizon.com,(206)044-0634x5210,2022-11-27 08:59:23,Housekeeping,Housekeeper,Night,
+ST000317,Regina,Nelson,regina.nelson@bluehorizon.com,382-376-1147,2023-11-30 00:41:19,Administration,HR Specialist,Morning,Hospitality Management
+ST000318,Karen,Murphy,karen.murphy@bluehorizon.com,001-483-630-8190x86222,2023-12-24 08:42:11,Spa & Wellness,Spa Attendant,Rotating,
+ST000319,Ruth,Simmons,ruth.simmons@bluehorizon.com,255-035-8894,2023-11-25 21:37:36,Maintenance,Supervisor,Rotating,
+ST000320,Kaylee,Figueroa,kaylee.figueroa@bluehorizon.com,001-365-836-6369x487,2020-12-21 09:26:21,Administration,Administrative Assistant,Afternoon,
+ST000321,Joshua,Reyes,joshua.reyes@bluehorizon.com,(019)803-5341x273,2023-07-13 23:52:53,Food & Beverage,Chef,Morning,
+ST000322,Mary,Wilson,mary.wilson@bluehorizon.com,+1-343-249-3758x48367,2020-12-21 18:51:49,Administration,Accountant,Night,
+ST000323,Cassandra,Nelson,cassandra.nelson@bluehorizon.com,386-059-6352,2024-08-09 05:24:39,Maintenance,Maintenance Technician,Morning,
+ST000324,David,Williams,david.williams@bluehorizon.com,001-539-971-6999x722,2021-04-22 23:19:18,Administration,Administrative Assistant,Rotating,First Aid
+ST000325,Kathleen,Smith,kathleen.smith@bluehorizon.com,(181)148-4437x00363,2022-06-20 22:43:47,Front Desk,Receptionist,Night,"Hospitality Management, Food Safety"
+ST000326,Mary,Taylor,mary.taylor@bluehorizon.com,737-813-3823x418,2021-02-05 02:02:19,Food & Beverage,Bartender,Morning,
+ST000327,Anna,Chapman,anna.chapman@bluehorizon.com,+1-483-758-1724x1980,2023-10-13 07:51:22,Security,Security Officer,Morning,First Aid
+ST000328,Jimmy,Ali,jimmy.ali@bluehorizon.com,758-920-0933,2023-01-16 22:56:54,Administration,Administrative Assistant,Morning,Massage Therapy License
+ST000329,Dean,Mcintyre,dean.mcintyre@bluehorizon.com,(329)062-1154,2023-06-01 16:13:41,Food & Beverage,Server,Rotating,
+ST000330,Mike,Delgado,mike.delgado@bluehorizon.com,+1-575-405-0168x762,2020-08-21 13:12:24,Security,Security Manager,Night,
+ST000331,Cameron,Brooks,cameron.brooks@bluehorizon.com,415.360.6355x71401,2024-01-25 11:01:52,Housekeeping,Manager,Morning,
+ST000332,Timothy,Burns,timothy.burns@bluehorizon.com,848-272-9514x19163,2023-11-27 15:54:29,Maintenance,Engineer,Night,
+ST000333,Edward,Drake,edward.drake@bluehorizon.com,(883)122-7659,2021-02-07 14:42:46,Food & Beverage,Bartender,Rotating,Massage Therapy License
+ST000334,Jason,Reed,jason.reed@bluehorizon.com,079-454-4252x5121,2024-03-14 08:06:52,Maintenance,Supervisor,Rotating,
+ST000335,Amy,Hancock,amy.hancock@bluehorizon.com,7407782293,2023-10-31 13:46:16,Security,Security Manager,Morning,
+ST000336,Joseph,Johnson,joseph.johnson@bluehorizon.com,5911916130,2020-09-17 16:06:14,Food & Beverage,Chef,Rotating,
+ST000337,Frederick,Lee,frederick.lee@bluehorizon.com,001-982-785-3807,2024-07-04 23:54:38,Maintenance,Supervisor,Afternoon,"Sommelier, CPR"
+ST000338,Kevin,Hudson,kevin.hudson@bluehorizon.com,(929)370-8699x275,2020-11-20 07:25:12,Maintenance,Engineer,Morning,"Hospitality Management, Sommelier, Security License"
+ST000339,Mark,Fox,mark.fox@bluehorizon.com,(413)576-2392,2024-03-16 10:04:38,Front Desk,Guest Relations Manager,Rotating,"Security License, CPR"
+ST000340,Gerald,Mitchell,gerald.mitchell@bluehorizon.com,(832)841-3910x907,2020-08-21 18:38:53,Front Desk,Concierge,Afternoon,Hospitality Management
+ST000341,Steven,Molina,steven.molina@bluehorizon.com,278.544.1571x01535,2023-08-28 08:23:01,Maintenance,Maintenance Technician,Rotating,"Massage Therapy License, Hospitality Management, Sommelier"
+ST000342,Andrew,Garcia,andrew.garcia@bluehorizon.com,001-095-143-5543,2023-02-17 00:49:52,Maintenance,Supervisor,Afternoon,Massage Therapy License
+ST000343,Amanda,Hanna,amanda.hanna@bluehorizon.com,(747)499-5918,2021-05-26 04:54:45,Spa & Wellness,Wellness Coach,Night,
+ST000344,Brooke,Williams,brooke.williams@bluehorizon.com,001-385-499-2611x03408,2023-02-25 22:03:57,Front Desk,Concierge,Rotating,Massage Therapy License
+ST000345,Amy,Gibson,amy.gibson@bluehorizon.com,584-283-1183x97645,2024-09-14 10:50:03,Administration,Accountant,Afternoon,
+ST000346,Julie,Ochoa,julie.ochoa@bluehorizon.com,001-585-037-6125,2023-04-08 18:58:46,Maintenance,Engineer,Morning,
+ST000347,Kelly,Williams,kelly.williams@bluehorizon.com,(234)734-1519,2021-05-16 14:13:53,Food & Beverage,Restaurant Manager,Rotating,
+ST000348,Whitney,Mcmillan,whitney.mcmillan@bluehorizon.com,+1-950-503-4232,2021-09-29 09:53:57,Front Desk,Receptionist,Morning,
+ST000349,Renee,Ellison,renee.ellison@bluehorizon.com,0050698016,2020-04-04 08:42:21,Administration,Accountant,Morning,
+ST000350,William,Maxwell,william.maxwell@bluehorizon.com,+1-185-973-6816x8602,2024-09-02 04:33:32,Front Desk,Receptionist,Night,
+ST000351,Susan,Bowen,susan.bowen@bluehorizon.com,826-134-3988x49587,2022-05-18 20:33:48,Front Desk,Receptionist,Morning,
+ST000352,Amanda,Marsh,amanda.marsh@bluehorizon.com,919-487-6544,2020-03-08 11:38:26,Security,Security Supervisor,Afternoon,"CPR, Hospitality Management, Sommelier"
+ST000353,Rebecca,Arnold,rebecca.arnold@bluehorizon.com,122-706-7552,2023-04-10 19:48:45,Administration,HR Specialist,Rotating,
+ST000354,Laurie,Mullen,laurie.mullen@bluehorizon.com,001-800-486-4069x87730,2022-09-09 12:28:06,Security,Security Manager,Rotating,
+ST000355,Elizabeth,Middleton,elizabeth.middleton@bluehorizon.com,062-024-3626x62711,2023-11-28 10:33:38,Food & Beverage,Bartender,Morning,
+ST000356,Paul,Ellis,paul.ellis@bluehorizon.com,053.988.2457,2024-04-23 23:35:38,Administration,Accountant,Morning,
+ST000357,Linda,Jacobs,linda.jacobs@bluehorizon.com,+1-809-418-8246,2022-08-30 20:47:23,Housekeeping,Housekeeper,Night,
+ST000358,Vanessa,Jacobs,vanessa.jacobs@bluehorizon.com,770-418-1190x77238,2024-05-25 05:38:26,Maintenance,Engineer,Afternoon,
+ST000359,Rhonda,Dorsey,rhonda.dorsey@bluehorizon.com,357-647-2959x6467,2023-10-24 09:49:12,Spa & Wellness,Wellness Coach,Morning,
+ST000360,Pamela,Cox,pamela.cox@bluehorizon.com,001-975-622-3257x98921,2020-01-22 13:22:55,Spa & Wellness,Wellness Coach,Night,
+ST000361,Riley,Mason,riley.mason@bluehorizon.com,7434661843,2020-05-16 21:51:28,Spa & Wellness,Wellness Coach,Rotating,
+ST000362,Susan,Wright,susan.wright@bluehorizon.com,001-282-682-2633x7598,2021-05-19 16:59:58,Food & Beverage,Restaurant Manager,Rotating,
+ST000363,John,Anderson,john.anderson@bluehorizon.com,864-982-4809,2023-05-30 18:46:22,Food & Beverage,Chef,Night,
+ST000364,Courtney,Murphy,courtney.murphy@bluehorizon.com,(103)513-8747,2020-08-26 17:17:31,Front Desk,Concierge,Morning,
+ST000365,Kyle,Miller,kyle.miller@bluehorizon.com,(353)569-4546x26129,2021-08-14 12:12:57,Food & Beverage,Kitchen Staff,Afternoon,
+ST000366,David,Henry,david.henry@bluehorizon.com,(015)712-9341,2022-12-02 10:24:24,Spa & Wellness,Wellness Coach,Night,
+ST000367,Debbie,Bryan,debbie.bryan@bluehorizon.com,0680640083,2022-05-08 22:28:59,Spa & Wellness,Massage Therapist,Night,
+ST000368,Heather,Cox,heather.cox@bluehorizon.com,725.472.0266x252,2021-01-01 05:43:44,Food & Beverage,Bartender,Afternoon,
+ST000369,James,James,james.james@bluehorizon.com,(546)646-8180x48722,2022-07-27 08:53:06,Maintenance,Maintenance Technician,Rotating,
+ST000370,Jay,Chen,jay.chen@bluehorizon.com,+1-197-886-8601x43432,2021-04-06 03:48:31,Security,Security Officer,Rotating,
+ST000371,William,Travis,william.travis@bluehorizon.com,766.893.3118,2022-11-21 08:34:37,Spa & Wellness,Massage Therapist,Afternoon,
+ST000372,Andrew,Spence,andrew.spence@bluehorizon.com,490-585-7454,2023-05-18 08:34:04,Security,Security Supervisor,Night,
+ST000373,Christine,Pearson,christine.pearson@bluehorizon.com,9727930811,2024-08-04 12:03:22,Food & Beverage,Server,Afternoon,
+ST000374,Cory,Munoz,cory.munoz@bluehorizon.com,136.366.9435x4980,2020-05-14 13:22:11,Housekeeping,Supervisor,Rotating,
+ST000375,Jasmine,Collins,jasmine.collins@bluehorizon.com,+1-966-309-0235,2023-06-03 11:04:25,Security,Security Supervisor,Morning,"CPR, Security License"
+ST000376,David,Clark,david.clark@bluehorizon.com,183.277.3961,2022-10-04 21:34:33,Front Desk,Receptionist,Morning,"CPR, Massage Therapy License, Hospitality Management"
+ST000377,Nathaniel,Schmidt,nathaniel.schmidt@bluehorizon.com,+1-990-894-1903,2024-04-14 10:12:22,Maintenance,Supervisor,Rotating,
+ST000378,Brooke,Miller,brooke.miller@bluehorizon.com,8479079955,2022-12-21 16:24:59,Food & Beverage,Kitchen Staff,Night,
+ST000379,Lisa,Evans,lisa.evans@bluehorizon.com,(990)555-7972,2022-08-28 11:37:47,Front Desk,Guest Relations Manager,Rotating,
+ST000380,Mario,Hill,mario.hill@bluehorizon.com,382.474.9759x3143,2021-09-19 12:06:00,Housekeeping,Supervisor,Afternoon,Sommelier
+ST000381,Amy,Watson,amy.watson@bluehorizon.com,(690)896-0140,2021-03-10 17:14:29,Front Desk,Concierge,Night,"Sommelier, First Aid, Hospitality Management"
+ST000382,Carlos,Hill,carlos.hill@bluehorizon.com,405-415-6732x3304,2021-03-01 22:03:30,Housekeeping,Manager,Morning,
+ST000383,Andrew,Ellis,andrew.ellis@bluehorizon.com,(282)769-3555,2021-12-18 14:32:35,Food & Beverage,Bartender,Rotating,
+ST000384,Tracy,Cohen,tracy.cohen@bluehorizon.com,001-487-795-6841x6702,2024-08-28 09:23:20,Food & Beverage,Chef,Morning,
+ST000385,Dalton,Hunt,dalton.hunt@bluehorizon.com,001-911-267-7402x34683,2024-12-11 19:59:38,Spa & Wellness,Massage Therapist,Morning,"Sommelier, Security License, Food Safety"
+ST000386,Joseph,Bates,joseph.bates@bluehorizon.com,326.938.1520,2022-01-28 02:21:05,Food & Beverage,Bartender,Afternoon,
+ST000387,Cheryl,Owens,cheryl.owens@bluehorizon.com,829.746.3174x517,2021-10-16 00:52:49,Spa & Wellness,Wellness Coach,Morning,
+ST000388,Caroline,Hayes,caroline.hayes@bluehorizon.com,553-133-7813x158,2025-01-03 21:22:51,Housekeeping,Manager,Morning,
+ST000389,Maria,Caldwell,maria.caldwell@bluehorizon.com,+1-713-546-8351x9146,2020-07-06 00:48:18,Front Desk,Receptionist,Morning,
+ST000390,Christian,Davis,christian.davis@bluehorizon.com,752.852.3666,2022-11-05 04:48:44,Maintenance,Maintenance Technician,Night,
+ST000391,Mark,Carter,mark.carter@bluehorizon.com,001-187-141-6852x462,2023-07-17 15:11:32,Maintenance,Engineer,Rotating,
+ST000392,Wendy,Sutton,wendy.sutton@bluehorizon.com,171.448.6354x65225,2024-09-02 02:54:03,Spa & Wellness,Wellness Coach,Afternoon,
+ST000393,Amber,Hendrix,amber.hendrix@bluehorizon.com,007-752-3579,2023-08-20 06:14:15,Maintenance,Supervisor,Rotating,
+ST000394,Ian,Smith,ian.smith@bluehorizon.com,7438902281,2021-07-15 02:41:52,Housekeeping,Housekeeper,Night,"Security License, First Aid"
+ST000395,Jonathan,Campbell,jonathan.campbell@bluehorizon.com,+1-154-284-3738x019,2021-10-23 05:52:18,Security,Security Officer,Rotating,
+ST000396,Patricia,Carrillo,patricia.carrillo@bluehorizon.com,873.322.5198x551,2022-07-09 16:38:44,Food & Beverage,Bartender,Afternoon,
+ST000397,Christopher,Tran,christopher.tran@bluehorizon.com,001-817-059-4944,2024-01-05 04:03:04,Housekeeping,Supervisor,Rotating,
+ST000398,Leslie,Richards,leslie.richards@bluehorizon.com,001-643-207-1306x931,2020-08-21 11:35:43,Security,Security Supervisor,Night,
+ST000399,Caleb,Stevens,caleb.stevens@bluehorizon.com,7960795524,2022-03-10 12:28:19,Security,Security Supervisor,Afternoon,
+ST000400,Tyler,Walters,tyler.walters@bluehorizon.com,3632208709,2022-09-25 04:30:40,Administration,HR Specialist,Rotating,CPR
+ST000401,Michael,Patel,michael.patel@bluehorizon.com,232-343-2652,2020-07-27 08:26:11,Security,Security Officer,Afternoon,
+ST000402,Michele,Freeman,michele.freeman@bluehorizon.com,+1-031-607-1663,2020-12-19 08:30:56,Security,Security Officer,Morning,
+ST000403,Christopher,Davis,christopher.davis@bluehorizon.com,086.122.5905x4722,2022-07-23 01:57:00,Food & Beverage,Bartender,Afternoon,
+ST000404,Melanie,Martin,melanie.martin@bluehorizon.com,001-842-854-3481x796,2024-10-09 02:30:38,Administration,HR Specialist,Rotating,
+ST000405,Brian,Gallegos,brian.gallegos@bluehorizon.com,001-919-161-1326x634,2021-05-15 01:27:44,Administration,Accountant,Night,
+ST000406,Patrick,Fletcher,patrick.fletcher@bluehorizon.com,925.286.0350x956,2020-01-16 23:12:31,Food & Beverage,Bartender,Morning,
+ST000407,Cynthia,Bryant,cynthia.bryant@bluehorizon.com,001-907-779-2824x8443,2020-11-17 17:56:25,Spa & Wellness,Spa Attendant,Night,
+ST000408,Raymond,Levine,raymond.levine@bluehorizon.com,+1-363-680-1925x289,2024-01-22 19:33:47,Administration,Accountant,Morning,
+ST000409,Sharon,Stephenson,sharon.stephenson@bluehorizon.com,814-804-5838,2024-11-28 16:48:04,Housekeeping,Manager,Morning,
+ST000410,Holly,Jacobson,holly.jacobson@bluehorizon.com,4382847175,2024-08-24 03:16:56,Housekeeping,Supervisor,Rotating,
+ST000411,Keith,Scott,keith.scott@bluehorizon.com,961.731.3674x902,2022-04-09 02:12:23,Maintenance,Maintenance Technician,Afternoon,"Massage Therapy License, CPR, Sommelier"
+ST000412,Michael,Jensen,michael.jensen@bluehorizon.com,001-035-011-8394x5879,2024-04-28 21:21:11,Food & Beverage,Chef,Rotating,
+ST000413,Daniel,Nunez,daniel.nunez@bluehorizon.com,+1-569-605-5179,2020-02-29 10:41:46,Maintenance,Maintenance Technician,Night,
+ST000414,Devin,Owens,devin.owens@bluehorizon.com,+1-483-535-5428x425,2022-01-14 01:14:08,Front Desk,Guest Relations Manager,Afternoon,Sommelier
+ST000415,Kelli,Shaw,kelli.shaw@bluehorizon.com,418-146-5528,2024-05-30 17:10:55,Housekeeping,Manager,Night,
+ST000416,Kathleen,Kaiser,kathleen.kaiser@bluehorizon.com,(193)336-5386,2023-04-19 03:38:04,Front Desk,Receptionist,Rotating,
+ST000417,Gregory,Ramirez,gregory.ramirez@bluehorizon.com,514.420.8372x6073,2021-05-22 10:45:27,Housekeeping,Supervisor,Rotating,
+ST000418,Nathan,Watkins,nathan.watkins@bluehorizon.com,264-760-2308x4346,2024-03-24 21:07:58,Administration,Accountant,Night,
+ST000419,Linda,Sutton,linda.sutton@bluehorizon.com,001-165-426-3441x668,2023-10-29 14:44:53,Front Desk,Guest Relations Manager,Afternoon,
+ST000420,Andrew,Graham,andrew.graham@bluehorizon.com,3187431252,2023-12-24 04:49:39,Maintenance,Engineer,Morning,
+ST000421,Martha,Morales,martha.morales@bluehorizon.com,001-904-659-5305x4346,2022-07-09 06:31:41,Food & Beverage,Kitchen Staff,Afternoon,"First Aid, Hospitality Management"
+ST000422,Suzanne,Gonzales,suzanne.gonzales@bluehorizon.com,005-245-4701x798,2024-12-29 04:17:48,Maintenance,Supervisor,Rotating,
+ST000423,Aaron,Miller,aaron.miller@bluehorizon.com,(248)925-5674x5835,2023-12-15 15:22:17,Security,Security Officer,Afternoon,"Food Safety, Sommelier, Security License"
+ST000424,Jennifer,Patel,jennifer.patel@bluehorizon.com,4751901722,2020-10-17 20:46:33,Security,Security Supervisor,Rotating,Massage Therapy License
+ST000425,Robert,Leblanc,robert.leblanc@bluehorizon.com,594-239-9673x3513,2023-12-29 07:26:08,Maintenance,Engineer,Night,
+ST000426,Stacy,Johnson,stacy.johnson@bluehorizon.com,+1-814-286-3866x5930,2024-02-04 19:38:40,Maintenance,Engineer,Rotating,
+ST000427,Brian,Davis,brian.davis@bluehorizon.com,532-797-0767,2024-12-12 19:26:03,Administration,HR Specialist,Night,"CPR, First Aid, Security License"
+ST000428,Paige,Pierce,paige.pierce@bluehorizon.com,732.516.0722x5391,2024-10-31 10:26:46,Housekeeping,Manager,Morning,"CPR, Massage Therapy License"
+ST000429,Bryan,Wilson,bryan.wilson@bluehorizon.com,(249)263-2647,2021-06-11 19:01:12,Administration,HR Specialist,Afternoon,
+ST000430,Jenna,Bennett,jenna.bennett@bluehorizon.com,001-881-006-2529,2023-12-15 17:52:01,Maintenance,Engineer,Morning,"Sommelier, First Aid, Food Safety"
+ST000431,Julie,Barron,julie.barron@bluehorizon.com,(708)309-4964,2022-09-02 10:31:21,Housekeeping,Supervisor,Afternoon,"Food Safety, Security License, CPR"
+ST000432,Gregory,Martinez,gregory.martinez@bluehorizon.com,001-237-732-7096x959,2024-07-22 15:29:28,Food & Beverage,Kitchen Staff,Afternoon,Security License
+ST000433,Linda,Vang,linda.vang@bluehorizon.com,001-895-976-4340x34099,2023-04-17 20:19:38,Front Desk,Receptionist,Night,
+ST000434,Rhonda,Scott,rhonda.scott@bluehorizon.com,(863)036-1985x7805,2022-03-13 14:41:25,Food & Beverage,Restaurant Manager,Afternoon,
+ST000435,Rachael,Ramsey,rachael.ramsey@bluehorizon.com,(479)255-4661x794,2020-01-09 21:37:12,Food & Beverage,Restaurant Manager,Night,Food Safety
+ST000436,Lisa,Martinez,lisa.martinez@bluehorizon.com,233.114.3598x4883,2020-08-11 11:22:09,Front Desk,Concierge,Rotating,
+ST000437,Tara,Gonzales,tara.gonzales@bluehorizon.com,001-070-947-3436x29231,2022-12-23 00:47:10,Administration,Accountant,Night,CPR
+ST000438,Brian,Evans,brian.evans@bluehorizon.com,451-976-0578x6592,2020-12-10 10:07:41,Food & Beverage,Server,Afternoon,Hospitality Management
+ST000439,Jason,Anderson,jason.anderson@bluehorizon.com,001-571-155-9440x659,2023-02-16 13:46:36,Spa & Wellness,Spa Attendant,Afternoon,
+ST000440,Kathleen,Walker,kathleen.walker@bluehorizon.com,560-929-2645x9413,2023-12-14 03:48:15,Front Desk,Concierge,Night,
+ST000441,Jose,Espinoza,jose.espinoza@bluehorizon.com,(449)998-4745,2021-01-18 16:19:56,Maintenance,Engineer,Rotating,
+ST000442,Marie,Reese,marie.reese@bluehorizon.com,001-984-377-0236x6125,2024-07-17 06:37:53,Administration,Accountant,Rotating,
+ST000443,Timothy,Wade,timothy.wade@bluehorizon.com,(519)833-8778,2022-09-12 23:06:21,Front Desk,Concierge,Morning,"First Aid, Sommelier"
+ST000444,Peter,Gaines,peter.gaines@bluehorizon.com,(871)895-1836,2023-05-11 17:59:59,Food & Beverage,Server,Afternoon,
+ST000445,Joanna,Castillo,joanna.castillo@bluehorizon.com,120.300.2904x844,2023-12-18 23:28:58,Security,Security Officer,Night,"Sommelier, First Aid"
+ST000446,April,Young,april.young@bluehorizon.com,520-856-5603x6654,2020-11-01 11:43:51,Food & Beverage,Restaurant Manager,Morning,"Hospitality Management, Massage Therapy License, First Aid"
+ST000447,Scott,Morgan,scott.morgan@bluehorizon.com,371.835.3435,2023-10-15 10:37:45,Spa & Wellness,Wellness Coach,Afternoon,
+ST000448,David,Singleton,david.singleton@bluehorizon.com,001-893-927-8374x04767,2022-06-18 01:38:29,Administration,HR Specialist,Afternoon,Sommelier
+ST000449,David,Cruz,david.cruz@bluehorizon.com,202.267.1188,2021-11-07 10:42:54,Spa & Wellness,Spa Attendant,Morning,
+ST000450,Andres,Tran,andres.tran@bluehorizon.com,6582648014,2023-10-09 23:09:43,Security,Security Supervisor,Night,
+ST000451,Marcus,Smith,marcus.smith@bluehorizon.com,049-427-9917,2021-10-14 23:43:57,Maintenance,Supervisor,Rotating,
+ST000452,Molly,Barnes,molly.barnes@bluehorizon.com,001-895-959-4941x28239,2023-12-13 11:07:08,Maintenance,Maintenance Technician,Night,
+ST000453,Keith,Robbins,keith.robbins@bluehorizon.com,001-428-884-0741x155,2023-07-22 18:30:58,Security,Security Supervisor,Rotating,
+ST000454,Sara,Smith,sara.smith@bluehorizon.com,+1-309-838-8498,2020-12-22 16:44:11,Administration,HR Specialist,Afternoon,"First Aid, Sommelier"
+ST000455,Evan,Myers,evan.myers@bluehorizon.com,393-874-1142,2021-02-20 19:12:49,Security,Security Manager,Afternoon,
+ST000456,John,Bush,john.bush@bluehorizon.com,001-031-461-8927,2021-09-29 13:23:35,Food & Beverage,Kitchen Staff,Rotating,"Food Safety, Security License"
+ST000457,Robert,Roberts,robert.roberts@bluehorizon.com,133-046-8880x31740,2022-09-24 18:17:54,Food & Beverage,Kitchen Staff,Rotating,
+ST000458,Michelle,Frederick,michelle.frederick@bluehorizon.com,049.821.4951,2021-01-22 08:28:32,Spa & Wellness,Spa Attendant,Night,
+ST000459,Kristina,Horne,kristina.horne@bluehorizon.com,355.540.8535x1339,2023-02-20 10:32:34,Food & Beverage,Restaurant Manager,Morning,
+ST000460,Diana,Moran,diana.moran@bluehorizon.com,(355)085-1896,2022-07-08 08:17:19,Security,Security Supervisor,Morning,"Hospitality Management, Food Safety, Sommelier"
+ST000461,Rodney,Blevins,rodney.blevins@bluehorizon.com,992-865-7891x6486,2021-08-13 06:37:03,Maintenance,Maintenance Technician,Afternoon,"Hospitality Management, CPR"
+ST000462,Jeffrey,Wright,jeffrey.wright@bluehorizon.com,001-522-056-0987,2024-03-17 22:12:23,Maintenance,Supervisor,Morning,
+ST000463,Daniel,Myers,daniel.myers@bluehorizon.com,030.291.7269x509,2023-03-08 22:00:36,Security,Security Officer,Afternoon,
+ST000464,Andrew,Coleman,andrew.coleman@bluehorizon.com,(796)083-3495x2871,2021-10-24 13:07:51,Spa & Wellness,Massage Therapist,Morning,
+ST000465,Michelle,Burton,michelle.burton@bluehorizon.com,001-762-842-7156x7346,2021-11-03 20:34:53,Food & Beverage,Chef,Afternoon,Food Safety
+ST000466,Holly,Mcmahon,holly.mcmahon@bluehorizon.com,(790)740-3013,2023-02-04 23:09:32,Housekeeping,Supervisor,Morning,
+ST000467,John,Horn,john.horn@bluehorizon.com,+1-752-169-2975x0389,2022-01-25 22:45:29,Food & Beverage,Chef,Rotating,
+ST000468,Linda,Gilbert,linda.gilbert@bluehorizon.com,739.724.0924x116,2023-11-11 09:12:32,Spa & Wellness,Massage Therapist,Afternoon,
+ST000469,David,Gonzalez,david.gonzalez@bluehorizon.com,4213532618,2021-04-02 15:37:22,Spa & Wellness,Massage Therapist,Rotating,"CPR, Security License, Sommelier"
+ST000470,Patrick,Owen,patrick.owen@bluehorizon.com,(652)862-1517,2020-09-06 11:44:12,Security,Security Supervisor,Rotating,
+ST000471,Debbie,Delgado,debbie.delgado@bluehorizon.com,(646)991-5851,2024-07-08 01:48:18,Security,Security Supervisor,Afternoon,"Sommelier, CPR, Massage Therapy License"
+ST000472,Courtney,Holt,courtney.holt@bluehorizon.com,(114)374-8130,2022-07-30 21:17:45,Spa & Wellness,Massage Therapist,Afternoon,"Sommelier, Massage Therapy License, Food Safety"
+ST000473,Austin,Bryant,austin.bryant@bluehorizon.com,0151064615,2023-06-28 07:11:16,Security,Security Manager,Rotating,
+ST000474,Heather,Powell,heather.powell@bluehorizon.com,(044)329-1206x01442,2020-12-29 03:55:19,Maintenance,Supervisor,Rotating,
+ST000475,Brandon,Wilson,brandon.wilson@bluehorizon.com,(313)622-1713x939,2023-09-29 19:12:35,Housekeeping,Supervisor,Night,
+ST000476,Stephanie,White,stephanie.white@bluehorizon.com,001-639-840-9309x9419,2023-08-05 17:25:16,Food & Beverage,Restaurant Manager,Morning,
+ST000477,Francis,Chang,francis.chang@bluehorizon.com,9344072190,2022-03-07 16:27:01,Housekeeping,Manager,Morning,
+ST000478,Jerry,Perez,jerry.perez@bluehorizon.com,507.733.2005x810,2020-12-04 00:07:03,Security,Security Officer,Afternoon,"First Aid, Massage Therapy License, CPR"
+ST000479,Lauren,Martinez,lauren.martinez@bluehorizon.com,+1-283-193-7213x34399,2022-11-12 20:00:20,Spa & Wellness,Massage Therapist,Rotating,
+ST000480,Jorge,Singh,jorge.singh@bluehorizon.com,176-137-7952x778,2021-03-04 10:12:50,Housekeeping,Supervisor,Morning,
+ST000481,Mariah,Chang,mariah.chang@bluehorizon.com,001-490-289-1584x2357,2021-03-24 10:30:09,Administration,HR Specialist,Night,CPR
+ST000482,Amy,Johnson,amy.johnson@bluehorizon.com,215-896-5432,2020-09-14 20:22:24,Security,Security Supervisor,Afternoon,
+ST000483,Judith,Harris,judith.harris@bluehorizon.com,+1-940-789-5827,2020-04-28 10:26:34,Spa & Wellness,Wellness Coach,Morning,
+ST000484,Jennifer,Lindsey,jennifer.lindsey@bluehorizon.com,001-922-497-6908x89544,2021-08-16 15:10:40,Front Desk,Guest Relations Manager,Morning,
+ST000485,Lisa,Smith,lisa.smith@bluehorizon.com,415.562.2247x3762,2023-04-14 00:51:41,Housekeeping,Supervisor,Night,
+ST000486,Joseph,Miles,joseph.miles@bluehorizon.com,565.449.2949x601,2020-08-09 07:52:18,Food & Beverage,Server,Morning,"Food Safety, Hospitality Management"
+ST000487,Chad,Thompson,chad.thompson@bluehorizon.com,+1-514-028-2335x4191,2020-02-17 04:51:27,Security,Security Manager,Afternoon,
+ST000488,Robert,Parker,robert.parker@bluehorizon.com,001-731-046-2398x9681,2022-03-29 12:15:08,Security,Security Officer,Afternoon,
+ST000489,George,Wood,george.wood@bluehorizon.com,078.171.1431x543,2022-01-13 09:01:07,Food & Beverage,Server,Rotating,
+ST000490,Tiffany,Ortega,tiffany.ortega@bluehorizon.com,2163050415,2024-01-14 16:05:59,Spa & Wellness,Massage Therapist,Afternoon,
+ST000491,Valerie,Arellano,valerie.arellano@bluehorizon.com,654.258.3970x0501,2021-06-11 04:19:04,Food & Beverage,Restaurant Manager,Rotating,
+ST000492,Jose,Knight,jose.knight@bluehorizon.com,241.412.2795x136,2022-02-26 02:57:25,Spa & Wellness,Wellness Coach,Morning,"CPR, Hospitality Management, First Aid"
+ST000493,Kathleen,Reed,kathleen.reed@bluehorizon.com,387.977.1153x841,2021-07-02 16:54:43,Security,Security Supervisor,Night,First Aid
+ST000494,Victoria,Barnes,victoria.barnes@bluehorizon.com,001-531-969-5979x294,2023-04-18 14:51:04,Administration,Accountant,Morning,
+ST000495,Stanley,Hunt,stanley.hunt@bluehorizon.com,+1-230-144-9648x898,2022-09-15 01:45:39,Housekeeping,Manager,Morning,"First Aid, Sommelier"
+ST000496,Joshua,Gould,joshua.gould@bluehorizon.com,+1-783-285-8162x52673,2023-04-05 08:47:27,Administration,Administrative Assistant,Afternoon,"Hospitality Management, First Aid"
+ST000497,Michelle,Vance,michelle.vance@bluehorizon.com,338.196.8324x7449,2024-12-27 05:33:05,Food & Beverage,Kitchen Staff,Rotating,
+ST000498,Joseph,Harvey,joseph.harvey@bluehorizon.com,(564)844-8292,2020-09-14 13:07:25,Housekeeping,Supervisor,Night,"CPR, Sommelier, First Aid"
+ST000499,Joshua,Herrera,joshua.herrera@bluehorizon.com,763.435.9495x55222,2024-05-04 16:10:19,Front Desk,Receptionist,Afternoon,
+ST000500,Tyler,Morales,tyler.morales@bluehorizon.com,354.409.0231x394,2021-10-03 22:54:27,Administration,HR Specialist,Night,
+ST000501,Michelle,Carter,michelle.carter@bluehorizon.com,001-265-659-5272x33898,2020-01-11 10:30:50,Security,Security Manager,Afternoon,
+ST000502,Tiffany,Green,tiffany.green@bluehorizon.com,(081)365-0386,2023-05-23 15:35:27,Front Desk,Receptionist,Morning,
+ST000503,Michael,Alexander,michael.alexander@bluehorizon.com,358.254.0259x05831,2021-05-06 07:11:59,Housekeeping,Manager,Rotating,
+ST000504,Jesse,Clay,jesse.clay@bluehorizon.com,+1-694-286-4799,2021-06-23 03:55:57,Administration,Administrative Assistant,Rotating,"CPR, Food Safety"
+ST000505,Mark,Frederick,mark.frederick@bluehorizon.com,755.445.9293x111,2020-01-30 18:09:43,Food & Beverage,Server,Rotating,
+ST000506,Scott,Harris,scott.harris@bluehorizon.com,567-030-4676x62800,2023-03-29 14:45:59,Housekeeping,Manager,Morning,
+ST000507,Daniel,Reeves,daniel.reeves@bluehorizon.com,189.400.8796,2023-06-26 10:33:59,Maintenance,Supervisor,Rotating,
+ST000508,Jesus,Clark,jesus.clark@bluehorizon.com,329.843.3566x01158,2021-08-05 09:31:51,Food & Beverage,Bartender,Afternoon,"Hospitality Management, First Aid"
+ST000509,Andrea,Watkins,andrea.watkins@bluehorizon.com,+1-202-518-1757x202,2020-02-18 21:38:41,Administration,HR Specialist,Rotating,
+ST000510,William,Smith,william.smith@bluehorizon.com,298.778.9533,2023-04-23 13:07:50,Spa & Wellness,Wellness Coach,Morning,
+ST000511,Thomas,Jones,thomas.jones@bluehorizon.com,(212)259-0956x2660,2024-01-09 09:55:09,Maintenance,Maintenance Technician,Night,
+ST000512,Jeffrey,Evans,jeffrey.evans@bluehorizon.com,+1-203-503-0673x2792,2023-01-14 23:59:47,Spa & Wellness,Massage Therapist,Rotating,
+ST000513,Sarah,Gonzales,sarah.gonzales@bluehorizon.com,001-801-459-2667,2023-01-17 08:04:49,Maintenance,Maintenance Technician,Morning,
+ST000514,Christopher,Richmond,christopher.richmond@bluehorizon.com,610-231-2814,2024-10-29 22:27:20,Food & Beverage,Chef,Afternoon,"Food Safety, First Aid, Hospitality Management"
+ST000515,Adam,Wang,adam.wang@bluehorizon.com,001-980-255-6008x431,2021-12-04 22:28:49,Front Desk,Concierge,Morning,
+ST000516,Sharon,Page,sharon.page@bluehorizon.com,+1-368-348-5519x1405,2021-01-17 01:36:03,Food & Beverage,Bartender,Night,
+ST000517,Mary,Bowman,mary.bowman@bluehorizon.com,0957340470,2020-04-14 17:42:00,Housekeeping,Housekeeper,Night,"Food Safety, First Aid"
+ST000518,Eric,Smith,eric.smith@bluehorizon.com,(912)842-2372x892,2023-01-19 22:19:26,Food & Beverage,Chef,Morning,
+ST000519,Amanda,Barnes,amanda.barnes@bluehorizon.com,454.149.6911x1112,2024-11-09 02:05:40,Maintenance,Maintenance Technician,Afternoon,
+ST000520,Susan,Miller,susan.miller@bluehorizon.com,001-662-082-4193x24540,2020-03-11 16:43:28,Maintenance,Supervisor,Night,
+ST000521,Nathan,Lawson,nathan.lawson@bluehorizon.com,(879)167-7732,2020-04-22 21:52:43,Housekeeping,Supervisor,Morning,
+ST000522,Dean,Hull,dean.hull@bluehorizon.com,+1-793-746-2541,2020-08-01 18:48:43,Security,Security Manager,Rotating,
+ST000523,Kurt,Deleon,kurt.deleon@bluehorizon.com,196.442.0238,2024-09-08 19:28:54,Front Desk,Guest Relations Manager,Morning,
+ST000524,Jamie,Brown,jamie.brown@bluehorizon.com,504.037.0400x64062,2021-12-30 09:08:39,Security,Security Supervisor,Rotating,
+ST000525,Gregory,Mercado,gregory.mercado@bluehorizon.com,302-959-5274,2024-01-21 01:31:04,Administration,Accountant,Morning,
+ST000526,Kyle,Peterson,kyle.peterson@bluehorizon.com,(169)616-3388x28717,2023-08-27 08:04:48,Front Desk,Guest Relations Manager,Morning,
+ST000527,Kenneth,Nichols,kenneth.nichols@bluehorizon.com,001-701-842-3867x324,2020-03-16 08:05:33,Food & Beverage,Kitchen Staff,Morning,
+ST000528,Sabrina,Davis,sabrina.davis@bluehorizon.com,(407)309-0462x31994,2021-07-26 10:46:35,Front Desk,Guest Relations Manager,Morning,Food Safety
+ST000529,Timothy,Williams,timothy.williams@bluehorizon.com,+1-276-097-9510x587,2022-04-14 03:43:32,Maintenance,Maintenance Technician,Night,
+ST000530,Jason,Caldwell,jason.caldwell@bluehorizon.com,061-575-2812,2024-06-29 20:57:16,Administration,Accountant,Morning,"First Aid, CPR, Massage Therapy License"
+ST000531,Alexis,Morgan,alexis.morgan@bluehorizon.com,+1-891-517-9058x366,2023-08-27 08:00:47,Front Desk,Guest Relations Manager,Afternoon,
+ST000532,Mariah,Barnett,mariah.barnett@bluehorizon.com,(376)722-9505,2024-11-05 19:45:13,Spa & Wellness,Wellness Coach,Rotating,
+ST000533,Summer,Montoya,summer.montoya@bluehorizon.com,235-121-2300,2020-11-11 13:39:05,Housekeeping,Housekeeper,Night,
+ST000534,Tyler,Bryant,tyler.bryant@bluehorizon.com,621-211-9875x12610,2023-05-21 15:57:48,Housekeeping,Manager,Morning,Security License
+ST000535,Robert,Martin,robert.martin@bluehorizon.com,(617)790-8796x622,2020-05-19 01:22:57,Housekeeping,Manager,Afternoon,"Security License, Food Safety"
+ST000536,Christine,Sutton,christine.sutton@bluehorizon.com,+1-365-620-6207x16043,2022-10-05 01:32:51,Spa & Wellness,Wellness Coach,Rotating,Sommelier
+ST000537,Latoya,Martinez,latoya.martinez@bluehorizon.com,444.837.0759x970,2020-10-23 15:58:46,Food & Beverage,Kitchen Staff,Morning,"Hospitality Management, Food Safety"
+ST000538,Jason,Leonard,jason.leonard@bluehorizon.com,(118)278-6018x00189,2024-01-16 01:24:59,Housekeeping,Supervisor,Rotating,
+ST000539,Tina,Alvarez,tina.alvarez@bluehorizon.com,(026)184-7645x9034,2020-10-19 18:55:06,Maintenance,Maintenance Technician,Night,"Sommelier, First Aid, Security License"
+ST000540,Michael,Henderson,michael.henderson@bluehorizon.com,(477)509-7987,2020-11-06 10:16:37,Front Desk,Guest Relations Manager,Rotating,
+ST000541,Michele,Arnold,michele.arnold@bluehorizon.com,069-602-0914x0515,2024-02-21 13:08:18,Administration,HR Specialist,Rotating,
+ST000542,Christopher,Bass,christopher.bass@bluehorizon.com,574.060.8056x95093,2023-04-17 09:05:43,Spa & Wellness,Wellness Coach,Rotating,
+ST000543,Dean,Mcdonald,dean.mcdonald@bluehorizon.com,705-398-0244x420,2021-02-22 16:57:15,Housekeeping,Manager,Night,
+ST000544,Joseph,Miller,joseph.miller@bluehorizon.com,001-063-299-3862,2020-10-13 01:07:11,Spa & Wellness,Spa Attendant,Rotating,
+ST000545,Joseph,Bennett,joseph.bennett@bluehorizon.com,266-828-7956x24233,2023-02-11 17:26:06,Front Desk,Concierge,Afternoon,
+ST000546,Aaron,Johnson,aaron.johnson@bluehorizon.com,(988)501-2636x201,2020-09-27 21:09:41,Administration,Administrative Assistant,Night,
+ST000547,Amy,Glenn,amy.glenn@bluehorizon.com,(176)502-5027,2021-11-13 19:05:01,Housekeeping,Supervisor,Night,
+ST000548,Bill,Elliott,bill.elliott@bluehorizon.com,2351490580,2021-09-19 18:44:58,Food & Beverage,Kitchen Staff,Night,"CPR, First Aid"
+ST000549,Paul,Reed,paul.reed@bluehorizon.com,(133)028-7451x619,2023-10-23 13:59:45,Administration,Administrative Assistant,Morning,
+ST000550,Andrew,Neal,andrew.neal@bluehorizon.com,503-941-6338x750,2020-10-15 21:21:34,Housekeeping,Housekeeper,Night,"Security License, First Aid, CPR"
+ST000551,Karen,Fisher,karen.fisher@bluehorizon.com,432.712.8062x12382,2023-03-09 01:14:33,Maintenance,Supervisor,Afternoon,
+ST000552,Paul,Ewing,paul.ewing@bluehorizon.com,053.656.8646x484,2020-01-20 06:02:14,Administration,Administrative Assistant,Afternoon,
+ST000553,James,Cooley,james.cooley@bluehorizon.com,188.881.7182x73210,2020-04-24 11:28:11,Food & Beverage,Server,Rotating,
+ST000554,Michael,Rich,michael.rich@bluehorizon.com,(124)914-9842,2023-08-10 02:01:53,Administration,HR Specialist,Night,
+ST000555,Charles,Gordon,charles.gordon@bluehorizon.com,001-919-189-7476x35323,2022-09-25 05:37:27,Spa & Wellness,Massage Therapist,Night,
+ST000556,John,Hall,john.hall@bluehorizon.com,915-108-6325,2021-11-16 13:20:22,Front Desk,Guest Relations Manager,Morning,"CPR, Food Safety"
+ST000557,Gregory,Yang,gregory.yang@bluehorizon.com,695-224-6683,2020-01-23 14:44:34,Spa & Wellness,Spa Attendant,Night,
+ST000558,Sierra,Green,sierra.green@bluehorizon.com,357.033.7959x23648,2024-03-31 12:45:00,Security,Security Officer,Night,
+ST000559,Jeremy,Bailey,jeremy.bailey@bluehorizon.com,127-047-2153x5724,2023-12-08 04:29:37,Administration,Administrative Assistant,Rotating,
+ST000560,Heather,Wallace,heather.wallace@bluehorizon.com,897.986.7342,2024-01-18 16:49:49,Security,Security Officer,Night,"Security License, Massage Therapy License, First Aid"
+ST000561,Annette,Mayer,annette.mayer@bluehorizon.com,150.215.6261x90767,2021-12-02 22:33:26,Food & Beverage,Server,Afternoon,
+ST000562,Rebekah,Harris,rebekah.harris@bluehorizon.com,206-583-7182x48975,2020-09-15 23:50:33,Housekeeping,Housekeeper,Morning,
+ST000563,Jessica,Smith,jessica.smith@bluehorizon.com,2026599917,2021-02-26 11:36:49,Food & Beverage,Server,Morning,"Security License, CPR, First Aid"
+ST000564,Tracy,Mason,tracy.mason@bluehorizon.com,(775)350-6133,2023-05-04 08:09:32,Maintenance,Maintenance Technician,Rotating,
+ST000565,Ethan,Alvarado,ethan.alvarado@bluehorizon.com,(634)055-5771x923,2022-06-02 05:48:47,Spa & Wellness,Spa Attendant,Morning,
+ST000566,Daniel,Sanchez,daniel.sanchez@bluehorizon.com,447-211-4640x813,2024-03-14 16:14:18,Spa & Wellness,Massage Therapist,Morning,"CPR, Food Safety, Sommelier"
+ST000567,Breanna,Rodriguez,breanna.rodriguez@bluehorizon.com,(245)831-3017x87039,2021-03-01 21:06:49,Housekeeping,Housekeeper,Morning,CPR
+ST000568,Debra,Horton,debra.horton@bluehorizon.com,+1-933-374-5882x71386,2024-07-24 21:07:22,Food & Beverage,Chef,Rotating,
+ST000569,Nicholas,Rivera,nicholas.rivera@bluehorizon.com,(023)975-7170,2022-04-19 16:13:27,Food & Beverage,Restaurant Manager,Afternoon,
+ST000570,Matthew,Fleming,matthew.fleming@bluehorizon.com,649-032-1307,2023-02-13 00:59:30,Security,Security Officer,Night,Security License
+ST000571,Mark,Luna,mark.luna@bluehorizon.com,001-782-861-1167x3759,2024-08-23 08:10:53,Food & Beverage,Chef,Afternoon,
+ST000572,Matthew,Peters,matthew.peters@bluehorizon.com,990.731.4452x3639,2024-09-24 03:39:03,Front Desk,Receptionist,Rotating,"Security License, Food Safety"
+ST000573,Travis,Smith,travis.smith@bluehorizon.com,+1-922-861-8859,2020-10-20 14:50:45,Security,Security Officer,Afternoon,Massage Therapy License
+ST000574,Thomas,Manning,thomas.manning@bluehorizon.com,001-249-224-7413x725,2023-11-08 13:52:17,Front Desk,Receptionist,Afternoon,
+ST000575,Nicholas,Hernandez,nicholas.hernandez@bluehorizon.com,(825)318-0710x5576,2024-09-26 06:51:18,Maintenance,Supervisor,Afternoon,
+ST000576,Kelly,Mcdaniel,kelly.mcdaniel@bluehorizon.com,+1-391-850-4710x29316,2024-05-27 07:45:51,Food & Beverage,Chef,Afternoon,"CPR, First Aid, Hospitality Management"
+ST000577,Christopher,Elliott,christopher.elliott@bluehorizon.com,201.105.4418,2021-05-09 09:59:28,Maintenance,Maintenance Technician,Afternoon,"Security License, Sommelier, First Aid"
+ST000578,Arthur,Smith,arthur.smith@bluehorizon.com,001-000-234-1985x14643,2024-07-17 22:32:31,Maintenance,Engineer,Rotating,"Food Safety, First Aid"
+ST000579,James,Hunter,james.hunter@bluehorizon.com,884.828.1609x1928,2023-01-27 02:51:26,Spa & Wellness,Wellness Coach,Night,
+ST000580,Christopher,Rojas,christopher.rojas@bluehorizon.com,001-151-285-0295,2024-12-04 13:05:42,Spa & Wellness,Spa Attendant,Afternoon,
+ST000581,Anita,Morales,anita.morales@bluehorizon.com,001-976-364-0077x21240,2021-10-29 23:05:38,Spa & Wellness,Massage Therapist,Afternoon,
+ST000582,Jo,Dillon,jo.dillon@bluehorizon.com,(485)126-1158,2022-05-22 03:41:48,Food & Beverage,Chef,Morning,
+ST000583,Kaitlyn,Wilkinson,kaitlyn.wilkinson@bluehorizon.com,+1-315-405-7986x5984,2020-04-22 13:36:46,Spa & Wellness,Massage Therapist,Rotating,
+ST000584,Samantha,Miller,samantha.miller@bluehorizon.com,(582)855-6906x46585,2020-02-27 05:28:38,Housekeeping,Manager,Morning,
+ST000585,Amber,Glenn,amber.glenn@bluehorizon.com,(129)416-9534x5012,2021-03-19 13:59:37,Security,Security Officer,Afternoon,"First Aid, CPR"
+ST000586,Chase,Horn,chase.horn@bluehorizon.com,(064)847-1421,2022-07-31 18:01:17,Food & Beverage,Bartender,Afternoon,Sommelier
+ST000587,Luis,Brown,luis.brown@bluehorizon.com,758-690-6292,2020-10-24 07:42:46,Front Desk,Receptionist,Rotating,
+ST000588,Megan,Goodwin,megan.goodwin@bluehorizon.com,897.896.7268x02171,2023-10-14 02:50:18,Food & Beverage,Kitchen Staff,Morning,CPR
+ST000589,Lisa,Reed,lisa.reed@bluehorizon.com,907.620.2733,2024-05-02 00:11:21,Front Desk,Guest Relations Manager,Morning,
+ST000590,Joseph,Watts,joseph.watts@bluehorizon.com,450.764.8393x75110,2021-01-11 19:55:11,Maintenance,Supervisor,Morning,
+ST000591,Sherry,Marshall,sherry.marshall@bluehorizon.com,+1-807-532-7254,2022-05-18 14:37:29,Food & Beverage,Kitchen Staff,Rotating,
+ST000592,Bryan,Nelson,bryan.nelson@bluehorizon.com,6077303279,2023-09-30 03:26:34,Front Desk,Concierge,Afternoon,
+ST000593,Adam,Owens,adam.owens@bluehorizon.com,473.144.4565x9264,2023-01-12 20:31:49,Housekeeping,Housekeeper,Rotating,
+ST000594,Paula,Mendez,paula.mendez@bluehorizon.com,543-789-7358,2022-12-18 13:29:42,Front Desk,Receptionist,Morning,
+ST000595,Stacy,Curry,stacy.curry@bluehorizon.com,384-056-7062x13510,2023-12-14 15:41:28,Security,Security Supervisor,Rotating,
+ST000596,Alexander,Bryant,alexander.bryant@bluehorizon.com,091-325-8510,2020-10-19 21:12:14,Spa & Wellness,Spa Attendant,Morning,"Food Safety, Massage Therapy License, Hospitality Management"
+ST000597,Brittany,Beard,brittany.beard@bluehorizon.com,4307103642,2023-11-17 16:38:57,Food & Beverage,Kitchen Staff,Night,
+ST000598,Jose,Estrada,jose.estrada@bluehorizon.com,001-796-048-9878x51125,2020-11-30 20:54:23,Housekeeping,Manager,Rotating,
+ST000599,Cheyenne,Roberts,cheyenne.roberts@bluehorizon.com,006-009-3984x33087,2024-08-08 04:57:02,Food & Beverage,Server,Night,
+ST000600,Jeffrey,Wall,jeffrey.wall@bluehorizon.com,(048)826-9589x7354,2020-04-19 05:29:37,Front Desk,Receptionist,Rotating,
+ST000601,Jeremy,Tapia,jeremy.tapia@bluehorizon.com,001-704-664-9672x20206,2022-05-03 23:20:13,Security,Security Manager,Morning,
+ST000602,Robert,Williams,robert.williams@bluehorizon.com,(276)022-0327x06873,2021-03-18 08:17:46,Maintenance,Maintenance Technician,Afternoon,
+ST000603,Timothy,Baker,timothy.baker@bluehorizon.com,878.826.1004,2021-12-30 17:26:42,Security,Security Manager,Morning,
+ST000604,Mark,Duarte,mark.duarte@bluehorizon.com,+1-007-798-8528,2024-09-23 20:23:40,Maintenance,Supervisor,Afternoon,"Hospitality Management, Food Safety, Sommelier"
+ST000605,Dorothy,Taylor,dorothy.taylor@bluehorizon.com,001-189-520-7876x45357,2023-10-02 19:46:32,Food & Beverage,Restaurant Manager,Afternoon,"Hospitality Management, Food Safety, Security License"
+ST000606,Jason,Brown,jason.brown@bluehorizon.com,049.802.6208x525,2020-06-10 14:21:33,Spa & Wellness,Spa Attendant,Night,"Massage Therapy License, Security License"
+ST000607,Richard,Taylor,richard.taylor@bluehorizon.com,621-076-6995x253,2022-11-13 04:48:16,Maintenance,Maintenance Technician,Afternoon,
+ST000608,Bethany,Coleman,bethany.coleman@bluehorizon.com,001-937-971-7486x50811,2021-02-24 18:42:08,Administration,HR Specialist,Afternoon,
+ST000609,David,Robinson,david.robinson@bluehorizon.com,006-375-9195x8987,2022-05-08 07:08:17,Security,Security Manager,Rotating,
+ST000610,Amanda,Rivera,amanda.rivera@bluehorizon.com,583-479-3082,2021-04-11 09:29:43,Administration,HR Specialist,Rotating,
+ST000611,Victoria,Burgess,victoria.burgess@bluehorizon.com,001-092-749-4336,2023-03-29 23:55:12,Housekeeping,Manager,Night,
+ST000612,Stephanie,Edwards,stephanie.edwards@bluehorizon.com,881.275.1349x43153,2020-01-14 07:58:16,Food & Beverage,Server,Morning,
+ST000613,Emily,Rodriguez,emily.rodriguez@bluehorizon.com,656-859-6635x9082,2021-08-16 06:22:40,Food & Beverage,Chef,Rotating,
+ST000614,William,Gordon,william.gordon@bluehorizon.com,(789)857-9085x868,2021-12-16 09:55:55,Food & Beverage,Kitchen Staff,Afternoon,
+ST000615,Kristen,Haley,kristen.haley@bluehorizon.com,+1-204-225-4733x9389,2021-06-25 22:23:18,Maintenance,Supervisor,Afternoon,
+ST000616,Peter,Yu,peter.yu@bluehorizon.com,001-353-276-2176x324,2024-10-03 21:29:20,Food & Beverage,Chef,Night,"CPR, Food Safety"
+ST000617,Christopher,Willis,christopher.willis@bluehorizon.com,4680758344,2021-01-14 19:25:35,Spa & Wellness,Massage Therapist,Night,
+ST000618,Ryan,Reyes,ryan.reyes@bluehorizon.com,(539)092-0742x07574,2020-09-14 16:12:52,Food & Beverage,Chef,Afternoon,"Hospitality Management, Sommelier"
+ST000619,Edward,Villa,edward.villa@bluehorizon.com,5657639733,2022-05-22 18:22:54,Front Desk,Receptionist,Rotating,Massage Therapy License
+ST000620,Kenneth,Brown,kenneth.brown@bluehorizon.com,(078)090-2517,2021-06-07 14:36:54,Spa & Wellness,Massage Therapist,Night,CPR
+ST000621,Penny,Kelly,penny.kelly@bluehorizon.com,+1-111-555-0386,2024-03-10 01:18:54,Administration,Accountant,Rotating,"CPR, Sommelier, Hospitality Management"
+ST000622,Daniel,Ruiz,daniel.ruiz@bluehorizon.com,856.836.9514x3226,2021-08-03 09:18:56,Maintenance,Maintenance Technician,Afternoon,
+ST000623,Nicole,Kirby,nicole.kirby@bluehorizon.com,045.914.5595,2024-10-19 21:36:33,Administration,Administrative Assistant,Afternoon,
+ST000624,Morgan,Kerr,morgan.kerr@bluehorizon.com,393-544-2602x51047,2022-06-30 16:03:08,Front Desk,Receptionist,Night,
+ST000625,George,Smith,george.smith@bluehorizon.com,+1-242-335-5796x587,2021-08-24 05:13:45,Administration,HR Specialist,Rotating,
+ST000626,Natalie,Rivera,natalie.rivera@bluehorizon.com,905-869-8837x2474,2021-02-19 03:35:45,Food & Beverage,Restaurant Manager,Afternoon,
+ST000627,Megan,Gomez,megan.gomez@bluehorizon.com,+1-067-350-9866x588,2021-08-25 15:21:02,Food & Beverage,Restaurant Manager,Afternoon,
+ST000628,Samantha,Brooks,samantha.brooks@bluehorizon.com,456-753-1715,2022-03-11 18:00:28,Food & Beverage,Restaurant Manager,Afternoon,"Massage Therapy License, Food Safety, Security License"
+ST000629,Shelby,Dennis,shelby.dennis@bluehorizon.com,2964731419,2022-04-26 15:21:14,Administration,Accountant,Rotating,
+ST000630,Crystal,Cooper,crystal.cooper@bluehorizon.com,+1-866-075-9094x388,2020-02-05 13:55:15,Housekeeping,Manager,Night,
+ST000631,Ann,Mitchell,ann.mitchell@bluehorizon.com,703-325-5542x73872,2024-10-01 14:49:25,Security,Security Manager,Night,
+ST000632,Joshua,Jackson,joshua.jackson@bluehorizon.com,(201)721-5098x48763,2024-08-29 15:45:34,Administration,HR Specialist,Rotating,
+ST000633,Kevin,Brown,kevin.brown@bluehorizon.com,(303)333-3974,2022-04-09 13:57:08,Food & Beverage,Bartender,Rotating,
+ST000634,Patrick,Hodge,patrick.hodge@bluehorizon.com,+1-068-956-8191x358,2020-09-07 00:43:18,Administration,HR Specialist,Afternoon,
+ST000635,David,Rogers,david.rogers@bluehorizon.com,480.673.0586x711,2020-12-06 04:05:40,Housekeeping,Supervisor,Afternoon,
+ST000636,Erik,Hernandez,erik.hernandez@bluehorizon.com,340.237.3471x78504,2020-04-02 16:45:51,Front Desk,Receptionist,Rotating,Hospitality Management
+ST000637,Holly,Diaz,holly.diaz@bluehorizon.com,001-701-528-4754x08324,2022-03-18 09:16:36,Front Desk,Guest Relations Manager,Rotating,
+ST000638,Jason,Brennan,jason.brennan@bluehorizon.com,158-714-7433x562,2023-05-09 15:11:02,Food & Beverage,Chef,Night,
+ST000639,Evan,Long,evan.long@bluehorizon.com,+1-781-381-9211x933,2024-03-18 11:51:46,Housekeeping,Supervisor,Rotating,"Food Safety, Security License"
+ST000640,John,Hernandez,john.hernandez@bluehorizon.com,001-993-940-3029x1047,2023-11-22 12:15:43,Food & Beverage,Bartender,Morning,CPR
+ST000641,Edward,Garcia,edward.garcia@bluehorizon.com,(231)765-0373,2021-11-23 04:58:13,Spa & Wellness,Massage Therapist,Afternoon,
+ST000642,Mark,Gonzalez,mark.gonzalez@bluehorizon.com,4572860135,2023-03-28 07:36:06,Security,Security Officer,Night,
+ST000643,Joshua,Hall,joshua.hall@bluehorizon.com,584.717.1164x78393,2024-11-21 00:43:46,Security,Security Manager,Morning,
+ST000644,Joseph,Jackson,joseph.jackson@bluehorizon.com,382.525.5498x500,2021-11-03 23:04:52,Administration,Accountant,Morning,"Massage Therapy License, Hospitality Management, Sommelier"
+ST000645,Amanda,Castillo,amanda.castillo@bluehorizon.com,913-674-8821x10197,2020-06-18 16:52:34,Security,Security Supervisor,Morning,
+ST000646,Bryan,Gordon,bryan.gordon@bluehorizon.com,+1-855-732-9434x476,2024-02-14 01:26:15,Maintenance,Engineer,Afternoon,
+ST000647,George,Short,george.short@bluehorizon.com,7712570183,2021-10-28 04:01:41,Administration,HR Specialist,Rotating,Security License
+ST000648,Brooke,Gonzales,brooke.gonzales@bluehorizon.com,5967756038,2020-06-28 22:16:59,Administration,Administrative Assistant,Rotating,"Sommelier, Hospitality Management, CPR"
+ST000649,Jerry,Johnson,jerry.johnson@bluehorizon.com,668-074-2863x05786,2021-06-02 00:48:29,Administration,Administrative Assistant,Rotating,
+ST000650,Heather,Stephens,heather.stephens@bluehorizon.com,+1-334-326-9517x524,2023-11-07 01:31:56,Spa & Wellness,Wellness Coach,Afternoon,
+ST000651,Jennifer,Harrison,jennifer.harrison@bluehorizon.com,843-401-3612x8197,2021-05-02 23:50:01,Food & Beverage,Restaurant Manager,Rotating,
+ST000652,Richard,Ramirez,richard.ramirez@bluehorizon.com,(512)538-3419x78701,2024-05-08 18:13:32,Housekeeping,Supervisor,Rotating,
+ST000653,Wendy,Escobar,wendy.escobar@bluehorizon.com,086-910-8564x2718,2024-08-13 12:05:39,Maintenance,Maintenance Technician,Night,
+ST000654,Anthony,Werner,anthony.werner@bluehorizon.com,+1-572-996-9677x8578,2024-07-04 13:12:32,Spa & Wellness,Massage Therapist,Rotating,"First Aid, Food Safety, CPR"
+ST000655,Jennifer,King,jennifer.king@bluehorizon.com,(517)130-5055x40181,2023-09-11 20:38:54,Maintenance,Maintenance Technician,Morning,
+ST000656,Edward,Mcdonald,edward.mcdonald@bluehorizon.com,+1-178-227-9102x69210,2020-03-06 06:22:05,Front Desk,Concierge,Rotating,
+ST000657,Stephanie,Williams,stephanie.williams@bluehorizon.com,785-993-0102,2021-12-24 18:07:54,Housekeeping,Manager,Morning,
+ST000658,Jeffrey,Hall,jeffrey.hall@bluehorizon.com,476-798-5368,2021-03-11 11:11:32,Food & Beverage,Kitchen Staff,Rotating,
+ST000659,Edward,Scott,edward.scott@bluehorizon.com,066-944-0572x78551,2022-08-16 23:25:57,Front Desk,Receptionist,Rotating,
+ST000660,Gwendolyn,Jones,gwendolyn.jones@bluehorizon.com,(056)621-2206x23856,2023-08-09 18:18:19,Security,Security Manager,Night,
+ST000661,Valerie,Jimenez,valerie.jimenez@bluehorizon.com,+1-086-398-2418,2022-02-11 00:51:02,Maintenance,Supervisor,Night,"Security License, Food Safety"
+ST000662,Marc,Howell,marc.howell@bluehorizon.com,(195)469-8445x677,2024-04-15 19:44:48,Spa & Wellness,Massage Therapist,Night,Food Safety
+ST000663,Joseph,Coleman,joseph.coleman@bluehorizon.com,018.560.4665x5586,2023-02-17 08:11:15,Spa & Wellness,Massage Therapist,Rotating,
+ST000664,Sean,Anderson,sean.anderson@bluehorizon.com,767-168-3930x040,2023-10-05 14:47:52,Spa & Wellness,Wellness Coach,Night,
+ST000665,Tracy,Johnson,tracy.johnson@bluehorizon.com,(726)975-1139x63474,2020-03-24 15:36:10,Spa & Wellness,Massage Therapist,Night,Sommelier
+ST000666,Kathryn,Watts,kathryn.watts@bluehorizon.com,+1-793-994-0945x9007,2024-12-10 19:49:33,Security,Security Supervisor,Rotating,CPR
+ST000667,Justin,Wells,justin.wells@bluehorizon.com,+1-414-243-3134x552,2021-09-10 01:23:14,Maintenance,Supervisor,Morning,
+ST000668,Jennifer,Thompson,jennifer.thompson@bluehorizon.com,001-735-000-3786x78193,2024-04-09 23:15:37,Security,Security Supervisor,Morning,
+ST000669,Caleb,Ellis,caleb.ellis@bluehorizon.com,058-787-2291x5511,2020-02-23 04:33:53,Spa & Wellness,Massage Therapist,Night,
+ST000670,Andrea,Lloyd,andrea.lloyd@bluehorizon.com,740.808.8289,2023-12-02 10:35:13,Housekeeping,Supervisor,Night,
+ST000671,Stephanie,Ruiz,stephanie.ruiz@bluehorizon.com,712-437-9939,2023-11-03 03:16:10,Housekeeping,Housekeeper,Afternoon,
+ST000672,David,Elliott,david.elliott@bluehorizon.com,+1-888-556-5111x29853,2022-07-13 08:56:31,Security,Security Manager,Morning,"CPR, Food Safety, First Aid"
+ST000673,Deborah,Martinez,deborah.martinez@bluehorizon.com,(317)418-3195x12171,2022-12-19 22:07:46,Security,Security Manager,Afternoon,
+ST000674,Stephanie,Dunn,stephanie.dunn@bluehorizon.com,(091)994-3897x0193,2024-10-25 22:19:29,Housekeeping,Supervisor,Morning,
+ST000675,Michael,Mooney,michael.mooney@bluehorizon.com,1460995145,2020-04-14 22:47:01,Security,Security Manager,Morning,
+ST000676,Andre,Norman,andre.norman@bluehorizon.com,337-497-9291,2024-08-11 22:18:14,Food & Beverage,Restaurant Manager,Morning,
+ST000677,Kathryn,Norton,kathryn.norton@bluehorizon.com,+1-858-803-2603x9418,2022-08-14 14:45:16,Administration,Accountant,Rotating,Sommelier
+ST000678,Tammy,Sanchez,tammy.sanchez@bluehorizon.com,(519)843-4416x6017,2021-10-25 15:12:16,Maintenance,Engineer,Afternoon,
+ST000679,Daniel,Palmer,daniel.palmer@bluehorizon.com,927.284.1370x36983,2022-04-28 08:52:48,Security,Security Manager,Morning,Hospitality Management
+ST000680,Sharon,Castro,sharon.castro@bluehorizon.com,+1-046-214-0881,2024-04-23 10:15:49,Maintenance,Maintenance Technician,Afternoon,
+ST000681,Nicole,Simpson,nicole.simpson@bluehorizon.com,001-163-592-2409,2021-05-22 22:45:19,Maintenance,Supervisor,Night,
+ST000682,Kevin,Stevenson,kevin.stevenson@bluehorizon.com,001-372-422-8444x170,2024-05-09 01:56:20,Spa & Wellness,Wellness Coach,Morning,"Massage Therapy License, CPR, Hospitality Management"
+ST000683,Susan,Ward,susan.ward@bluehorizon.com,(212)011-6419x873,2021-10-17 09:17:21,Food & Beverage,Chef,Morning,
+ST000684,Katherine,Russell,katherine.russell@bluehorizon.com,199-327-3390,2023-08-23 10:14:31,Housekeeping,Manager,Night,
+ST000685,Ann,Roberts,ann.roberts@bluehorizon.com,+1-158-903-3421,2023-04-08 20:49:35,Housekeeping,Manager,Rotating,"First Aid, Massage Therapy License, CPR"
+ST000686,Courtney,Carey,courtney.carey@bluehorizon.com,057.429.8754,2024-11-29 04:56:46,Security,Security Manager,Afternoon,
+ST000687,Jennifer,Mcintyre,jennifer.mcintyre@bluehorizon.com,+1-802-350-3546x24646,2021-06-01 19:14:41,Administration,Accountant,Night,
+ST000688,Christina,Davis,christina.davis@bluehorizon.com,727-286-3055x630,2024-01-12 05:39:27,Food & Beverage,Chef,Afternoon,
+ST000689,Brian,Brewer,brian.brewer@bluehorizon.com,7712576341,2024-12-07 04:16:56,Food & Beverage,Restaurant Manager,Afternoon,Security License
+ST000690,Melissa,Murphy,melissa.murphy@bluehorizon.com,770.531.0152,2020-03-23 07:53:29,Administration,Accountant,Afternoon,
+ST000691,Kathryn,Campbell,kathryn.campbell@bluehorizon.com,874-766-3990x312,2021-02-22 22:12:35,Food & Beverage,Chef,Night,
+ST000692,Cory,Carr,cory.carr@bluehorizon.com,001-008-247-0789,2022-03-12 00:22:16,Front Desk,Guest Relations Manager,Morning,
+ST000693,Mark,Brewer,mark.brewer@bluehorizon.com,(075)968-1087x5151,2022-08-04 05:40:33,Housekeeping,Supervisor,Night,"Hospitality Management, Massage Therapy License"
+ST000694,Christopher,Nelson,christopher.nelson@bluehorizon.com,001-501-313-8708,2022-08-05 05:56:12,Security,Security Manager,Rotating,"Massage Therapy License, Security License"
+ST000695,Glenda,Johnson,glenda.johnson@bluehorizon.com,(654)014-3871x7084,2022-12-15 00:10:10,Food & Beverage,Restaurant Manager,Afternoon,
+ST000696,Heather,Ho,heather.ho@bluehorizon.com,588-093-0979x38038,2021-08-20 12:50:52,Administration,Accountant,Afternoon,
+ST000697,Vanessa,Reeves,vanessa.reeves@bluehorizon.com,648-810-9276x38501,2022-06-29 02:26:31,Housekeeping,Manager,Morning,
+ST000698,Melissa,Kidd,melissa.kidd@bluehorizon.com,883.744.0077x85223,2023-10-30 19:27:30,Administration,HR Specialist,Rotating,"CPR, Massage Therapy License"
+ST000699,Monica,Lewis,monica.lewis@bluehorizon.com,+1-460-802-1462x3350,2020-05-20 13:25:37,Administration,Accountant,Morning,
+ST000700,Charles,Ballard,charles.ballard@bluehorizon.com,064-245-3097x0270,2023-11-06 02:40:21,Food & Beverage,Kitchen Staff,Morning,"First Aid, Security License"
+ST000701,Tammy,Blackwell,tammy.blackwell@bluehorizon.com,520-470-6414x396,2021-10-08 17:32:55,Administration,HR Specialist,Rotating,"First Aid, Hospitality Management"
+ST000702,Michael,Torres,michael.torres@bluehorizon.com,838-662-4143x836,2021-06-30 20:05:40,Food & Beverage,Restaurant Manager,Morning,"Sommelier, Security License"
+ST000703,James,Wilson,james.wilson@bluehorizon.com,076.944.1329x2353,2020-04-15 08:19:20,Spa & Wellness,Spa Attendant,Rotating,
+ST000704,Meghan,Rasmussen,meghan.rasmussen@bluehorizon.com,001-132-716-5888,2023-09-26 20:54:11,Maintenance,Supervisor,Rotating,
+ST000705,Jill,Briggs,jill.briggs@bluehorizon.com,(651)500-9076x74528,2021-07-05 19:19:22,Administration,Administrative Assistant,Afternoon,
+ST000706,Amy,Hall,amy.hall@bluehorizon.com,8714154966,2021-03-09 12:45:01,Maintenance,Maintenance Technician,Rotating,
+ST000707,Mark,Sanford,mark.sanford@bluehorizon.com,2152893276,2020-09-20 03:26:34,Maintenance,Maintenance Technician,Morning,First Aid
+ST000708,Daniel,Ross,daniel.ross@bluehorizon.com,863.760.9097,2024-05-15 05:02:20,Security,Security Supervisor,Morning,
+ST000709,Alyssa,Anderson,alyssa.anderson@bluehorizon.com,446-962-9720,2024-02-13 08:29:43,Food & Beverage,Kitchen Staff,Night,
+ST000710,Heather,Smith,heather.smith@bluehorizon.com,675.976.7262x46754,2020-12-12 04:48:28,Maintenance,Engineer,Rotating,"Massage Therapy License, First Aid, CPR"
+ST000711,Candice,Perez,candice.perez@bluehorizon.com,234.128.2851x6317,2023-10-10 19:25:51,Administration,HR Specialist,Rotating,
+ST000712,Angela,Miller,angela.miller@bluehorizon.com,+1-469-908-9921x8009,2024-07-15 13:36:55,Administration,HR Specialist,Afternoon,Security License
+ST000713,Cynthia,Mccarthy,cynthia.mccarthy@bluehorizon.com,877-162-2849,2023-10-16 22:19:14,Administration,HR Specialist,Morning,
+ST000714,Allison,Chang,allison.chang@bluehorizon.com,0915149051,2020-11-13 08:19:25,Administration,Administrative Assistant,Rotating,
+ST000715,Emily,Jimenez,emily.jimenez@bluehorizon.com,(253)678-7841x4370,2021-03-19 04:01:27,Housekeeping,Supervisor,Morning,
+ST000716,Robert,Mclaughlin,robert.mclaughlin@bluehorizon.com,(242)696-7136x133,2023-09-24 03:24:45,Maintenance,Engineer,Night,
+ST000717,Joseph,Park,joseph.park@bluehorizon.com,(037)587-9251x6177,2023-07-09 10:18:49,Maintenance,Supervisor,Morning,
+ST000718,Jason,Beasley,jason.beasley@bluehorizon.com,118.035.1557x643,2022-07-27 03:09:17,Security,Security Manager,Morning,
+ST000719,Andrew,Farmer,andrew.farmer@bluehorizon.com,001-568-951-3253x7824,2023-11-26 09:41:14,Administration,HR Specialist,Night,"Massage Therapy License, Food Safety"
+ST000720,Alyssa,Chang,alyssa.chang@bluehorizon.com,685-268-7001x717,2020-04-21 23:40:35,Security,Security Manager,Night,
+ST000721,Jamie,Navarro,jamie.navarro@bluehorizon.com,2253954421,2020-01-13 14:26:40,Administration,HR Specialist,Morning,"Massage Therapy License, CPR"
+ST000722,Peter,Meadows,peter.meadows@bluehorizon.com,001-164-678-3193x7681,2022-11-14 22:09:21,Maintenance,Engineer,Afternoon,
+ST000723,Kari,Craig,kari.craig@bluehorizon.com,483.062.9477,2024-08-17 01:00:57,Food & Beverage,Bartender,Morning,"Food Safety, Massage Therapy License"
+ST000724,Kelly,Calhoun,kelly.calhoun@bluehorizon.com,082-729-4821x907,2020-06-01 03:00:46,Administration,HR Specialist,Night,
+ST000725,Bryan,Carroll,bryan.carroll@bluehorizon.com,(369)152-0775,2020-11-15 04:30:43,Maintenance,Supervisor,Morning,
+ST000726,Tyler,Proctor,tyler.proctor@bluehorizon.com,001-861-981-7280x779,2024-04-08 04:28:25,Front Desk,Receptionist,Morning,
+ST000727,Beth,Combs,beth.combs@bluehorizon.com,0097910695,2020-06-18 10:43:42,Administration,Administrative Assistant,Night,Massage Therapy License
+ST000728,Jennifer,Hardy,jennifer.hardy@bluehorizon.com,5912277888,2022-04-14 12:57:10,Administration,Administrative Assistant,Afternoon,
+ST000729,Marcia,Tucker,marcia.tucker@bluehorizon.com,906.558.7835x576,2020-05-14 05:09:33,Spa & Wellness,Wellness Coach,Night,
+ST000730,Annette,Davis,annette.davis@bluehorizon.com,(770)852-9798,2024-10-18 19:51:23,Maintenance,Maintenance Technician,Rotating,"Hospitality Management, Security License, CPR"
+ST000731,Jill,Maddox,jill.maddox@bluehorizon.com,047.383.4542,2022-04-08 09:50:49,Spa & Wellness,Spa Attendant,Morning,
+ST000732,Nathaniel,Miller,nathaniel.miller@bluehorizon.com,7073480204,2020-10-28 08:33:52,Administration,Administrative Assistant,Night,
+ST000733,Wayne,Rice,wayne.rice@bluehorizon.com,759-306-3708,2023-10-20 14:45:25,Food & Beverage,Kitchen Staff,Morning,First Aid
+ST000734,Jonathan,Gonzalez,jonathan.gonzalez@bluehorizon.com,001-595-593-7400x72858,2021-10-15 10:53:06,Housekeeping,Housekeeper,Afternoon,
+ST000735,Julie,Morgan,julie.morgan@bluehorizon.com,(530)009-5272x34886,2021-01-30 02:42:03,Security,Security Officer,Night,"CPR, First Aid"
+ST000736,Edward,Robinson,edward.robinson@bluehorizon.com,001-567-678-6356x9536,2021-04-06 10:14:23,Front Desk,Receptionist,Night,"Massage Therapy License, First Aid"
+ST000737,William,Brooks,william.brooks@bluehorizon.com,+1-634-086-6578x6867,2022-05-08 21:35:31,Administration,HR Specialist,Night,
+ST000738,Andre,Meza,andre.meza@bluehorizon.com,001-072-016-6271x018,2024-11-04 16:50:27,Front Desk,Receptionist,Afternoon,
+ST000739,Kelli,Fleming,kelli.fleming@bluehorizon.com,(305)915-3746x32277,2022-09-07 09:22:12,Spa & Wellness,Massage Therapist,Morning,Sommelier
+ST000740,Richard,Butler,richard.butler@bluehorizon.com,976-969-8160x9282,2021-02-09 09:20:13,Security,Security Supervisor,Morning,
+ST000741,Andrea,Strong,andrea.strong@bluehorizon.com,976.047.0692x393,2024-08-16 16:18:14,Maintenance,Engineer,Rotating,Massage Therapy License
+ST000742,Tamara,Jackson,tamara.jackson@bluehorizon.com,+1-015-625-7299x299,2024-10-11 07:28:33,Administration,Accountant,Rotating,
+ST000743,Melissa,Richardson,melissa.richardson@bluehorizon.com,+1-465-533-7590x5880,2021-05-05 10:40:47,Administration,Administrative Assistant,Afternoon,"Sommelier, Hospitality Management, Security License"
+ST000744,Kenneth,Hernandez,kenneth.hernandez@bluehorizon.com,+1-924-069-2945x0433,2023-07-18 01:36:05,Housekeeping,Supervisor,Rotating,
+ST000745,David,Cochran,david.cochran@bluehorizon.com,(726)070-7461x691,2020-01-15 22:16:23,Housekeeping,Manager,Morning,
+ST000746,William,Kane,william.kane@bluehorizon.com,123.822.6555x9806,2023-11-21 01:14:12,Front Desk,Concierge,Morning,
+ST000747,Ronald,Davies,ronald.davies@bluehorizon.com,001-534-069-2067,2021-12-01 23:15:07,Food & Beverage,Kitchen Staff,Morning,
+ST000748,Katelyn,Jones,katelyn.jones@bluehorizon.com,565.878.5540x2036,2021-06-02 10:19:00,Spa & Wellness,Spa Attendant,Afternoon,"Food Safety, Sommelier"
+ST000749,Karen,Brooks,karen.brooks@bluehorizon.com,(438)996-1426x525,2022-04-08 10:18:15,Security,Security Manager,Rotating,
+ST000750,Michael,Thompson,michael.thompson@bluehorizon.com,212.528.1628x598,2020-10-02 04:53:26,Security,Security Supervisor,Night,
+ST000751,Matthew,Franklin,matthew.franklin@bluehorizon.com,001-061-980-7309x727,2020-01-15 16:00:29,Security,Security Manager,Night,
+ST000752,Ashlee,Bauer,ashlee.bauer@bluehorizon.com,3183575882,2021-04-04 14:37:06,Maintenance,Engineer,Rotating,"Massage Therapy License, First Aid"
+ST000753,Julie,Taylor,julie.taylor@bluehorizon.com,001-150-227-4347x01193,2024-10-05 15:07:04,Food & Beverage,Restaurant Manager,Afternoon,Food Safety
+ST000754,Joel,Kelly,joel.kelly@bluehorizon.com,769.042.7543x1818,2021-04-19 13:27:53,Security,Security Manager,Afternoon,Security License
+ST000755,Marc,Harris,marc.harris@bluehorizon.com,+1-854-560-2263x048,2020-09-21 10:35:01,Administration,Accountant,Rotating,Hospitality Management
+ST000756,Amy,Snyder,amy.snyder@bluehorizon.com,508-533-4278x9392,2020-11-15 19:01:31,Spa & Wellness,Massage Therapist,Afternoon,"First Aid, Massage Therapy License, CPR"
+ST000757,Aaron,Kim,aaron.kim@bluehorizon.com,138.725.5966x4650,2022-11-03 19:31:15,Food & Beverage,Bartender,Rotating,"Security License, Hospitality Management"
+ST000758,Erica,Underwood,erica.underwood@bluehorizon.com,104.298.2515x411,2023-03-30 01:07:23,Housekeeping,Housekeeper,Afternoon,
+ST000759,Amanda,Knight,amanda.knight@bluehorizon.com,788.565.7870,2023-04-01 06:48:37,Maintenance,Supervisor,Rotating,
+ST000760,Kim,Le,kim.le@bluehorizon.com,+1-256-479-1925x49626,2021-11-03 06:21:36,Food & Beverage,Bartender,Afternoon,
+ST000761,Patricia,Graham,patricia.graham@bluehorizon.com,+1-798-263-5355x42952,2022-11-10 19:51:35,Spa & Wellness,Spa Attendant,Rotating,"Security License, Food Safety"
+ST000762,Christopher,Johnson,christopher.johnson@bluehorizon.com,023-532-0153,2021-05-12 04:05:19,Housekeeping,Housekeeper,Afternoon,
+ST000763,Rebecca,Kane,rebecca.kane@bluehorizon.com,3489357655,2021-09-05 09:48:16,Administration,HR Specialist,Morning,Security License
+ST000764,Marvin,Dunn,marvin.dunn@bluehorizon.com,215-570-2619,2022-03-22 17:21:07,Food & Beverage,Chef,Rotating,"First Aid, Security License, Food Safety"
+ST000765,Gabriel,Lee,gabriel.lee@bluehorizon.com,(891)837-3149,2024-05-04 17:38:47,Front Desk,Guest Relations Manager,Rotating,
+ST000766,Tina,Gamble,tina.gamble@bluehorizon.com,998-015-5517x0097,2022-06-07 07:25:20,Maintenance,Maintenance Technician,Morning,
+ST000767,Jason,Watson,jason.watson@bluehorizon.com,983-695-9407x211,2020-11-12 20:52:04,Spa & Wellness,Massage Therapist,Morning,
+ST000768,Michael,Castaneda,michael.castaneda@bluehorizon.com,+1-321-226-2997,2023-12-27 12:12:39,Spa & Wellness,Massage Therapist,Morning,Food Safety
+ST000769,Jill,Nguyen,jill.nguyen@bluehorizon.com,001-236-710-8644x4879,2020-10-28 06:18:57,Security,Security Officer,Rotating,
+ST000770,Steven,Walker,steven.walker@bluehorizon.com,+1-141-774-9637x7738,2023-03-14 15:45:16,Food & Beverage,Kitchen Staff,Afternoon,
+ST000771,Susan,Jones,susan.jones@bluehorizon.com,+1-019-191-4250,2023-07-13 06:45:49,Front Desk,Receptionist,Rotating,
+ST000772,Mary,Odonnell,mary.odonnell@bluehorizon.com,770.104.3559x8851,2021-04-14 23:08:12,Security,Security Officer,Night,Sommelier
+ST000773,Sherri,Davis,sherri.davis@bluehorizon.com,333-353-8486x7043,2023-12-28 06:06:59,Food & Beverage,Bartender,Afternoon,
+ST000774,Amber,Higgins,amber.higgins@bluehorizon.com,064.084.4995x84141,2022-06-29 19:36:52,Front Desk,Receptionist,Night,
+ST000775,Sandra,Santiago,sandra.santiago@bluehorizon.com,990.862.2458x948,2024-01-05 06:23:09,Security,Security Supervisor,Morning,
+ST000776,Juan,Flores,juan.flores@bluehorizon.com,+1-215-867-1577x90799,2024-01-30 19:32:22,Housekeeping,Supervisor,Rotating,
+ST000777,Gregory,Carter,gregory.carter@bluehorizon.com,(581)646-1602,2023-02-08 07:54:12,Administration,Administrative Assistant,Afternoon,
+ST000778,John,Barnes,john.barnes@bluehorizon.com,339.619.5656,2023-07-06 01:06:06,Security,Security Supervisor,Rotating,
+ST000779,Dustin,Williams,dustin.williams@bluehorizon.com,1633911028,2023-05-21 21:57:53,Front Desk,Guest Relations Manager,Rotating,
+ST000780,Mallory,Ray,mallory.ray@bluehorizon.com,+1-990-253-5481x084,2022-07-07 20:13:23,Food & Beverage,Chef,Rotating,
+ST000781,Erica,Dunn,erica.dunn@bluehorizon.com,+1-486-212-5276x0876,2023-09-18 09:13:56,Administration,HR Specialist,Morning,"Hospitality Management, First Aid"
+ST000782,Jesse,Vargas,jesse.vargas@bluehorizon.com,490-931-4237x9677,2020-12-09 08:32:04,Administration,Administrative Assistant,Afternoon,"Sommelier, CPR, Food Safety"
+ST000783,Christopher,Adams,christopher.adams@bluehorizon.com,507-561-3124,2023-03-31 04:48:33,Housekeeping,Housekeeper,Afternoon,"First Aid, Massage Therapy License"
+ST000784,Kimberly,Grimes,kimberly.grimes@bluehorizon.com,+1-690-869-0338x1457,2020-02-23 07:23:32,Security,Security Officer,Night,
+ST000785,Kenneth,Hall,kenneth.hall@bluehorizon.com,001-502-232-0853,2020-11-17 02:10:01,Administration,HR Specialist,Morning,"Hospitality Management, Security License, First Aid"
+ST000786,Kimberly,Black,kimberly.black@bluehorizon.com,001-882-229-5252,2021-10-08 23:13:01,Front Desk,Concierge,Morning,"Food Safety, Hospitality Management"
+ST000787,Samantha,Bradshaw,samantha.bradshaw@bluehorizon.com,+1-836-568-9938x60076,2022-10-01 17:55:14,Administration,HR Specialist,Rotating,
+ST000788,Mark,Johnson,mark.johnson@bluehorizon.com,+1-604-200-5377x75773,2022-02-11 00:33:58,Administration,HR Specialist,Night,"CPR, Sommelier"
+ST000789,Eric,Stein,eric.stein@bluehorizon.com,3780246613,2021-04-25 02:42:56,Housekeeping,Supervisor,Afternoon,
+ST000790,Claudia,Jordan,claudia.jordan@bluehorizon.com,983-100-8304,2024-02-04 19:40:05,Food & Beverage,Restaurant Manager,Morning,
+ST000791,Timothy,Thompson,timothy.thompson@bluehorizon.com,036.299.4170,2020-10-03 03:43:44,Front Desk,Guest Relations Manager,Afternoon,
+ST000792,David,Mccarthy,david.mccarthy@bluehorizon.com,5271874383,2023-08-20 09:20:14,Security,Security Officer,Morning,Security License
+ST000793,Debra,Wilson,debra.wilson@bluehorizon.com,8210503032,2022-12-18 14:39:08,Front Desk,Guest Relations Manager,Rotating,
+ST000794,Courtney,Cunningham,courtney.cunningham@bluehorizon.com,+1-044-207-6854x629,2021-03-02 10:46:17,Spa & Wellness,Massage Therapist,Rotating,
+ST000795,Martha,Abbott,martha.abbott@bluehorizon.com,(866)974-4112,2020-01-30 09:49:13,Maintenance,Engineer,Morning,
+ST000796,Derrick,Stout,derrick.stout@bluehorizon.com,199.136.0003x9234,2023-07-22 08:42:42,Security,Security Manager,Night,
+ST000797,Valerie,Contreras,valerie.contreras@bluehorizon.com,511.527.3808,2022-06-21 05:05:00,Administration,Accountant,Night,
+ST000798,Anna,Leblanc,anna.leblanc@bluehorizon.com,(814)573-8407,2024-11-05 07:31:51,Spa & Wellness,Wellness Coach,Night,
+ST000799,Tammy,Higgins,tammy.higgins@bluehorizon.com,001-095-204-4529x96343,2020-07-23 13:12:53,Administration,HR Specialist,Rotating,
+ST000800,Catherine,Osborne,catherine.osborne@bluehorizon.com,(762)157-0222x31109,2022-10-25 09:32:14,Spa & Wellness,Spa Attendant,Afternoon,
+ST000801,Nicole,Griffin,nicole.griffin@bluehorizon.com,611.226.1199x937,2022-03-19 01:20:38,Food & Beverage,Chef,Rotating,
+ST000802,Barbara,Kelly,barbara.kelly@bluehorizon.com,771.611.7953x9583,2022-08-04 15:02:18,Housekeeping,Manager,Night,
+ST000803,Vincent,Henry,vincent.henry@bluehorizon.com,+1-924-367-8559x301,2021-11-28 14:53:12,Administration,Accountant,Rotating,
+ST000804,Patricia,Jackson,patricia.jackson@bluehorizon.com,001-631-067-0451x751,2023-04-27 05:00:49,Security,Security Officer,Morning,"Massage Therapy License, First Aid, Sommelier"
+ST000805,Debra,Friedman,debra.friedman@bluehorizon.com,+1-850-253-6309x094,2024-06-16 14:43:08,Administration,Accountant,Afternoon,
+ST000806,Kelly,Green,kelly.green@bluehorizon.com,(642)719-0195,2021-02-28 03:40:00,Housekeeping,Manager,Morning,
+ST000807,Thomas,Thompson,thomas.thompson@bluehorizon.com,+1-667-570-2595x5733,2023-03-12 15:30:05,Food & Beverage,Kitchen Staff,Night,
+ST000808,Mary,Rowe,mary.rowe@bluehorizon.com,815.742.8410x7829,2024-12-06 14:08:30,Housekeeping,Housekeeper,Afternoon,
+ST000809,Crystal,Holmes,crystal.holmes@bluehorizon.com,+1-281-951-8673x35538,2023-09-25 02:05:55,Security,Security Officer,Rotating,
+ST000810,John,Marshall,john.marshall@bluehorizon.com,001-496-754-7923x08114,2020-03-18 20:51:39,Security,Security Supervisor,Morning,
+ST000811,Edward,Francis,edward.francis@bluehorizon.com,185-819-5490x6133,2020-10-10 09:57:10,Food & Beverage,Restaurant Manager,Morning,
+ST000812,Keith,Schmidt,keith.schmidt@bluehorizon.com,3476406946,2021-09-14 06:47:04,Security,Security Supervisor,Rotating,
+ST000813,Christopher,Snyder,christopher.snyder@bluehorizon.com,+1-704-995-3318x5312,2023-06-28 07:02:59,Front Desk,Receptionist,Rotating,"Massage Therapy License, Sommelier, Security License"
+ST000814,Jasmine,Livingston,jasmine.livingston@bluehorizon.com,0126670393,2020-11-19 14:13:25,Maintenance,Engineer,Afternoon,CPR
+ST000815,Phillip,Dalton,phillip.dalton@bluehorizon.com,+1-520-934-4989x56001,2021-07-16 00:48:59,Food & Beverage,Bartender,Rotating,
+ST000816,Raven,Hoover,raven.hoover@bluehorizon.com,197-101-2698,2020-10-03 23:01:46,Spa & Wellness,Wellness Coach,Night,
+ST000817,Toni,Mccullough,toni.mccullough@bluehorizon.com,+1-149-791-1972x639,2023-08-22 02:52:03,Front Desk,Receptionist,Rotating,
+ST000818,Jasmine,Burns,jasmine.burns@bluehorizon.com,355.611.9731,2020-04-01 09:37:25,Spa & Wellness,Massage Therapist,Night,"Hospitality Management, Food Safety, Massage Therapy License"
+ST000819,Nathan,Caldwell,nathan.caldwell@bluehorizon.com,+1-367-385-4168x782,2024-08-22 08:12:05,Spa & Wellness,Massage Therapist,Morning,
+ST000820,Daniel,Reed,daniel.reed@bluehorizon.com,(844)946-1541,2020-09-16 04:33:04,Spa & Wellness,Wellness Coach,Night,
+ST000821,Elizabeth,Villanueva,elizabeth.villanueva@bluehorizon.com,+1-545-191-3324x8458,2024-10-02 18:03:01,Front Desk,Concierge,Morning,
+ST000822,Robert,Phelps,robert.phelps@bluehorizon.com,001-048-388-1001,2023-11-19 20:46:23,Spa & Wellness,Massage Therapist,Rotating,"Food Safety, Security License, CPR"
+ST000823,John,Rivera,john.rivera@bluehorizon.com,+1-582-521-9420x78799,2022-07-24 05:29:08,Food & Beverage,Chef,Morning,
+ST000824,Michael,Dixon,michael.dixon@bluehorizon.com,5188949310,2021-11-24 03:18:20,Housekeeping,Housekeeper,Rotating,
+ST000825,Patricia,Miller,patricia.miller@bluehorizon.com,769.201.3322,2020-02-27 11:51:30,Front Desk,Receptionist,Afternoon,"First Aid, Security License"
+ST000826,Sarah,Wall,sarah.wall@bluehorizon.com,+1-997-531-5720x84156,2021-12-10 06:57:54,Housekeeping,Supervisor,Afternoon,
+ST000827,Martin,Barron,martin.barron@bluehorizon.com,115.307.4322,2022-07-10 12:29:55,Food & Beverage,Restaurant Manager,Night,
+ST000828,David,Taylor,david.taylor@bluehorizon.com,(553)785-0858x422,2021-05-26 15:58:14,Housekeeping,Manager,Night,
+ST000829,Jeffrey,Robinson,jeffrey.robinson@bluehorizon.com,794-413-2815x804,2022-06-18 09:17:21,Food & Beverage,Chef,Night,
+ST000830,Robert,Fields,robert.fields@bluehorizon.com,001-443-764-8375x537,2024-07-24 20:58:18,Administration,Accountant,Night,
+ST000831,Michael,Mcdowell,michael.mcdowell@bluehorizon.com,5108615063,2020-06-07 17:00:08,Housekeeping,Supervisor,Afternoon,
+ST000832,Carmen,Harrell,carmen.harrell@bluehorizon.com,1567690632,2024-09-23 22:35:30,Spa & Wellness,Spa Attendant,Night,
+ST000833,Robert,Rice,robert.rice@bluehorizon.com,308-359-3036x966,2022-03-05 06:10:18,Spa & Wellness,Massage Therapist,Morning,
+ST000834,Allen,Schaefer,allen.schaefer@bluehorizon.com,001-601-828-3449,2020-03-26 14:44:14,Housekeeping,Supervisor,Rotating,"First Aid, Food Safety"
+ST000835,Brandi,Williams,brandi.williams@bluehorizon.com,598.471.7711,2022-01-13 22:40:07,Administration,Accountant,Afternoon,
+ST000836,Michael,Graves,michael.graves@bluehorizon.com,325.856.1578,2023-03-06 23:07:46,Maintenance,Maintenance Technician,Rotating,
+ST000837,Eugene,Barker,eugene.barker@bluehorizon.com,001-651-350-1390,2021-04-29 19:48:50,Front Desk,Receptionist,Morning,
+ST000838,Victoria,Banks,victoria.banks@bluehorizon.com,865-477-4308,2022-07-13 21:15:44,Housekeeping,Housekeeper,Night,
+ST000839,Joseph,Myers,joseph.myers@bluehorizon.com,818-670-9392,2023-02-14 00:03:04,Security,Security Officer,Afternoon,
+ST000840,Wendy,Reed,wendy.reed@bluehorizon.com,001-624-740-1647x02704,2024-06-07 03:18:53,Maintenance,Engineer,Morning,
+ST000841,Brian,Long,brian.long@bluehorizon.com,+1-751-186-2756x199,2021-02-04 12:58:29,Housekeeping,Supervisor,Morning,
+ST000842,Susan,Marks,susan.marks@bluehorizon.com,001-979-822-9562x816,2023-05-30 16:02:53,Administration,Administrative Assistant,Afternoon,
+ST000843,Kimberly,Jones,kimberly.jones@bluehorizon.com,102.205.8829x887,2023-11-05 06:31:48,Housekeeping,Supervisor,Rotating,
+ST000844,Robert,Hamilton,robert.hamilton@bluehorizon.com,+1-761-821-4573,2020-04-20 18:04:36,Maintenance,Supervisor,Night,
+ST000845,Stacy,Hernandez,stacy.hernandez@bluehorizon.com,110.556.1401x8610,2024-05-03 01:28:39,Housekeeping,Housekeeper,Morning,First Aid
+ST000846,Gregory,Harvey,gregory.harvey@bluehorizon.com,+1-683-306-2017,2022-08-30 01:41:17,Maintenance,Supervisor,Afternoon,"CPR, Security License, Hospitality Management"
+ST000847,Dustin,Patterson,dustin.patterson@bluehorizon.com,029-234-3087x46803,2024-07-26 08:20:10,Spa & Wellness,Wellness Coach,Morning,
+ST000848,Brandi,Gregory,brandi.gregory@bluehorizon.com,655.195.2079,2020-03-24 19:17:35,Administration,HR Specialist,Morning,
+ST000849,Darrell,Raymond,darrell.raymond@bluehorizon.com,121-267-3823x347,2024-07-30 04:20:29,Food & Beverage,Restaurant Manager,Morning,
+ST000850,Carl,Lee,carl.lee@bluehorizon.com,704-797-7028x56863,2020-10-23 00:47:21,Maintenance,Supervisor,Afternoon,
+ST000851,Barbara,Jackson,barbara.jackson@bluehorizon.com,148-748-2759x9910,2024-11-13 23:20:44,Administration,HR Specialist,Morning,
+ST000852,David,Flores,david.flores@bluehorizon.com,370-479-8850,2024-11-25 03:21:53,Maintenance,Supervisor,Morning,
+ST000853,Andrea,Jenkins,andrea.jenkins@bluehorizon.com,+1-975-000-6832x94013,2023-11-23 18:58:23,Front Desk,Guest Relations Manager,Morning,
+ST000854,Michael,Rodriguez,michael.rodriguez@bluehorizon.com,001-414-394-8622x871,2024-10-03 19:06:51,Food & Beverage,Server,Night,"Food Safety, Security License, CPR"
+ST000855,Ivan,Browning,ivan.browning@bluehorizon.com,(456)892-4798,2021-03-06 07:16:17,Maintenance,Supervisor,Rotating,
+ST000856,Gloria,Rojas,gloria.rojas@bluehorizon.com,001-384-230-2705x5496,2022-10-05 06:41:48,Maintenance,Maintenance Technician,Afternoon,
+ST000857,Robert,Jones,robert.jones@bluehorizon.com,898.504.1182x2286,2022-11-06 14:37:23,Front Desk,Receptionist,Morning,
+ST000858,Lisa,Poole,lisa.poole@bluehorizon.com,(741)347-7701,2024-12-03 07:26:36,Spa & Wellness,Wellness Coach,Rotating,
+ST000859,Christina,Morton,christina.morton@bluehorizon.com,001-310-554-8646x83217,2024-05-10 03:57:53,Front Desk,Guest Relations Manager,Afternoon,Security License
+ST000860,Heather,Campbell,heather.campbell@bluehorizon.com,(383)048-6068,2020-06-13 21:46:11,Front Desk,Guest Relations Manager,Afternoon,
+ST000861,Seth,Owen,seth.owen@bluehorizon.com,444.119.4649,2021-06-08 01:17:02,Front Desk,Concierge,Morning,
+ST000862,Jeremy,Cain,jeremy.cain@bluehorizon.com,001-855-848-5803x931,2022-07-28 21:47:15,Front Desk,Concierge,Rotating,"CPR, Food Safety"
+ST000863,Dana,Ewing,dana.ewing@bluehorizon.com,2231240565,2020-10-02 13:37:19,Front Desk,Receptionist,Night,
+ST000864,Jacob,Rose,jacob.rose@bluehorizon.com,383.951.4936x42549,2022-04-03 23:50:43,Maintenance,Engineer,Night,
+ST000865,Sheila,Lewis,sheila.lewis@bluehorizon.com,+1-072-007-1003x3215,2022-10-08 22:09:29,Security,Security Manager,Afternoon,Food Safety
+ST000866,Daniel,Ramirez,daniel.ramirez@bluehorizon.com,972.659.8767,2021-10-15 05:52:44,Security,Security Officer,Morning,"First Aid, Security License, CPR"
+ST000867,Craig,Conway,craig.conway@bluehorizon.com,325-196-8516x997,2021-10-22 02:48:11,Spa & Wellness,Spa Attendant,Rotating,
+ST000868,Todd,Weaver,todd.weaver@bluehorizon.com,(888)006-2425,2023-03-11 05:58:15,Food & Beverage,Restaurant Manager,Night,"First Aid, Sommelier, Hospitality Management"
+ST000869,Christopher,Flores,christopher.flores@bluehorizon.com,995-352-6678x12609,2022-09-21 01:51:10,Front Desk,Concierge,Rotating,
+ST000870,Richard,Bruce,richard.bruce@bluehorizon.com,219-637-8798x0401,2022-12-01 23:54:16,Spa & Wellness,Spa Attendant,Night,"Food Safety, Hospitality Management, Sommelier"
+ST000871,Michael,Stewart,michael.stewart@bluehorizon.com,+1-647-399-6361x5987,2023-03-25 06:50:57,Maintenance,Engineer,Rotating,"Food Safety, Sommelier"
+ST000872,Ryan,Ward,ryan.ward@bluehorizon.com,+1-746-712-6627,2024-07-14 12:40:08,Front Desk,Receptionist,Night,"Sommelier, First Aid"
+ST000873,John,Day,john.day@bluehorizon.com,440.525.3040x57708,2020-04-20 06:51:36,Housekeeping,Manager,Rotating,
+ST000874,Tracy,Murphy,tracy.murphy@bluehorizon.com,398.463.2777x6115,2024-04-12 23:06:40,Housekeeping,Housekeeper,Night,"Security License, CPR"
+ST000875,Timothy,Baker,timothy.baker@bluehorizon.com,(473)777-7710x580,2023-07-15 11:43:06,Front Desk,Receptionist,Morning,
+ST000876,Christian,Mcfarland,christian.mcfarland@bluehorizon.com,204-077-8801,2021-03-24 10:25:49,Security,Security Supervisor,Night,"Hospitality Management, Food Safety, Security License"
+ST000877,Richard,Powell,richard.powell@bluehorizon.com,650.028.0045,2023-08-20 10:26:06,Security,Security Officer,Night,
+ST000878,Angel,Romero,angel.romero@bluehorizon.com,001-197-910-0121x688,2024-09-06 11:27:42,Administration,HR Specialist,Morning,"Sommelier, First Aid, Hospitality Management"
+ST000879,Bradley,Robinson,bradley.robinson@bluehorizon.com,001-551-256-4074x755,2023-06-30 20:44:05,Spa & Wellness,Spa Attendant,Rotating,
+ST000880,Lauren,Smith,lauren.smith@bluehorizon.com,(346)469-4874,2021-02-28 10:11:25,Maintenance,Supervisor,Morning,
+ST000881,Chelsea,Johnson,chelsea.johnson@bluehorizon.com,(677)200-6934,2024-12-15 00:07:16,Security,Security Manager,Night,
+ST000882,Cynthia,Russell,cynthia.russell@bluehorizon.com,153.720.6456x18345,2021-12-12 14:17:36,Security,Security Manager,Night,CPR
+ST000883,Tom,Davis,tom.davis@bluehorizon.com,996-382-4116,2021-12-31 19:54:36,Spa & Wellness,Massage Therapist,Rotating,
+ST000884,Jeffrey,Horton,jeffrey.horton@bluehorizon.com,001-156-129-1050x08825,2023-07-16 14:33:20,Security,Security Supervisor,Night,
+ST000885,James,Hill,james.hill@bluehorizon.com,2469024144,2023-05-07 03:42:28,Housekeeping,Housekeeper,Morning,
+ST000886,Melissa,Kennedy,melissa.kennedy@bluehorizon.com,(910)100-7455x881,2020-08-13 15:35:02,Spa & Wellness,Massage Therapist,Morning,
+ST000887,Katherine,Robinson,katherine.robinson@bluehorizon.com,281.859.8914x53064,2023-03-20 09:57:01,Housekeeping,Supervisor,Afternoon,
+ST000888,April,Baker,april.baker@bluehorizon.com,+1-994-933-0546x7301,2024-06-13 07:56:41,Security,Security Supervisor,Night,
+ST000889,Joseph,Thomas,joseph.thomas@bluehorizon.com,584.202.5160,2021-08-01 03:48:00,Food & Beverage,Chef,Rotating,
+ST000890,Tracey,Boyd,tracey.boyd@bluehorizon.com,(125)873-1507x8803,2022-05-20 17:32:27,Maintenance,Engineer,Night,
+ST000891,Jeremy,Allen,jeremy.allen@bluehorizon.com,(510)154-9289,2023-10-10 22:31:57,Administration,HR Specialist,Morning,
+ST000892,Zachary,Ramos,zachary.ramos@bluehorizon.com,203.246.9156,2021-07-31 02:47:22,Administration,Administrative Assistant,Rotating,
+ST000893,Michael,Parks,michael.parks@bluehorizon.com,+1-788-390-2745x2813,2021-07-30 13:52:19,Housekeeping,Manager,Morning,"Food Safety, Massage Therapy License, First Aid"
+ST000894,Allen,Conrad,allen.conrad@bluehorizon.com,(251)991-7384x1010,2024-10-24 06:02:56,Security,Security Supervisor,Afternoon,
+ST000895,Brittany,Zavala,brittany.zavala@bluehorizon.com,050.796.3518,2022-04-28 23:39:05,Spa & Wellness,Massage Therapist,Morning,
+ST000896,Barbara,Ferrell,barbara.ferrell@bluehorizon.com,568.608.9332x2073,2021-06-26 04:47:45,Housekeeping,Housekeeper,Morning,
+ST000897,Debra,Jones,debra.jones@bluehorizon.com,486-707-7205,2022-03-03 11:01:54,Housekeeping,Housekeeper,Rotating,
+ST000898,Tyrone,Allen,tyrone.allen@bluehorizon.com,7147366535,2022-11-16 02:59:58,Spa & Wellness,Wellness Coach,Rotating,
+ST000899,Ryan,Perry,ryan.perry@bluehorizon.com,6911881658,2021-07-04 12:03:16,Security,Security Manager,Morning,"Security License, Sommelier"
+ST000900,Erin,Vega,erin.vega@bluehorizon.com,9003508522,2021-09-30 21:52:59,Administration,HR Specialist,Afternoon,
+ST000901,Michael,Peters,michael.peters@bluehorizon.com,001-075-686-6056x89057,2022-03-03 20:20:29,Spa & Wellness,Massage Therapist,Night,Security License
+ST000902,Colin,Contreras,colin.contreras@bluehorizon.com,095.063.6425x3495,2023-03-21 01:02:51,Food & Beverage,Chef,Morning,"First Aid, Security License, CPR"
+ST000903,Steven,Kelley,steven.kelley@bluehorizon.com,001-839-815-7615x2792,2024-05-30 10:51:48,Front Desk,Guest Relations Manager,Night,
+ST000904,Alexandria,Martin,alexandria.martin@bluehorizon.com,382.961.9921x74610,2022-08-29 18:56:50,Administration,Administrative Assistant,Night,
+ST000905,Xavier,Harrington,xavier.harrington@bluehorizon.com,001-461-958-2634x3727,2020-12-13 10:13:18,Spa & Wellness,Massage Therapist,Afternoon,
+ST000906,Timothy,Porter,timothy.porter@bluehorizon.com,001-638-663-5330x203,2020-07-30 00:40:23,Maintenance,Engineer,Morning,
+ST000907,Christopher,Bishop,christopher.bishop@bluehorizon.com,+1-702-864-8474x71302,2024-10-03 04:36:38,Food & Beverage,Bartender,Rotating,
+ST000908,Ann,Banks,ann.banks@bluehorizon.com,653.543.3715x111,2023-01-22 04:19:51,Housekeeping,Manager,Afternoon,
+ST000909,Nicholas,Richards,nicholas.richards@bluehorizon.com,622.380.2951,2020-03-19 09:41:50,Housekeeping,Housekeeper,Afternoon,"Sommelier, Security License"
+ST000910,Shannon,Meza,shannon.meza@bluehorizon.com,+1-664-647-2836x637,2022-08-19 10:19:03,Maintenance,Supervisor,Morning,
+ST000911,Douglas,Harris,douglas.harris@bluehorizon.com,+1-083-027-2807x80333,2020-01-05 20:23:45,Front Desk,Receptionist,Afternoon,
+ST000912,Steven,Andrews,steven.andrews@bluehorizon.com,(353)405-3024x1870,2023-01-23 18:07:27,Maintenance,Supervisor,Night,Hospitality Management
+ST000913,Michael,Moore,michael.moore@bluehorizon.com,(566)759-2340,2024-07-30 15:34:23,Security,Security Supervisor,Rotating,"CPR, Sommelier, First Aid"
+ST000914,Angela,Andrews,angela.andrews@bluehorizon.com,6659048748,2022-02-26 23:05:17,Food & Beverage,Restaurant Manager,Rotating,
+ST000915,Angela,Wilson,angela.wilson@bluehorizon.com,136.704.8719,2024-03-23 03:55:33,Food & Beverage,Bartender,Morning,
+ST000916,Benjamin,Castaneda,benjamin.castaneda@bluehorizon.com,+1-717-691-7096x054,2020-08-28 22:53:04,Maintenance,Supervisor,Night,Security License
+ST000917,Claudia,Santana,claudia.santana@bluehorizon.com,001-677-752-9021x58338,2022-04-12 05:13:42,Front Desk,Concierge,Afternoon,
+ST000918,Cynthia,Taylor,cynthia.taylor@bluehorizon.com,685.456.1145x19805,2023-11-02 02:17:33,Spa & Wellness,Spa Attendant,Night,First Aid
+ST000919,Michelle,Johnson,michelle.johnson@bluehorizon.com,733-331-4617,2021-10-27 22:25:56,Food & Beverage,Kitchen Staff,Night,
+ST000920,Joy,Graham,joy.graham@bluehorizon.com,001-804-186-4313x5183,2022-01-31 00:12:28,Administration,Accountant,Rotating,
+ST000921,Jamie,Charles,jamie.charles@bluehorizon.com,663-113-8329x05132,2022-10-26 18:15:01,Administration,Administrative Assistant,Morning,
+ST000922,Anthony,Cantu,anthony.cantu@bluehorizon.com,+1-503-030-0120x1957,2021-04-20 21:27:41,Maintenance,Maintenance Technician,Morning,
+ST000923,Victoria,Page,victoria.page@bluehorizon.com,(137)600-5157x85133,2021-02-28 17:19:32,Food & Beverage,Chef,Morning,
+ST000924,Daniel,Moyer,daniel.moyer@bluehorizon.com,001-246-633-5359x6527,2024-02-07 05:05:58,Administration,Administrative Assistant,Rotating,
+ST000925,Jeremiah,Flowers,jeremiah.flowers@bluehorizon.com,+1-439-669-9230,2022-09-14 09:31:48,Administration,HR Specialist,Night,"Security License, First Aid"
+ST000926,Megan,Wagner,megan.wagner@bluehorizon.com,6926223077,2020-12-01 10:56:32,Front Desk,Receptionist,Night,
+ST000927,Allison,Richard,allison.richard@bluehorizon.com,(522)523-8387x520,2022-03-27 03:38:19,Spa & Wellness,Wellness Coach,Night,
+ST000928,Leah,Flores,leah.flores@bluehorizon.com,+1-997-755-7966,2022-09-04 05:48:31,Spa & Wellness,Massage Therapist,Rotating,
+ST000929,Daniel,Warren,daniel.warren@bluehorizon.com,404-736-2341,2023-05-01 05:45:25,Spa & Wellness,Wellness Coach,Rotating,Sommelier
+ST000930,Aaron,Estrada,aaron.estrada@bluehorizon.com,+1-538-640-6732x916,2023-07-04 06:20:06,Food & Beverage,Chef,Afternoon,
+ST000931,Kurt,Collins,kurt.collins@bluehorizon.com,5350686419,2023-08-31 21:28:55,Administration,Accountant,Night,
+ST000932,Emily,Dixon,emily.dixon@bluehorizon.com,(668)307-4005x0303,2022-09-20 17:30:54,Maintenance,Maintenance Technician,Afternoon,
+ST000933,Sean,Davis,sean.davis@bluehorizon.com,870-559-9839x505,2021-02-09 16:59:21,Front Desk,Receptionist,Night,
+ST000934,Shelby,Shields,shelby.shields@bluehorizon.com,174-445-2296,2021-10-10 10:31:39,Security,Security Supervisor,Night,"Security License, Massage Therapy License"
+ST000935,Andrew,Farley,andrew.farley@bluehorizon.com,(423)333-0565,2021-12-06 07:00:39,Front Desk,Concierge,Morning,"Sommelier, Massage Therapy License"
+ST000936,Keith,Rice,keith.rice@bluehorizon.com,444-849-9992,2021-11-13 11:00:02,Security,Security Manager,Rotating,
+ST000937,Amanda,Holder,amanda.holder@bluehorizon.com,940.546.6837x56577,2024-06-26 04:20:32,Security,Security Manager,Afternoon,
+ST000938,Kenneth,Lowery,kenneth.lowery@bluehorizon.com,+1-099-619-4857x6287,2024-03-09 23:30:31,Security,Security Manager,Afternoon,
+ST000939,Lauren,Cox,lauren.cox@bluehorizon.com,(420)623-2232x13800,2023-04-08 14:47:22,Front Desk,Guest Relations Manager,Afternoon,
+ST000940,Richard,Jennings,richard.jennings@bluehorizon.com,7388707828,2023-10-14 01:30:57,Food & Beverage,Bartender,Rotating,"Massage Therapy License, Hospitality Management"
+ST000941,Daniel,Aguilar,daniel.aguilar@bluehorizon.com,051-574-3778,2024-09-07 18:27:30,Spa & Wellness,Wellness Coach,Morning,
+ST000942,Kathleen,Campbell,kathleen.campbell@bluehorizon.com,(991)957-0990x6556,2024-06-03 18:57:26,Front Desk,Guest Relations Manager,Night,
+ST000943,Mary,Fuller,mary.fuller@bluehorizon.com,645.455.9836x48575,2023-09-01 06:44:38,Administration,HR Specialist,Afternoon,
+ST000944,Ashley,Holder,ashley.holder@bluehorizon.com,+1-892-404-6793,2022-08-04 07:50:52,Security,Security Supervisor,Afternoon,
+ST000945,Sarah,Miller,sarah.miller@bluehorizon.com,448-671-0996x0537,2020-04-04 02:22:10,Housekeeping,Supervisor,Morning,
+ST000946,Thomas,Bailey,thomas.bailey@bluehorizon.com,3620845447,2022-12-26 11:03:02,Security,Security Officer,Rotating,
+ST000947,Katherine,Fuller,katherine.fuller@bluehorizon.com,217-547-9740x401,2022-07-27 19:29:53,Food & Beverage,Server,Night,
+ST000948,Molly,Allen,molly.allen@bluehorizon.com,001-400-207-3870,2024-05-04 13:18:08,Spa & Wellness,Spa Attendant,Afternoon,
+ST000949,Shannon,Martinez,shannon.martinez@bluehorizon.com,(357)964-4257,2024-06-24 00:01:51,Front Desk,Concierge,Afternoon,
+ST000950,Gail,Murphy,gail.murphy@bluehorizon.com,001-062-177-9057x1428,2024-03-20 13:32:15,Security,Security Supervisor,Morning,
+ST000951,Jill,Munoz,jill.munoz@bluehorizon.com,001-056-795-9650x55659,2020-02-12 14:03:16,Spa & Wellness,Spa Attendant,Afternoon,
+ST000952,Sarah,Duncan,sarah.duncan@bluehorizon.com,001-408-685-9032x83670,2021-04-26 16:31:23,Front Desk,Guest Relations Manager,Morning,Food Safety
+ST000953,Angela,Morrison,angela.morrison@bluehorizon.com,001-530-031-0543x682,2020-12-05 16:38:10,Security,Security Manager,Rotating,First Aid
+ST000954,Patrick,Davis,patrick.davis@bluehorizon.com,001-468-047-1873x592,2020-05-01 07:08:18,Maintenance,Engineer,Afternoon,"Security License, Massage Therapy License"
+ST000955,Tina,Shepherd,tina.shepherd@bluehorizon.com,+1-666-028-0520x7728,2024-07-15 10:34:02,Food & Beverage,Kitchen Staff,Afternoon,
+ST000956,Derrick,Reyes,derrick.reyes@bluehorizon.com,536-641-5874,2024-02-21 11:07:55,Spa & Wellness,Spa Attendant,Rotating,
+ST000957,Paula,Bowers,paula.bowers@bluehorizon.com,+1-149-560-6067x4933,2024-01-09 01:32:45,Food & Beverage,Restaurant Manager,Rotating,
+ST000958,Shelby,Good,shelby.good@bluehorizon.com,(746)386-2256x339,2024-07-03 01:46:50,Front Desk,Concierge,Morning,
+ST000959,Brian,Huerta,brian.huerta@bluehorizon.com,(404)801-3076x099,2022-04-14 04:40:05,Food & Beverage,Restaurant Manager,Afternoon,
+ST000960,Ryan,Holt,ryan.holt@bluehorizon.com,492-780-1626,2020-06-17 21:45:58,Security,Security Supervisor,Morning,
+ST000961,Stephanie,Nichols,stephanie.nichols@bluehorizon.com,795.368.4713x77502,2021-01-16 04:14:00,Security,Security Officer,Afternoon,"CPR, Security License"
+ST000962,Douglas,Pacheco,douglas.pacheco@bluehorizon.com,4079979997,2021-07-11 11:58:27,Spa & Wellness,Spa Attendant,Morning,"Food Safety, Hospitality Management"
+ST000963,Jamie,Simpson,jamie.simpson@bluehorizon.com,801-470-5043x22691,2021-06-22 11:34:02,Maintenance,Supervisor,Afternoon,
+ST000964,Sheri,Stevenson,sheri.stevenson@bluehorizon.com,+1-336-039-5712,2023-09-22 12:05:07,Security,Security Officer,Afternoon,
+ST000965,Karen,Shelton,karen.shelton@bluehorizon.com,(060)125-4127,2021-08-03 06:14:47,Administration,HR Specialist,Morning,"Hospitality Management, First Aid"
+ST000966,Spencer,Smith,spencer.smith@bluehorizon.com,001-093-309-8544,2024-06-19 09:01:15,Front Desk,Receptionist,Night,
+ST000967,Antonio,Petersen,antonio.petersen@bluehorizon.com,176-420-6346,2024-11-07 14:09:58,Front Desk,Guest Relations Manager,Night,
+ST000968,Robert,Murphy,robert.murphy@bluehorizon.com,033.574.4537x8317,2024-10-14 21:29:42,Administration,Accountant,Rotating,
+ST000969,Elizabeth,Alexander,elizabeth.alexander@bluehorizon.com,6552526605,2021-07-04 00:36:55,Front Desk,Receptionist,Rotating,
+ST000970,Desiree,Miller,desiree.miller@bluehorizon.com,+1-558-462-9145,2021-03-04 16:01:53,Security,Security Supervisor,Morning,
+ST000971,Brian,Mathews,brian.mathews@bluehorizon.com,611.024.4318,2020-12-03 05:39:30,Front Desk,Guest Relations Manager,Rotating,Food Safety
+ST000972,Alexander,Merritt,alexander.merritt@bluehorizon.com,739-397-0482,2023-03-29 19:45:16,Front Desk,Concierge,Rotating,
+ST000973,Brett,Walls,brett.walls@bluehorizon.com,+1-097-356-3804x82142,2020-05-18 04:18:51,Spa & Wellness,Spa Attendant,Morning,Hospitality Management
+ST000974,Austin,Freeman,austin.freeman@bluehorizon.com,081-719-8601,2020-09-09 14:42:10,Security,Security Officer,Night,
+ST000975,Tina,Rowland,tina.rowland@bluehorizon.com,322-476-6397x62391,2024-09-07 16:47:42,Spa & Wellness,Wellness Coach,Night,
+ST000976,Matthew,Munoz,matthew.munoz@bluehorizon.com,+1-733-539-8342x5574,2024-03-03 09:43:12,Maintenance,Maintenance Technician,Morning,
+ST000977,Bobby,Ferguson,bobby.ferguson@bluehorizon.com,034.386.9550,2024-03-13 16:41:19,Security,Security Supervisor,Afternoon,
+ST000978,Ronald,Keith,ronald.keith@bluehorizon.com,(101)993-6479x2794,2021-04-28 19:42:32,Maintenance,Maintenance Technician,Morning,CPR
+ST000979,Lisa,Smith,lisa.smith@bluehorizon.com,001-179-867-8403x5828,2024-08-04 12:11:13,Administration,Administrative Assistant,Rotating,"First Aid, Security License"
+ST000980,Anthony,Taylor,anthony.taylor@bluehorizon.com,+1-765-277-3524x7751,2022-11-23 03:57:59,Housekeeping,Supervisor,Afternoon,
+ST000981,Erika,Gardner,erika.gardner@bluehorizon.com,577-307-1435,2021-06-25 00:31:08,Food & Beverage,Restaurant Manager,Afternoon,Sommelier
+ST000982,Stephen,Long,stephen.long@bluehorizon.com,331-921-0479x62227,2023-10-02 09:36:23,Administration,Accountant,Night,
+ST000983,Ronald,Chase,ronald.chase@bluehorizon.com,003-966-5769x770,2024-08-26 09:38:22,Food & Beverage,Bartender,Rotating,CPR
+ST000984,Lisa,Evans,lisa.evans@bluehorizon.com,949.114.2959x793,2020-06-27 08:30:38,Administration,Accountant,Night,"First Aid, Massage Therapy License"
+ST000985,Donna,Webb,donna.webb@bluehorizon.com,(198)207-4827,2021-05-24 16:14:55,Security,Security Manager,Afternoon,Massage Therapy License
+ST000986,David,Brown,david.brown@bluehorizon.com,+1-575-501-4999x5963,2022-01-13 20:05:50,Food & Beverage,Server,Morning,
+ST000987,Jamie,Woods,jamie.woods@bluehorizon.com,782-798-9505,2022-08-08 22:55:42,Front Desk,Concierge,Night,
+ST000988,Levi,Lucas,levi.lucas@bluehorizon.com,096.688.3118,2021-06-30 21:26:36,Food & Beverage,Chef,Rotating,First Aid
+ST000989,Larry,Schultz,larry.schultz@bluehorizon.com,(097)310-8960,2023-08-08 00:42:51,Housekeeping,Manager,Afternoon,CPR
+ST000990,Lauren,Phillips,lauren.phillips@bluehorizon.com,+1-675-620-3181x4537,2022-06-18 06:20:37,Maintenance,Engineer,Morning,
+ST000991,Anne,Berry,anne.berry@bluehorizon.com,001-140-090-8306x4139,2021-11-11 04:05:42,Administration,Accountant,Night,
+ST000992,Ashley,Lee,ashley.lee@bluehorizon.com,191-667-4710x786,2021-04-10 20:16:41,Maintenance,Engineer,Night,
+ST000993,Austin,Mason,austin.mason@bluehorizon.com,207.368.7912,2021-06-28 20:30:41,Food & Beverage,Restaurant Manager,Afternoon,
+ST000994,Alan,Baker,alan.baker@bluehorizon.com,+1-525-095-1940x13706,2021-02-20 18:19:22,Maintenance,Maintenance Technician,Afternoon,"Security License, First Aid"
+ST000995,Michaela,Hall,michaela.hall@bluehorizon.com,022-993-9868,2021-11-09 22:17:19,Spa & Wellness,Wellness Coach,Rotating,
+ST000996,James,Stevenson,james.stevenson@bluehorizon.com,966.401.8159x25687,2021-07-19 00:21:21,Front Desk,Receptionist,Rotating,
+ST000997,John,Walters,john.walters@bluehorizon.com,+1-296-295-3179x51567,2021-08-19 03:48:11,Administration,HR Specialist,Morning,
+ST000998,Antonio,Burgess,antonio.burgess@bluehorizon.com,(602)807-4185x48168,2024-08-14 07:30:37,Front Desk,Receptionist,Night,First Aid
+ST000999,Robert,Barrett,robert.barrett@bluehorizon.com,(836)075-9733,2024-01-08 22:20:42,Housekeeping,Supervisor,Rotating,
+ST001000,Tammy,Chen,tammy.chen@bluehorizon.com,001-964-223-5297x880,2024-01-22 07:06:05,Administration,Accountant,Rotating,

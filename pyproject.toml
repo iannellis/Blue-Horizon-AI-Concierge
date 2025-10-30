@@ -14,7 +14,8 @@ dependencies = [
     "llama-index-embeddings-huggingface (>=0.6.1,<0.7.0)",
     "llama-index-llms-openai (>=0.6.6,<0.7.0)",
     "pydantic-ai[examples] (>=1.8.0,<2.0.0)",
-    "python-dotenv (>=1.2.1,<2.0.0)"
+    "python-dotenv (>=1.2.1,<2.0.0)",
+    "ipykernel (>=7.1.0,<8.0.0)"
 ]
 
 

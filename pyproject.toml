@@ -15,7 +15,8 @@ dependencies = [
     "llama-index-llms-openai (>=0.6.6,<0.7.0)",
     "pydantic-ai[examples] (>=1.8.0,<2.0.0)",
     "python-dotenv (>=1.2.1,<2.0.0)",
-    "ipykernel (>=7.1.0,<8.0.0)"
+    "ipykernel (>=7.1.0,<8.0.0)",
+    "psycopg[binary] (>=3.2.12,<4.0.0)"
 ]
 
 

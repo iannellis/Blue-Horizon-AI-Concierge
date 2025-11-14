@@ -1180,14 +1180,14 @@ test-randomorder = ["pytest-randomly"]
 
 [[package]]
 name = "cyclopts"
-version = "4.2.3"
+version = "4.2.4"
 description = "Intuitive, easy CLIs based on type hints."
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "cyclopts-4.2.3-py3-none-any.whl", hash = "sha256:4c2bc17af50e1a958f758cdc541f0a28b0eccf3f718e26be85b712c54ac0ef0b"},
-    {file = "cyclopts-4.2.3.tar.gz", hash = "sha256:5949d5d0fc8f269547bdc507985d4d973cf6794ab781bf0600d5994eda29a471"},
+    {file = "cyclopts-4.2.4-py3-none-any.whl", hash = "sha256:41054f5e921a4f2b8ab9c839f12a274dec06a19560dc4898ce37cb775ca68ca4"},
+    {file = "cyclopts-4.2.4.tar.gz", hash = "sha256:27e1d175df2889aba72cd960c4e34c8b0a501c5b0161e849c72d9fee5903ecbb"},
 ]
 
 [package.dependencies]
@@ -2560,6 +2560,28 @@ files = [
 pygments = "*"
 
 [[package]]
+name = "ipywidgets"
+version = "8.1.8"
+description = "Jupyter interactive widgets"
+optional = false
+python-versions = ">=3.7"
+groups = ["main"]
+files = [
+    {file = "ipywidgets-8.1.8-py3-none-any.whl", hash = "sha256:ecaca67aed704a338f88f67b1181b58f821ab5dc89c1f0f5ef99db43c1c2921e"},
+    {file = "ipywidgets-8.1.8.tar.gz", hash = "sha256:61f969306b95f85fba6b6986b7fe45d73124d1d9e3023a8068710d47a22ea668"},
+]
+
+[package.dependencies]
+comm = ">=0.1.3"
+ipython = ">=6.1.0"
+jupyterlab_widgets = ">=3.0.15,<3.1.0"
+traitlets = ">=4.3.1"
+widgetsnbextension = ">=4.0.14,<4.1.0"
+
+[package.extras]
+test = ["ipykernel", "jsonschema", "pytest (>=3.6.0)", "pytest-cov", "pytz"]
+
+[[package]]
 name = "jaraco-classes"
 version = "3.4.0"
 description = "Utility functions for Python class constructs"
@@ -2905,6 +2927,18 @@ traitlets = ">=5.3"
 [package.extras]
 docs = ["intersphinx-registry", "myst-parser", "pydata-sphinx-theme", "sphinx-autodoc-typehints", "sphinxcontrib-spelling", "traitlets"]
 test = ["ipykernel", "pre-commit", "pytest (<9)", "pytest-cov", "pytest-timeout"]
+
+[[package]]
+name = "jupyterlab-widgets"
+version = "3.0.16"
+description = "Jupyter interactive widgets for JupyterLab"
+optional = false
+python-versions = ">=3.7"
+groups = ["main"]
+files = [
+    {file = "jupyterlab_widgets-3.0.16-py3-none-any.whl", hash = "sha256:45fa36d9c6422cf2559198e4db481aa243c7a32d9926b500781c830c80f7ecf8"},
+    {file = "jupyterlab_widgets-3.0.16.tar.gz", hash = "sha256:423da05071d55cf27a9e602216d35a3a65a3e41cdf9c5d3b643b814ce38c19e0"},
+]
 
 [[package]]
 name = "keyring"
@@ -7860,6 +7894,18 @@ files = [
 ]
 
 [[package]]
+name = "widgetsnbextension"
+version = "4.0.15"
+description = "Jupyter interactive widgets for Jupyter Notebook"
+optional = false
+python-versions = ">=3.7"
+groups = ["main"]
+files = [
+    {file = "widgetsnbextension-4.0.15-py3-none-any.whl", hash = "sha256:8156704e4346a571d9ce73b84bee86a29906c9abfd7223b7228a28899ccf3366"},
+    {file = "widgetsnbextension-4.0.15.tar.gz", hash = "sha256:de8610639996f1567952d763a5a41af8af37f2575a41f9852a38f947eb82a3b9"},
+]
+
+[[package]]
 name = "wrapt"
 version = "1.17.3"
 description = "Module for decorators, wrappers and monkey patching."
@@ -8268,4 +8314,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.13,<3.14"
-content-hash = "87649a4394d66cde2de75c387dcc26784aeab0c47f963b0a55bdec9f6894a6d2"
+content-hash = "8f26d7b18a7468d6015bf1009309f72509aeaa3abb0df33e7d8532a49f3f01a2"

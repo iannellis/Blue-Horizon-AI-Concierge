@@ -1,0 +1,1 @@
+Database user with limited permissions

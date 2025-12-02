@@ -1,1 +1,3 @@
 Database user with limited permissions
+Other vector database that works with LlamaIndex auto-retriever
+Async retriever

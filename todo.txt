@@ -2,3 +2,4 @@ Database user with limited permissions
 Other vector database that works with LlamaIndex auto-retriever
 Async retriever
 Once the LLM asked which hotel the user was referring to when it should have called the retriever.
+Add note at bottom of screen that the bot may only be returning limited results and there may be more available.

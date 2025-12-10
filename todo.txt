@@ -5,3 +5,5 @@ Once the LLM asked which hotel the user was referring to when it should have cal
 Add note at bottom of screen that the bot may only be returning limited results and there may be more available.
 Add multiple user support
 Other vector database that works with LlamaIndex auto-retriever
+Setup config file with similarity_top_k, gpt_model (from info_agent.py)
+Setup config file with gpt_model (from room_agent.py)

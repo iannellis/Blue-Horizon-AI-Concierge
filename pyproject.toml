@@ -1,5 +1,5 @@
 [project]
-name = "blue_horizon_ai_concierge"
+name = "blue-horizon"
 version = "0.1.0"
 description = ""
 authors = [
@@ -33,6 +33,3 @@ dev = [
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
-
-[tool.poetry]
-package-mode = false

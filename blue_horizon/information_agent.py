@@ -10,7 +10,7 @@ from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.redis import RedisVectorStore
 from redisvl.schema import IndexSchema
 
-load_dotenv("../.env")
+load_dotenv()
 
 Settings.embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
 

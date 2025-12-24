@@ -79,6 +79,7 @@ def query_hotel_info(query: str) -> list[dict]:
 
     Returns:
         list[dict]: The retrieved results and their associated metadata
+
     """
     retrieved_nodes = retriever.retrieve(query)
 

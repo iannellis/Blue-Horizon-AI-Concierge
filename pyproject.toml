@@ -18,7 +18,8 @@ dependencies = [
     "langchain-community (>=0.4.1,<0.5.0)",
     "langchain-openai (>=1.1.0,<2.0.0)",
     "langgraph (>=1.0.4,<2.0.0)",
-    "pydantic-settings (>=2.12.0,<3.0.0)"
+    "pydantic-settings (>=2.12.0,<3.0.0)",
+    "llama-index-embeddings-google-genai (>=0.3.1,<0.4.0)",
 ]
 
 [dependency-groups]

@@ -8,3 +8,4 @@ Other vector database that works with LlamaIndex auto-retriever
 Setup config file with similarity_top_k, gpt_model (from info_agent.py)
 Setup config file with gpt_model (from room_agent.py)
 Test GPT-5.2 with reasoning.effort="none"
+See if can have SQL check availability and book a room in a single transaction.

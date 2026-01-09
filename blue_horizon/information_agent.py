@@ -75,9 +75,9 @@ schema = IndexSchema.from_dict(
     },
 )
 
-faq_vector_store = RedisVectorStore(schema=schema, redis_client=redis_client, overwrite=True)
+faq_vector_store = RedisVectorStore(schema=schema, redis_client=redis_client, overwrite=False)
 storage_context = StorageContext.from_defaults(vector_store=faq_vector_store)
-faq_index = VectorStoreIndex(storage_context=storage_context)
+faq_index = VectorStoreIndex.from_vector_store(vector_store=faq_vector_store, storage_context=storage_context)
 faq_retriever = faq_index.as_retriever(similarity_top_k=top_k)
 
 # Setup the Amenities index (we need to setup the retriever with each tool call)
@@ -110,9 +110,9 @@ schema = IndexSchema.from_dict(
     },
 )
 
-amenities_vector_store = RedisVectorStore(schema=schema, redis_client=redis_client, overwrite=True)
+amenities_vector_store = RedisVectorStore(schema=schema, redis_client=redis_client, overwrite=False)
 storage_context = StorageContext.from_defaults(vector_store=amenities_vector_store)
-amenities_index = VectorStoreIndex(storage_context=storage_context)
+amenities_index = VectorStoreIndex.from_vector_store(vector_store=amenities_vector_store, storage_context=storage_context)
 
 # Setup the Services index (we need to setup the retriever with each tool call)
 schema = IndexSchema.from_dict(
@@ -145,9 +145,9 @@ schema = IndexSchema.from_dict(
     },
 )
 
-services_vector_store = RedisVectorStore(schema=schema, redis_client=redis_client, overwrite=True)
+services_vector_store = RedisVectorStore(schema=schema, redis_client=redis_client, overwrite=False)
 storage_context = StorageContext.from_defaults(vector_store=services_vector_store)
-services_index = VectorStoreIndex(storage_context=storage_context)
+services_index = VectorStoreIndex.from_vector_store(vector_store=services_vector_store, storage_context=storage_context)
 
 # used by both amenities and services
 def _range_filters(

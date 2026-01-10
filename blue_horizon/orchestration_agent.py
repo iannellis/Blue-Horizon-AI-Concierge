@@ -20,7 +20,7 @@ llm = ChatOpenAI(model=gpt_model, temperature=0)
 
 
 class Route(BaseModel):
-    step: Literal["info", "rooms", "none"] = Field(
+    step: Literal["info", "rooms", "none"] = Field(...,
         description="The next step to take in answering the user's query.")
 
 class State(MessagesState):
@@ -121,7 +121,7 @@ def router_llm(state: State) -> dict:
     """Route the user's query to the appropriate agent."""
     messages = state["messages"]
     decision = router.invoke([SystemMessage(content = system_prompt), *messages])
-    return {"route": decision.step}
+    return {"route": getattr(decision, "step", "none")}
 
 def info_agent_call(state: State):
     return info_agent.invoke(state)

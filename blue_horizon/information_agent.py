@@ -6,8 +6,7 @@ Goals:
 - Async-friendly for FastAPI (no blocking event loop)
 
 Assumptions:
-- Redis keys follow the pattern: {Prefix}:{id}
-  where Prefix is one of: faq, amenities, services
+- Redis keys follow the pattern: {prefix}:{id} where prefix is one of: faq, amenities, services
 - Each key stores fields: "_node_content" (JSON string) and "text" (string)
 - booking_required is stored as a Redis TAG field with values "True" / "False".
 
@@ -18,16 +17,16 @@ Versions (per user):
 
 from __future__ import annotations
 
-import asyncio
 import heapq
 import json
 import os
-from pathlib import Path
-from string import Template
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import lru_cache
-from typing import Any, Iterable, Optional
+from pathlib import Path
+from string import Template
+from typing import Any, Optional
 
 from dotenv import load_dotenv
 from langchain.agents import create_agent
@@ -47,33 +46,20 @@ from redis import Redis
 from redis.asyncio import Redis as AsyncRedis
 from redisvl.schema import IndexSchema
 
-# ---------------------------
-# Configuration
-# ---------------------------
-
-
 DEFAULT_TOP_K = 4
 DEFAULT_EMBED_MODEL = "text-embedding-3-small"
 DEFAULT_VECTOR_DIMS = 1536  # default length for text-embedding-3-small
 
-# System prompt template file. Uses $top_k placeholder.
-# Prefer $placeholders over {placeholders} to avoid conflicts with braces in text.
 SYSTEM_PROMPT_PATH = Path(__file__).parent / "system_prompts/information_prompt.txt"
 
 
 @lru_cache(maxsize=1)
 def get_redis_url() -> str:
-    """Resolve the Redis URL once."""
     load_dotenv()
     url = os.getenv("REDIS_URL")
     if not url:
         raise RuntimeError("REDIS_URL is not set")
     return url
-
-
-# ---------------------------
-# Types
-# ---------------------------
 
 
 class Source(StrEnum):
@@ -109,11 +95,6 @@ class HydrateInput(BaseModel):
     items: list[RetrievalItemLite] = Field(..., description="Top items from reranker")
 
 
-# ---------------------------
-# Filters
-# ---------------------------
-
-
 def build_filters(
     *,
     booking_required: Optional[bool] = None,
@@ -124,12 +105,6 @@ def build_filters(
     min_duration_minutes: Optional[int] = None,
     max_duration_minutes: Optional[int] = None,
 ) -> Optional[MetadataFilters]:
-    """Build MetadataFilters for Redis vector store.
-
-    Notes:
-    - Redis TAG fields typically store strings, so booleans are represented as "True"/"False".
-    """
-
     filters: list[MetadataFilter] = []
 
     if booking_required is not None:
@@ -183,11 +158,6 @@ def build_filters(
     return MetadataFilters(filters=filters) if filters else None
 
 
-# ---------------------------
-# Redis / LlamaIndex resources
-# ---------------------------
-
-
 def build_index_schema(
     *,
     name: str,
@@ -195,14 +165,10 @@ def build_index_schema(
     extra_fields: list[dict[str, Any]],
     vector_dims: int,
 ) -> IndexSchema:
-    """Create a RedisVL schema dict and turn it into an IndexSchema."""
-
     fields: list[dict[str, Any]] = [
-        # required fields for LlamaIndex
         {"type": "tag", "name": "id"},
         {"type": "tag", "name": "doc_id"},
         {"type": "text", "name": "text"},
-        # embedding vector field
         {
             "type": "vector",
             "name": "vector",
@@ -223,10 +189,7 @@ class VectorIndexes:
 
 
 class HotelRagResources:
-    """Owns shared resources for the agent.
-
-    Create once at FastAPI startup and reuse.
-    """
+    """Owns shared resources for the agent."""
 
     def __init__(
         self,
@@ -236,52 +199,28 @@ class HotelRagResources:
         embed_model_name: str = DEFAULT_EMBED_MODEL,
         vector_dims: int = DEFAULT_VECTOR_DIMS,
         embed_batch_size: int = 64,
-        # If you *really* need Settings.llm elsewhere, set it explicitly.
-        set_llamaindex_llm: bool = False,
-        llamaindex_llm_factory: Optional[callable] = None,
     ) -> None:
         self._top_k = int(top_k)
         self._vector_dims = int(vector_dims)
         self._embed_batch_size = int(embed_batch_size)
 
-        # Initialize LlamaIndex global settings once.
-        self._init_llamaindex(
-            embed_model_name,
-            embed_batch_size=self._embed_batch_size,
-            set_llamaindex_llm=set_llamaindex_llm,
-            llamaindex_llm_factory=llamaindex_llm_factory,
-        )
+        self._init_llamaindex(embed_model_name, embed_batch_size=self._embed_batch_size)
 
-        # Create BOTH sync + async Redis clients.
-        #
-        # - LlamaIndex's RedisVectorStore supports async operations when an async client is
-        #   provided (used by aquery/async_add/etc.).
-        # - We also keep a sync client as a fallback / for any sync-only code paths.
-        self.redis_sync: Redis = Redis.from_url(redis_url, decode_responses=True)
+        # Keep *only* an async client on the instance for request-path operations.
+        # A sync Redis client is created transiently for RedisVectorStore initialization.
         self.redis_async: AsyncRedis = AsyncRedis.from_url(redis_url, decode_responses=True)
 
+        redis_sync = Redis.from_url(redis_url, decode_responses=True)
         self.indexes = self._build_indexes(
-            self.redis_sync,
+            redis_sync,
             self.redis_async,
             vector_dims=self._vector_dims,
         )
 
-        # Build a dedicated FAQ retriever once (no per-call filter).
         self._faq_retriever = self.indexes.faq.as_retriever(similarity_top_k=self._top_k)
 
     @staticmethod
-    def _init_llamaindex(
-        embed_model_name: str,
-        *,
-        embed_batch_size: int,
-        set_llamaindex_llm: bool,
-        llamaindex_llm_factory: Optional[callable],
-    ) -> None:
-        # Avoid repeating costly global Settings mutation.
-        #
-        # NOTE: LlamaIndex may set a default embed_model (often OpenAIEmbedding with
-        # an older default model) even if you never configured it. So we must
-        # actively ensure the configured model is what we expect.
+    def _init_llamaindex(embed_model_name: str, *, embed_batch_size: int) -> None:
         current_embed = getattr(Settings, "embed_model", None)
         current_model = (
             getattr(current_embed, "model", None)
@@ -290,19 +229,10 @@ class HotelRagResources:
         )
 
         if (current_embed is None) or (current_model != embed_model_name):
-            # Uses OPENAI_API_KEY from env by default.
             Settings.embed_model = OpenAIEmbedding(
                 model=embed_model_name,
                 embed_batch_size=int(embed_batch_size),
             )
-
-        if set_llamaindex_llm:
-            if llamaindex_llm_factory is None:
-                raise ValueError(
-                    "set_llamaindex_llm=True requires llamaindex_llm_factory"
-                )
-            if getattr(Settings, "llm", None) is None:
-                Settings.llm = llamaindex_llm_factory()
 
     @staticmethod
     def _build_indexes(
@@ -311,7 +241,6 @@ class HotelRagResources:
         *,
         vector_dims: int,
     ) -> VectorIndexes:
-        # FAQ
         faq_schema = build_index_schema(
             name="faq",
             prefix="faq",
@@ -329,7 +258,6 @@ class HotelRagResources:
             vector_store=faq_store, storage_context=faq_storage
         )
 
-        # Amenities
         amenities_schema = build_index_schema(
             name="amenities",
             prefix="amenities",
@@ -353,7 +281,6 @@ class HotelRagResources:
             vector_store=amenities_store, storage_context=amenities_storage
         )
 
-        # Services
         services_schema = build_index_schema(
             name="services",
             prefix="services",
@@ -385,12 +312,13 @@ class HotelRagResources:
         return self._top_k
 
     async def retrieve_faq(self, query: str) -> list[RetrievalItemLite]:
-        # Prefer true-async retrieval if supported.
-        if hasattr(self._faq_retriever, "aretrieve"):
-            nodes = await self._faq_retriever.aretrieve(query)
-        else:
-            nodes = await asyncio.to_thread(self._faq_retriever.retrieve, query)
+        if not hasattr(self._faq_retriever, "aretrieve"):
+            raise RuntimeError(
+                "FAQ retriever does not support aretrieve(); provide redis_client_async "
+                "and use an async-capable LlamaIndex retriever implementation."
+            )
 
+        nodes = await self._faq_retriever.aretrieve(query)
         return [
             RetrievalItemLite(
                 source=Source.FAQ,
@@ -418,11 +346,13 @@ class HotelRagResources:
             filters=filters,
         )
 
-        if hasattr(retriever, "aretrieve"):
-            nodes = await retriever.aretrieve(query)
-        else:
-            nodes = await asyncio.to_thread(retriever.retrieve, query)
+        if not hasattr(retriever, "aretrieve"):
+            raise RuntimeError(
+                "VectorIndexRetriever does not support aretrieve(); provide redis_client_async "
+                "and use an async-capable LlamaIndex retriever implementation."
+            )
 
+        nodes = await retriever.aretrieve(query)
         return [
             RetrievalItemLite(
                 source=source,
@@ -437,20 +367,19 @@ class HotelRagResources:
         if not item_list:
             return []
 
-        # Use an async pipeline to batch all HMGETs into a single round-trip.
-        pipe = self.redis_async.pipeline()
+        pipe = self.redis_async.pipeline(transaction=False)
         keys: list[str] = []
+
         for item in item_list:
-            # Source values already match Redis key prefixes (faq/amenities/services)
-            prefix = item.source
-            key = f"{prefix}:{item.item_id}"
+            key = f"{item.source}:{item.item_id}"
             keys.append(key)
             pipe.hmget(key, ["_node_content", "text"])
 
         results = await pipe.execute()
 
         hydrated: list[RetrievalItem] = []
-        for item, key, (node_content_str, text) in zip(item_list, keys, results):
+        for item, key, result in zip(item_list, keys, results, strict=True):
+            node_content_str, text = result
             if not node_content_str:
                 raise RuntimeError(
                     f"Could not hydrate item_id={item.item_id} from source={item.source} (key={key})"
@@ -461,11 +390,10 @@ class HotelRagResources:
             except json.JSONDecodeError as e:
                 raise RuntimeError(f"Invalid _node_content JSON for key={key}") from e
 
-            metadata = node_content.get("metadata") or {}
             hydrated.append(
                 RetrievalItem(
                     source=item.source,
-                    metadata=metadata,
+                    metadata=node_content.get("metadata") or {},
                     text=text or "",
                     score=item.score,
                 )
@@ -474,39 +402,23 @@ class HotelRagResources:
         return hydrated
 
 
-# ---------------------------
-# Tools + Agent factory
-# ---------------------------
-
-
 @lru_cache(maxsize=8)
 def _load_system_prompt_template(path: str) -> Template:
-    """Load the system prompt template from disk once per process.
-
-    Uses string.Template with $top_k to avoid needing to escape braces.
-    """
-
-    text = Path(path).read_text(encoding="utf-8")
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError as e:
+        raise RuntimeError(f"Failed to read system prompt template at: {Path(path).resolve()}") from e
     return Template(text)
 
 
 def build_system_prompt(*, top_k: int, prompt_path: Path | None = None) -> str:
-    """Render the system prompt template, substituting runtime values."""
-
     path = str(prompt_path or SYSTEM_PROMPT_PATH)
     template = _load_system_prompt_template(path)
     return template.safe_substitute(top_k=top_k)
 
 
 class AgentFactory:
-    """Builds the LangChain/LangGraph agent and its tools around shared resources."""
-
-    def __init__(
-        self,
-        *,
-        resources: HotelRagResources,
-        chat_model: Any,
-    ) -> None:
+    def __init__(self, *, resources: HotelRagResources, chat_model: Any) -> None:
         self._resources = resources
         self._chat_model = chat_model
 
@@ -516,15 +428,7 @@ class AgentFactory:
 
         @tool(parse_docstring=True)
         async def query_faq(query: str) -> list[RetrievalItemLite]:
-            """Provide information about which FAQs are relevant to the passed-in query.
-
-            Args:
-                query (string): The query string.
-
-            Returns:
-                list[RetrievalItemLite]: The source, item id, and similarity score for each item.
-            """
-
+            """Provide information about which FAQs are relevant to the passed-in query."""
             return await resources.retrieve_faq(query)
 
         @tool(parse_docstring=True)
@@ -538,24 +442,7 @@ class AgentFactory:
             min_duration_minutes: int | None = None,
             max_duration_minutes: int | None = None,
         ) -> list[RetrievalItemLite]:
-            """Provide information about which amenities are relevant to the passed-in query.
-
-            Supports optional range filtering on numeric fields and exact filtering on booking_required.
-
-            Args:
-                query (string): The query string.
-                booking_required (bool, optional): If provided, filter amenities requiring booking.
-                min_price (float, optional): Minimum price (inclusive).
-                max_price (float, optional): Maximum price (inclusive).
-                min_notice_hours (int, optional): Minimum notice hours (inclusive).
-                max_notice_hours (int, optional): Maximum notice hours (inclusive).
-                min_duration_minutes (int, optional): Minimum duration in minutes (inclusive).
-                max_duration_minutes (int, optional): Maximum duration in minutes (inclusive).
-
-            Returns:
-                list[RetrievalItemLite]: The source, item id, and similarity score for each item.
-            """
-
+            """Provide information about which amenities are relevant to the passed-in query."""
             filters = build_filters(
                 booking_required=booking_required,
                 min_price=min_price,
@@ -582,24 +469,7 @@ class AgentFactory:
             min_duration_minutes: int | None = None,
             max_duration_minutes: int | None = None,
         ) -> list[RetrievalItemLite]:
-            """Provide information about which services are relevant to the passed-in query.
-
-            Supports optional range filtering on numeric fields and exact filtering on booking_required.
-
-            Args:
-                query (string): The query string.
-                booking_required (bool, optional): If provided, filter services requiring booking.
-                min_price (float, optional): Minimum price (inclusive).
-                max_price (float, optional): Maximum price (inclusive).
-                min_notice_hours (int, optional): Minimum notice hours (inclusive).
-                max_notice_hours (int, optional): Maximum notice hours (inclusive).
-                min_duration_minutes (int, optional): Minimum duration in minutes (inclusive).
-                max_duration_minutes (int, optional): Maximum duration in minutes (inclusive).
-
-            Returns:
-                list[RetrievalItemLite]: The source, item id, and similarity score for each item.
-            """
-
+            """Provide information about which services are relevant to the passed-in query."""
             filters = build_filters(
                 booking_required=booking_required,
                 min_price=min_price,
@@ -621,15 +491,11 @@ class AgentFactory:
             amenities_results: list[RetrievalItemLite],
             services_results: list[RetrievalItemLite],
         ) -> list[RetrievalItemLite]:
-            """Rerank combined results from earlier tool calls according to similarity score."""
-
             all_results = [*faq_results, *amenities_results, *services_results]
             return heapq.nlargest(top_k, all_results, key=lambda x: x.score)
 
         @tool(args_schema=HydrateInput)
         async def hydrate_items(items: list[RetrievalItemLite]) -> list[RetrievalItem]:
-            """Hydrate lite reranked items into full objects (text + metadata)."""
-
             return await resources.hydrate(items)
 
         system_prompt = build_system_prompt(top_k=top_k)

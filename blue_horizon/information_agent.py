@@ -18,8 +18,10 @@ Versions (per user):
 
 import heapq
 import json
+import logging
 import math
 import os
+from collections import OrderedDict
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import lru_cache
@@ -30,6 +32,7 @@ from typing import Any, Iterable
 from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain.tools import tool
+from langchain_openai import ChatOpenAI
 from langgraph.graph.state import CompiledStateGraph
 from llama_index.core import Settings, StorageContext, VectorStoreIndex
 from llama_index.core.retrievers import VectorIndexRetriever
@@ -45,15 +48,37 @@ from redis.asyncio import Redis as AsyncRedis
 from redisvl.schema import IndexSchema
 
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_TOP_K = 4
 DEFAULT_EMBED_MODEL = "text-embedding-3-small"
 DEFAULT_VECTOR_DIMS = 1536  # default length for text-embedding-3-small
+
+# OpenAI client behavior: keep these bounded so requests don't hang indefinitely.
+DEFAULT_OPENAI_TIMEOUT_S = 20.0
+DEFAULT_OPENAI_MAX_RETRIES = 2
+
+# Redis timeouts: keep these short so user-facing requests fail fast.
+DEFAULT_REDIS_CONNECT_TIMEOUT_S = 2.0
+DEFAULT_REDIS_SOCKET_TIMEOUT_S = 4.0
+DEFAULT_REDIS_HEALTH_CHECK_INTERVAL_S = 30
+
+# Retriever cache: bound this to avoid unbounded growth if the LLM emits many filter combos.
+DEFAULT_RETRIEVER_CACHE_MAX = 64
 
 # Resolve and validate the prompt path once per worker at import time.
 # If packaging/layout differs across environments, override via build_system_prompt(prompt_path=...).
 DEFAULT_SYSTEM_PROMPT_PATH = (
     Path(__file__).parent / "system_prompts" / "information_prompt.txt"
 ).resolve()
+
+
+class OperationalError(RuntimeError):
+    """An expected operational failure (Redis, retrieval, hydration).
+
+    These should be logged and turned into safe/partial outputs rather than bubbling
+    up to the user.
+    """
 
 
 def resolve_system_prompt_path(path: Path | None = None) -> Path:
@@ -70,7 +95,8 @@ def resolve_system_prompt_path(path: Path | None = None) -> Path:
     """
     candidate = (path or DEFAULT_SYSTEM_PROMPT_PATH).expanduser().resolve()
     if not candidate.exists() or not candidate.is_file():
-        raise RuntimeError(f"System prompt template not found: {candidate}")
+        msg = f"System prompt template not found: {candidate}"
+        raise RuntimeError(msg)
     return candidate
 
 
@@ -93,7 +119,8 @@ def get_redis_url() -> str:
     load_dotenv()
     url = os.getenv("REDIS_URL")
     if not url:
-        raise RuntimeError("REDIS_URL is not set")
+        msg = "REDIS_URL is not set"
+        raise RuntimeError(msg)
     return url
 
 
@@ -283,8 +310,17 @@ class HotelRagResources:
         embed_model_name: str = DEFAULT_EMBED_MODEL,
         vector_dims: int = DEFAULT_VECTOR_DIMS,
         embed_batch_size: int = 64,
+        retriever_cache_max: int = DEFAULT_RETRIEVER_CACHE_MAX,
+        openai_timeout_s: float = DEFAULT_OPENAI_TIMEOUT_S,
+        openai_max_retries: int = DEFAULT_OPENAI_MAX_RETRIES,
+        redis_connect_timeout_s: float = DEFAULT_REDIS_CONNECT_TIMEOUT_S,
+        redis_socket_timeout_s: float = DEFAULT_REDIS_SOCKET_TIMEOUT_S,
+        redis_health_check_interval_s: int = DEFAULT_REDIS_HEALTH_CHECK_INTERVAL_S,
     ) -> None:
-        """Initialize Redis clients, embedding settings, and vector indexes.
+        """Initialize embedding settings, Redis client, and indexes.
+
+        Note: This constructor is synchronous; call ``await startup_check()`` during
+        FastAPI startup to validate connectivity and capability.
 
         Args:
             redis_url: Redis connection URL.
@@ -292,14 +328,32 @@ class HotelRagResources:
             embed_model_name: OpenAI embedding model name.
             vector_dims: Embedding dimensionality used in Redis schema.
             embed_batch_size: Batch size used by the embedding client.
+            retriever_cache_max: Max cached retrievers per process.
+            redis_connect_timeout_s: Redis connect timeout in seconds.
+            redis_socket_timeout_s: Redis socket timeout in seconds.
+            redis_health_check_interval_s: Redis health check interval.
         """
         self._top_k = int(top_k)
         self._vector_dims = int(vector_dims)
         self._embed_batch_size = int(embed_batch_size)
+        self._retriever_cache_max = max(1, int(retriever_cache_max))
+        self._openai_timeout_s = float(openai_timeout_s)
+        self._openai_max_retries = int(openai_max_retries)
 
-        self._init_llamaindex(embed_model_name, embed_batch_size=self._embed_batch_size)
+        self._init_llamaindex(
+            embed_model_name,
+            embed_batch_size=self._embed_batch_size,
+            timeout_s=self._openai_timeout_s,
+            max_retries=self._openai_max_retries,
+        )
 
-        self.redis_async: AsyncRedis = AsyncRedis.from_url(redis_url, decode_responses=True)
+        self.redis_async: AsyncRedis = AsyncRedis.from_url(
+            redis_url,
+            decode_responses=True,
+            socket_connect_timeout=float(redis_connect_timeout_s),
+            socket_timeout=float(redis_socket_timeout_s),
+            health_check_interval=int(redis_health_check_interval_s),
+        )
 
         self.indexes = self._build_indexes(
             self.redis_async,
@@ -310,10 +364,132 @@ class HotelRagResources:
 
         # Cache catalog retrievers (amenities/services) by (source, filters_signature)
         # to reduce per-request allocations.
-        self._catalog_retrievers: dict[tuple[Source, tuple[tuple[str, str, str], ...]], VectorIndexRetriever] = {}
+        self._catalog_retrievers: OrderedDict[
+            tuple[Source, tuple[tuple[str, str, str], ...]], VectorIndexRetriever
+        ] = OrderedDict()
+
+    async def startup_check(self) -> None:
+        """Validate Redis connectivity, retriever capability, and index schema.
+
+        Call this once per worker during FastAPI startup.
+
+        Raises:
+            OperationalError: If Redis is unreachable, retrievers cannot run async,
+                or the Redis index schema does not match configured expectations.
+        """
+        try:
+            await self.redis_async.ping()
+        except Exception as exc:
+            msg = "Redis ping failed"
+            raise OperationalError(msg) from exc
+
+        if not hasattr(self._faq_retriever, "aretrieve"):
+            msg = "FAQ retriever does not support aretrieve()"
+            raise OperationalError(msg)
+
+        # Validate catalog retrievers support aretrieve() by constructing one.
+        _ = self._get_catalog_retriever(source=Source.AMENITIES, filters=None)
+
+        # Verify the Redis index schemas match our expected vector dimensions.
+        await self._validate_vector_dims()
+
+    async def _validate_vector_dims(self) -> None:
+        """Validate that Redis vector index dimensions match the configured value.
+
+        Raises:
+            OperationalError: If any index is missing, FT.INFO fails, the vector field
+                cannot be located, or the dims do not match ``self._vector_dims``.
+        """
+        for src in (Source.FAQ, Source.AMENITIES, Source.SERVICES):
+            expected = self._vector_dims
+            actual = await self._get_index_vector_dims(str(src))
+            if actual != expected:
+                msg = f"Index '{src}' vector dims mismatch: expected={expected} actual={actual}"
+                raise OperationalError(msg)
+
+    async def _get_index_vector_dims(self, index_name: str) -> int:
+        """Extract vector dims for the 'vector' field from FT.INFO.
+
+        Args:
+            index_name: RediSearch index name.
+
+        Returns:
+            int: Vector dimensionality.
+
+        Raises:
+            OperationalError: If the index cannot be inspected or dims cannot be found.
+        """
+        try:
+            reply = await self.redis_async.execute_command("FT.INFO", index_name)
+        except Exception as exc:  # noqa: BLE001
+            msg = f"FT.INFO failed for index '{index_name}'"
+            raise OperationalError(msg) from exc
+
+        info = self._redis_kv_list_to_dict(reply)
+        attributes = info.get("attributes") or info.get("fields")
+        if not isinstance(attributes, list):
+            msg = f"FT.INFO for '{index_name}' missing attributes/fields section"
+            raise OperationalError(msg)
+
+        for attr in attributes:
+            attr_dict = self._redis_kv_list_to_dict(attr)
+            name = (
+                attr_dict.get("attribute")
+                or attr_dict.get("identifier")
+                or attr_dict.get("name")
+            )
+            if str(name).lower() != "vector":
+                continue
+
+            # Common keys are "dims" or "dim" depending on module/version.
+            dims = attr_dict.get("dims") or attr_dict.get("dim")
+            if dims is None:
+                # Some outputs nest vector params under "vecsim" or similar.
+                for v in attr_dict.values():
+                    nested = self._redis_kv_list_to_dict(v)
+                    dims = nested.get("dims") or nested.get("dim")
+                    if dims is not None:
+                        break
+
+            if dims is None:
+                msg = f"FT.INFO for '{index_name}' has vector field but no dims"
+                raise OperationalError(msg)
+
+            try:
+                return int(dims)
+            except (TypeError, ValueError) as exc:
+                msg = f"FT.INFO for '{index_name}' returned non-int dims: {dims!r}"
+                raise OperationalError(msg) from exc
+
+        msg = f"FT.INFO for '{index_name}' did not include a vector field named 'vector'"
+        raise OperationalError(msg)
 
     @staticmethod
-    def _init_llamaindex(embed_model_name: str, *, embed_batch_size: int) -> None:
+    def _redis_kv_list_to_dict(reply: Any) -> dict[str, Any]:
+        """Convert Redis module replies (flat [k,v,k,v,...]) to dict recursively."""
+        if isinstance(reply, dict):
+            return {str(k).lower(): v for k, v in reply.items()}
+        if not isinstance(reply, list):
+            return {}
+
+        out: dict[str, Any] = {}
+        it = iter(reply)
+        for k in it:
+            try:
+                v = next(it)
+            except StopIteration:
+                break
+            out[str(k).lower()] = v
+        return out
+
+    @staticmethod
+    def _init_llamaindex(
+        embed_model_name: str,
+        *,
+        embed_batch_size: int,
+        timeout_s: float,
+        max_retries: int,
+    ) -> None:
         """Configure LlamaIndex global embedding settings.
 
         This sets the embedding model unconditionally to avoid relying on internal
@@ -326,6 +502,8 @@ class HotelRagResources:
         Settings.embed_model = OpenAIEmbedding(
             model=embed_model_name,
             embed_batch_size=int(embed_batch_size),
+            timeout=float(timeout_s),
+            max_retries=int(max_retries),
         )
 
     @staticmethod
@@ -345,7 +523,9 @@ class HotelRagResources:
             score = float(raw)
         except (TypeError, ValueError):
             return 0.0
-        return 0.0 if math.isnan(score) else score
+        if math.isnan(score) or math.isinf(score):
+            return 0.0
+        return score
 
     @staticmethod
     def _filters_signature(filters: MetadataFilters | None) -> tuple[tuple[str, str, str], ...]:
@@ -371,6 +551,17 @@ class HotelRagResources:
         signature.sort()
         return tuple(signature)
 
+    def _cache_retriever(
+        self,
+        cache_key: tuple[Source, tuple[tuple[str, str, str], ...]],
+        retriever: VectorIndexRetriever,
+    ) -> None:
+        """Insert a retriever into the bounded LRU cache."""
+        self._catalog_retrievers[cache_key] = retriever
+        self._catalog_retrievers.move_to_end(cache_key)
+        while len(self._catalog_retrievers) > self._retriever_cache_max:
+            self._catalog_retrievers.popitem(last=False)
+
     def _get_catalog_retriever(
         self,
         *,
@@ -388,13 +579,14 @@ class HotelRagResources:
 
         Raises:
             KeyError: If an unsupported source is provided.
-            RuntimeError: If the retriever does not support async retrieval.
+            OperationalError: If the retriever does not support async retrieval.
         """
         sig = self._filters_signature(filters)
         cache_key = (source, sig)
 
         existing = self._catalog_retrievers.get(cache_key)
         if existing is not None:
+            self._catalog_retrievers.move_to_end(cache_key)
             return existing
 
         index = {
@@ -409,13 +601,11 @@ class HotelRagResources:
         )
 
         if not hasattr(retriever, "aretrieve"):
-            raise RuntimeError(
-                "VectorIndexRetriever does not support aretrieve(); provide redis_client_async "
-                "and use an async-capable LlamaIndex retriever implementation."
-            )
+            msg = "VectorIndexRetriever does not support aretrieve()"
+            raise OperationalError(msg)
 
-        # Cache after validation. Races are acceptable; at worst we build twice.
-        self._catalog_retrievers[cache_key] = retriever
+        # Cache after validation.
+        self._cache_retriever(cache_key, retriever)
         return retriever
 
     @staticmethod
@@ -424,15 +614,7 @@ class HotelRagResources:
         *,
         vector_dims: int,
     ) -> VectorIndexes:
-        """Build VectorStoreIndex instances backed by RedisVectorStore.
-
-        Args:
-            redis_client_async: Async Redis client passed into RedisVectorStore.
-            vector_dims: Embedding dimensionality used in index schemas.
-
-        Returns:
-            VectorIndexes: FAQ, amenities, and services indexes.
-        """
+        """Build VectorStoreIndex instances backed by RedisVectorStore."""
         faq_schema = build_index_schema(
             name=Source.FAQ,
             prefix=Source.FAQ,
@@ -502,24 +684,13 @@ class HotelRagResources:
         return self._top_k
 
     async def retrieve_faq(self, query: str) -> list[RetrievalItemLite]:
-        """Retrieve FAQ nodes relevant to a query.
+        """Retrieve FAQ nodes relevant to a query."""
+        try:
+            nodes = await self._faq_retriever.aretrieve(query)
+        except Exception as exc:  # noqa: BLE001
+            msg = "FAQ retrieval failed"
+            raise OperationalError(msg) from exc
 
-        Args:
-            query: User query string.
-
-        Returns:
-            list[RetrievalItemLite]: Lightweight results for reranking.
-
-        Raises:
-            RuntimeError: If the underlying retriever does not support async retrieval.
-        """
-        if not hasattr(self._faq_retriever, "aretrieve"):
-            raise RuntimeError(
-                "FAQ retriever does not support aretrieve(); provide redis_client_async "
-                "and use an async-capable LlamaIndex retriever implementation."
-            )
-
-        nodes = await self._faq_retriever.aretrieve(query)
         return [
             RetrievalItemLite(
                 source=Source.FAQ,
@@ -536,22 +707,14 @@ class HotelRagResources:
         query: str,
         filters: MetadataFilters | None,
     ) -> list[RetrievalItemLite]:
-        """Retrieve amenity/service nodes for a query with optional metadata filters.
-
-        Args:
-            source: Source.AMENITIES or Source.SERVICES.
-            query: User query string.
-            filters: Optional metadata filters to apply.
-
-        Returns:
-            list[RetrievalItemLite]: Lightweight results for reranking.
-
-        Raises:
-            KeyError: If an unsupported source is provided.
-            RuntimeError: If the retriever does not support async retrieval.
-        """
+        """Retrieve amenity/service nodes for a query with optional metadata filters."""
         retriever = self._get_catalog_retriever(source=source, filters=filters)
-        nodes = await retriever.aretrieve(query)
+        try:
+            nodes = await retriever.aretrieve(query)
+        except Exception as exc:  # noqa: BLE001
+            msg = f"{source} retrieval failed"
+            raise OperationalError(msg) from exc
+
         return [
             RetrievalItemLite(
                 source=source,
@@ -561,19 +724,26 @@ class HotelRagResources:
             for n in nodes
         ]
 
-    async def hydrate(self, items: Iterable[RetrievalItemLite]) -> list[RetrievalItem]:
+    async def hydrate(
+        self,
+        items: Iterable[RetrievalItemLite],
+        *,
+        best_effort: bool = True,
+    ) -> list[RetrievalItem]:
         """Hydrate lite results into full objects by fetching Redis document fields.
 
-        Uses an async Redis pipeline to minimize round trips.
+        If best_effort=True, any individual hydration failures are logged and skipped,
+        returning fewer results rather than raising.
 
         Args:
             items: Lightweight items returned from reranking.
+            best_effort: If True, skip bad/missing items instead of raising.
 
         Returns:
             list[RetrievalItem]: Hydrated items with metadata and text.
 
         Raises:
-            RuntimeError: If an item cannot be hydrated or stored JSON is invalid.
+            OperationalError: If best_effort is False and an item cannot be hydrated.
         """
         item_list = list(items)
         if not item_list:
@@ -587,20 +757,48 @@ class HotelRagResources:
             keys.append(key)
             pipe.hmget(key, ["_node_content", "text"])
 
-        results = await pipe.execute()
+        try:
+            results = await pipe.execute()
+        except Exception as exc:  # noqa: BLE001
+            if best_effort:
+                logger.exception("Hydration pipeline failed")
+                return []
+            msg = "Hydration pipeline failed"
+            raise OperationalError(msg) from exc
 
         hydrated: list[RetrievalItem] = []
         for item, key, result in zip(item_list, keys, results, strict=True):
-            node_content_str, text = result
+            try:
+                node_content_str, text = result
+            except Exception as exc:  # noqa: BLE001
+                if best_effort:
+                    logger.warning("Hydration malformed result for key=%s", key)
+                    continue
+                msg = f"Hydration malformed result for key={key}"
+                raise OperationalError(msg) from exc
+
             if not node_content_str:
-                raise RuntimeError(
+                if best_effort:
+                    logger.warning(
+                        "Missing _node_content for key=%s (source=%s item_id=%s)",
+                        key,
+                        item.source,
+                        item.item_id,
+                    )
+                    continue
+                msg = (
                     f"Could not hydrate item_id={item.item_id} from source={item.source} (key={key})"
                 )
+                raise OperationalError(msg)
 
             try:
                 node_content = json.loads(node_content_str)
-            except json.JSONDecodeError as e:
-                raise RuntimeError(f"Invalid _node_content JSON for key={key}") from e
+            except json.JSONDecodeError as exc:
+                if best_effort:
+                    logger.warning("Invalid _node_content JSON for key=%s", key)
+                    continue
+                msg = f"Invalid _node_content JSON for key={key}"
+                raise OperationalError(msg) from exc
 
             hydrated.append(
                 RetrievalItem(
@@ -616,65 +814,75 @@ class HotelRagResources:
 
 @lru_cache(maxsize=5)
 def _load_system_prompt_template(path: Path) -> Template:
-    """Load and cache the system prompt template from disk.
-
-    Args:
-        path: Path to the template file.
-
-    Returns:
-        Template: Parsed template instance.
-
-    Raises:
-        RuntimeError: If the file cannot be read.
-    """
+    """Load and cache the system prompt template from disk."""
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError as e:
-        raise RuntimeError(f"Failed to read system prompt template at: {path}") from e
+    except OSError as exc:
+        msg = f"Failed to read system prompt template at: {path}"
+        raise RuntimeError(msg) from exc
     return Template(text)
 
 
 def build_system_prompt(*, top_k: int, prompt_path: Path | None = None) -> str:
-    """Render the system prompt with runtime substitutions.
-
-    Args:
-        top_k: Number of items each retriever returns.
-        prompt_path: Optional override for the template file location.
-
-    Returns:
-        str: Rendered prompt text.
-    """
+    """Render the system prompt with runtime substitutions."""
     path = resolve_system_prompt_path(prompt_path)
     template = _load_system_prompt_template(path)
     return template.safe_substitute(top_k=top_k)
+
+
+def build_chat_model(
+    *,
+    model: str,
+    temperature: float = 0.0,
+    timeout_s: float = DEFAULT_OPENAI_TIMEOUT_S,
+    max_retries: int = DEFAULT_OPENAI_MAX_RETRIES,
+    **kwargs: Any,
+) -> ChatOpenAI:
+    """Create a ChatOpenAI instance with bounded timeout and retries.
+
+    Args:
+        model: Model name.
+        temperature: Sampling temperature.
+        timeout_s: Request timeout in seconds.
+        max_retries: Maximum number of retries.
+        **kwargs: Additional ChatOpenAI kwargs.
+
+    Returns:
+        ChatOpenAI: Configured chat model.
+    """
+    return ChatOpenAI(
+        model=model,
+        temperature=temperature,
+        timeout=float(timeout_s),
+        max_retries=int(max_retries),
+        **kwargs,
+    )
 
 
 class AgentFactory:
     """Factory for constructing the LangChain agent with bound async tools."""
 
     def __init__(self, *, resources: HotelRagResources, chat_model: Any) -> None:
-        """Initialize the agent factory.
-
-        Args:
-            resources: Shared resources used by tool implementations.
-            chat_model: LangChain chat model used by the agent.
-        """
         self._resources = resources
         self._chat_model = chat_model
 
     def build(self) -> CompiledStateGraph:
-        """Build and return a compiled agent graph.
-
-        Returns:
-            CompiledStateGraph: Graph ready for `ainvoke`.
-        """
+        """Build and return a compiled agent graph."""
         resources = self._resources
         top_k = resources.top_k
+
+        def _log_tool_failure(tool_name: str, exc: Exception) -> None:
+            # Single place to log tool failures without leaking details to users.
+            logger.exception("Tool %s failed: %s", tool_name, exc)
 
         @tool(parse_docstring=True)
         async def query_faq(query: str) -> list[RetrievalItemLite]:
             """Provide information about which FAQs are relevant to the passed-in query."""
-            return await resources.retrieve_faq(query)
+            try:
+                return await resources.retrieve_faq(query)
+            except Exception as exc:  # noqa: BLE001
+                _log_tool_failure("query_faq", exc)
+                return []
 
         @tool(parse_docstring=True)
         async def query_amenities(
@@ -740,11 +948,15 @@ class AgentFactory:
                 min_duration_minutes=min_duration_minutes,
                 max_duration_minutes=max_duration_minutes,
             )
-            return await resources.retrieve_filtered_catalog_items(
-                source=Source.AMENITIES,
-                query=query,
-                filters=filters,
-            )
+            try:
+                return await resources.retrieve_filtered_catalog_items(
+                    source=Source.AMENITIES,
+                    query=query,
+                    filters=filters,
+                )
+            except Exception as exc:  # noqa: BLE001
+                _log_tool_failure("query_amenities", exc)
+                return []
 
         @tool(parse_docstring=True)
         async def query_services(
@@ -810,11 +1022,15 @@ class AgentFactory:
                 min_duration_minutes=min_duration_minutes,
                 max_duration_minutes=max_duration_minutes,
             )
-            return await resources.retrieve_filtered_catalog_items(
-                source=Source.SERVICES,
-                query=query,
-                filters=filters,
-            )
+            try:
+                return await resources.retrieve_filtered_catalog_items(
+                    source=Source.SERVICES,
+                    query=query,
+                    filters=filters,
+                )
+            except Exception as exc:  # noqa: BLE001
+                _log_tool_failure("query_services", exc)
+                return []
 
         @tool(args_schema=RerankInput)
         def reranker(
@@ -822,52 +1038,18 @@ class AgentFactory:
             amenities_results: list[RetrievalItemLite],
             services_results: list[RetrievalItemLite],
         ) -> list[RetrievalItemLite]:
-            """Select the top-k results across FAQ, amenities, and services.
-
-            This tool combines the three retrieval result lists and returns the global
-            top ``top_k`` items by similarity score. It does **not** hydrate results; it
-            only selects which item IDs should be hydrated next.
-
-            Args:
-                faq_results: Lightweight FAQ retrieval results.
-                amenities_results: Lightweight amenities retrieval results.
-                services_results: Lightweight services retrieval results.
-
-            Returns:
-                list[RetrievalItemLite]: The best-scoring items across all sources,
-                limited to ``top_k``.
-
-            Notes:
-                - Scores are compared directly across sources.
-                - If score scales differ between sources, consider normalizing scores
-                  before reranking.
-            """
+            """Select the top-k results across FAQ, amenities, and services."""
             all_results = [*faq_results, *amenities_results, *services_results]
             return heapq.nlargest(top_k, all_results, key=lambda x: x.score)
 
         @tool(args_schema=HydrateInput)
         async def hydrate_items(items: list[RetrievalItemLite]) -> list[RetrievalItem]:
-            """Hydrate reranked items into full text + metadata objects.
-
-            This tool takes the output of ``reranker`` (lite items containing ``source``
-            and ``item_id``) and fetches stored fields from Redis to produce hydrated
-            results that can be presented to the user.
-
-            Args:
-                items: Lightweight items selected by ``reranker``.
-
-            Returns:
-                list[RetrievalItem]: Hydrated items containing:
-                    - source
-                    - text
-                    - metadata
-                    - score (from reranking)
-
-            Raises:
-                RuntimeError: If any item cannot be hydrated (missing Redis key/fields)
-                or stored JSON is invalid.
-            """
-            return await resources.hydrate(items)
+            """Hydrate reranked items into full text + metadata objects."""
+            try:
+                return await resources.hydrate(items, best_effort=True)
+            except Exception as exc:  # noqa: BLE001
+                _log_tool_failure("hydrate_items", exc)
+                return []
 
         system_prompt = build_system_prompt(top_k=top_k)
 

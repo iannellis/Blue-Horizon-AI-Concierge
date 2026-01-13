@@ -379,7 +379,7 @@ class HotelRagResources:
         """
         try:
             await self.redis_async.ping()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             msg = "Redis ping failed"
             raise OperationalError(msg) from exc
 
@@ -495,9 +495,15 @@ class HotelRagResources:
         This sets the embedding model unconditionally to avoid relying on internal
         attribute names that may change across LlamaIndex versions.
 
+        Side effects:
+            Updates the global ``llama_index.core.Settings.embed_model`` for the
+            current process.
+
         Args:
             embed_model_name: OpenAI embedding model name.
             embed_batch_size: Embedding batch size.
+            timeout_s: Per-request timeout (seconds) for embedding calls.
+            max_retries: Maximum number of retries for embedding calls.
         """
         Settings.embed_model = OpenAIEmbedding(
             model=embed_model_name,

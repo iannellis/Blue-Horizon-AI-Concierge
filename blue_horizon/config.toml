@@ -35,6 +35,9 @@ model = "gpt-5.2"
 # Temperature for responses (0 is deterministic-ish).
 temperature = 0.0
 
+# Reasoning effort. Medium works well for information agent.
+reasoning_effort = "medium"
+
 # Network timeout for chat requests (seconds).
 timeout_s = 20.0
 

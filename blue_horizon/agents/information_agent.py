@@ -34,6 +34,7 @@ Example TOML (hotel_rag.toml):
     temperature = 0.0
     timeout_s = 20.0
     max_retries = 2
+    reasoning_effort = "medium"
 
     [redis]
     connect_timeout_s = 2.0
@@ -55,16 +56,18 @@ import math
 import os
 import tomllib
 from collections import OrderedDict
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 from string import Template
-from typing import Any, Iterable
+from typing import Any
 
 from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain.tools import tool
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 from langgraph.graph.state import CompiledStateGraph
 from llama_index.core import Settings, StorageContext, VectorStoreIndex
@@ -79,7 +82,6 @@ from llama_index.vector_stores.redis import RedisVectorStore
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis as AsyncRedis
 from redisvl.schema import IndexSchema
-
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +121,7 @@ class ChatConfig:
     temperature: float
     timeout_s: float
     max_retries: int
+    reasoning_effort: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,6 +201,7 @@ def load_config(config_path: Path) -> InfoRagConfig:
                 temperature=float(chat["temperature"]),
                 timeout_s=float(chat["timeout_s"]),
                 max_retries=int(chat["max_retries"]),
+                reasoning_effort=str(chat["reasoning_effort"]),
             ),
             redis=RedisConfig(
                 connect_timeout_s=float(redis["connect_timeout_s"]),
@@ -214,7 +218,7 @@ def load_config(config_path: Path) -> InfoRagConfig:
         raise RuntimeError(msg) from exc
 
 
-def resolve_prompts_dir(*, prompts_folder: str = "system_prompts") -> Path:
+def resolve_prompts_dir(*, prompts_folder: str = "../system_prompts") -> Path:
     """Resolve the prompts directory.
 
     Assumes prompts live in a single folder next to this module.
@@ -320,7 +324,7 @@ def build_filters(
     max_duration_minutes: int | None = None,
 ) -> MetadataFilters | None:
     """Build metadata filters for LlamaIndex retrieval."""
-    filters: list[MetadataFilter] = []
+    filters: list[MetadataFilter | MetadataFilters] = []
 
     if booking_required is not None:
         filters.append(
@@ -388,7 +392,11 @@ def build_index_schema(
         {
             "type": "vector",
             "name": "vector",
-            "attrs": {"dims": vector_dims, "algorithm": "hnsw", "distance_metric": "cosine"},
+            "attrs": {
+                "dims": vector_dims,
+                "algorithm": "hnsw",
+                "distance_metric": "cosine",
+            },
         },
         *extra_fields,
     ]
@@ -455,7 +463,7 @@ class InfoRagResources:
         """Validate Redis connectivity, retriever capability, and index schema."""
         try:
             await self.redis_async.ping()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             msg = "Redis ping failed"
             raise OperationalError(msg) from exc
 
@@ -479,7 +487,7 @@ class InfoRagResources:
         """Extract vector dims for the 'vector' field from FT.INFO."""
         try:
             reply = await self.redis_async.execute_command("FT.INFO", index_name)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             msg = f"FT.INFO failed for index '{index_name}'"
             raise OperationalError(msg) from exc
 
@@ -521,11 +529,13 @@ class InfoRagResources:
         raise OperationalError(msg)
 
     @staticmethod
-    def _redis_kv_list_to_dict(reply: Any) -> dict[str, Any]:
+    def _redis_kv_list_to_dict(reply: object | None) -> dict[str, Any]:
         """Convert Redis module replies (flat [k,v,k,v,...]) to dict."""
-        if isinstance(reply, dict):
+        if reply is None:
+            return {}
+        if isinstance(reply, Mapping):
             return {str(k).lower(): v for k, v in reply.items()}
-        if not isinstance(reply, list):
+        if not isinstance(reply, Sequence) or isinstance(reply, (str, bytes, bytearray)):
             return {}
 
         out: dict[str, Any] = {}
@@ -571,10 +581,12 @@ class InfoRagResources:
         return score
 
     @staticmethod
-    def _filters_signature(filters: MetadataFilters | None) -> tuple[tuple[str, str, str], ...]:
+    def _filters_signature(
+        filters: MetadataFilters | None,
+    ) -> tuple[tuple[str, str, str], ...]:
         """Create a stable cache key for metadata filters."""
         if not filters:
-            return tuple()
+            return ()
 
         signature: list[tuple[str, str, str]] = []
         for f in getattr(filters, "filters", []) or []:
@@ -698,7 +710,11 @@ class InfoRagResources:
             vector_store=services_store, storage_context=services_storage
         )
 
-        return VectorIndexes(faq=faq_index, amenities=amenities_index, services=services_index)
+        return VectorIndexes(
+            faq=faq_index,
+            amenities=amenities_index,
+            services=services_index,
+        )
 
     @property
     def top_k(self) -> int:
@@ -709,7 +725,7 @@ class InfoRagResources:
         """Retrieve FAQ nodes relevant to a query."""
         try:
             nodes = await self._faq_retriever.aretrieve(query)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             msg = "FAQ retrieval failed"
             raise OperationalError(msg) from exc
 
@@ -733,7 +749,7 @@ class InfoRagResources:
         retriever = self._get_catalog_retriever(source=source, filters=filters)
         try:
             nodes = await retriever.aretrieve(query)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             msg = f"{source} retrieval failed"
             raise OperationalError(msg) from exc
 
@@ -746,6 +762,97 @@ class InfoRagResources:
             for n in nodes
         ]
 
+    def _build_hydration_pipeline(
+        self,
+        items: list[RetrievalItemLite],
+    ) -> tuple[Any, list[str]]:
+        """Build a Redis pipeline to fetch hydration fields for a list of items."""
+        pipe = self.redis_async.pipeline(transaction=False)
+        keys: list[str] = []
+        for item in items:
+            key = f"{item.source}:{item.item_id}"
+            keys.append(key)
+            pipe.hmget(key, ["_node_content", "text"])
+        return pipe, keys
+
+    def _parse_hmget_result(
+        self,
+        *,
+        item: RetrievalItemLite,
+        key: str,
+        result: object,
+        best_effort: bool,
+    ) -> tuple[str, str] | None:
+        """Parse a single HMGET result into (_node_content, text)."""
+        try:
+            node_content_str, text = result  # type: ignore[misc]
+        except Exception as exc:
+            if best_effort:
+                logger.warning("Hydration malformed result for key=%s", key)
+                return None
+            msg = f"Hydration malformed result for key={key}"
+            raise OperationalError(msg) from exc
+
+        if not node_content_str:
+            if best_effort:
+                logger.warning(
+                    "Missing _node_content for key=%s (source=%s item_id=%s)",
+                    key,
+                    item.source,
+                    item.item_id,
+                )
+                return None
+            msg = (
+                f"Could not hydrate item_id={item.item_id} from source={item.source} (key={key})"
+            )
+            raise OperationalError(msg)
+
+        return str(node_content_str), str(text or "")
+
+    def _decode_node_content(
+        self,
+        *,
+        node_content_str: str,
+        key: str,
+        best_effort: bool,
+    ) -> dict[str, Any] | None:
+        """Decode the JSON stored in _node_content."""
+        try:
+            node_content = json.loads(node_content_str)
+        except json.JSONDecodeError as exc:
+            if best_effort:
+                logger.warning("Invalid _node_content JSON for key=%s", key)
+                return None
+            msg = f"Invalid _node_content JSON for key={key}"
+            raise OperationalError(msg) from exc
+
+        if not isinstance(node_content, dict):
+            if best_effort:
+                logger.warning("Unexpected _node_content type for key=%s", key)
+                return None
+            msg = f"Unexpected _node_content type for key={key}"
+            raise OperationalError(msg)
+
+        return node_content
+
+    @staticmethod
+    def _to_hydrated_item(
+        *,
+        item: RetrievalItemLite,
+        node_content: dict[str, Any],
+        text: str,
+    ) -> RetrievalItem:
+        """Convert parsed Redis payload to a hydrated RetrievalItem."""
+        metadata = node_content.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+        return RetrievalItem(
+            source=item.source,
+            metadata=metadata,
+            text=text,
+            score=item.score,
+        )
+
     async def hydrate(
         self,
         items: Iterable[RetrievalItemLite],
@@ -757,17 +864,11 @@ class InfoRagResources:
         if not item_list:
             return []
 
-        pipe = self.redis_async.pipeline(transaction=False)
-        keys: list[str] = []
-
-        for item in item_list:
-            key = f"{item.source}:{item.item_id}"
-            keys.append(key)
-            pipe.hmget(key, ["_node_content", "text"])
+        pipe, keys = self._build_hydration_pipeline(item_list)
 
         try:
             results = await pipe.execute()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             if best_effort:
                 logger.exception("Hydration pipeline failed")
                 return []
@@ -776,45 +877,26 @@ class InfoRagResources:
 
         hydrated: list[RetrievalItem] = []
         for item, key, result in zip(item_list, keys, results, strict=True):
-            try:
-                node_content_str, text = result
-            except Exception as exc:  # noqa: BLE001
-                if best_effort:
-                    logger.warning("Hydration malformed result for key=%s", key)
-                    continue
-                msg = f"Hydration malformed result for key={key}"
-                raise OperationalError(msg) from exc
+            parsed = self._parse_hmget_result(
+                item=item,
+                key=key,
+                result=result,
+                best_effort=best_effort,
+            )
+            if parsed is None:
+                continue
 
-            if not node_content_str:
-                if best_effort:
-                    logger.warning(
-                        "Missing _node_content for key=%s (source=%s item_id=%s)",
-                        key,
-                        item.source,
-                        item.item_id,
-                    )
-                    continue
-                msg = (
-                    f"Could not hydrate item_id={item.item_id} from source={item.source} (key={key})"
-                )
-                raise OperationalError(msg)
-
-            try:
-                node_content = json.loads(node_content_str)
-            except json.JSONDecodeError as exc:
-                if best_effort:
-                    logger.warning("Invalid _node_content JSON for key=%s", key)
-                    continue
-                msg = f"Invalid _node_content JSON for key={key}"
-                raise OperationalError(msg) from exc
+            node_content_str, text = parsed
+            node_content = self._decode_node_content(
+                node_content_str=node_content_str,
+                key=key,
+                best_effort=best_effort,
+            )
+            if node_content is None:
+                continue
 
             hydrated.append(
-                RetrievalItem(
-                    source=item.source,
-                    metadata=node_content.get("metadata") or {},
-                    text=text or "",
-                    score=item.score,
-                )
+                self._to_hydrated_item(item=item, node_content=node_content, text=text)
             )
 
         return hydrated
@@ -837,13 +919,22 @@ def build_system_prompt(*, top_k: int, prompt_path: Path) -> str:
     return template.safe_substitute(top_k=top_k)
 
 
-def build_chat_model(*, cfg: ChatConfig, **kwargs: Any) -> ChatOpenAI:
-    """Create a ChatOpenAI instance configured from TOML."""
+def build_chat_model(*, cfg: ChatConfig, **kwargs: Any) -> ChatOpenAI:  # noqa: ANN401
+    """Create a ChatOpenAI instance configured from TOML.
+
+    Args:
+        cfg: Chat model configuration.
+        **kwargs: Extra keyword arguments forwarded to ``ChatOpenAI``.
+
+    Returns:
+        ChatOpenAI: Configured chat model.
+    """
     return ChatOpenAI(
         model=cfg.model,
         temperature=float(cfg.temperature),
         timeout=float(cfg.timeout_s),
         max_retries=int(cfg.max_retries),
+        reasoning={"effort": cfg.reasoning_effort},
         **kwargs,
     )
 
@@ -855,7 +946,7 @@ class AgentFactory:
         self,
         *,
         resources: InfoRagResources,
-        chat_model: Any,
+        chat_model: str | BaseChatModel,
         config: InfoRagConfig,
         prompts_dir: Path,
     ) -> None:
@@ -863,7 +954,8 @@ class AgentFactory:
 
         Args:
             resources: Shared async resources (Redis client, indexes, retrievers).
-            chat_model: LangChain chat model instance used by the agent.
+            chat_model: LangChain chat model instance (or model name string) used by the
+                agent.
             config: Parsed TOML configuration.
             prompts_dir: Directory containing all prompt templates.
         """
@@ -882,10 +974,35 @@ class AgentFactory:
 
         @tool(parse_docstring=True)
         async def query_faq(query: str) -> list[RetrievalItemLite]:
-            """Provide information about which FAQs are relevant to the passed-in query."""
+            """Retrieve FAQ entries relevant to a user query.
+
+            This tool performs vector search over the **FAQ** knowledge base. Use it
+            when the user asks about hotel policies, rules, hours, check-in/check-out,
+            deposits, cancellations, parking, pet policy, accessibility, or other
+            "how does the hotel work" questions.
+
+            Notes:
+                - This tool returns lightweight items (source, item_id, score). The
+                  system will later rerank across sources and then hydrate the final
+                  selection to retrieve full text + metadata.
+                - If you are unsure whether a question is policy-related, it is still
+                  safe to call this tool; irrelevant FAQ hits will be dropped later.
+
+            Args:
+                query: Natural-language query describing what the user wants.
+
+            Returns:
+                list[RetrievalItemLite]: Up to ``top_k`` lightweight FAQ matches.
+
+            Examples:
+                - "What time is check-in?"
+                - "Do you allow pets?"
+                - "Is there parking and how much does it cost?"
+                - "What is the cancellation policy?"
+            """
             try:
                 return await resources.retrieve_faq(query)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 _log_tool_failure("query_faq", exc)
                 return []
 
@@ -937,7 +1054,7 @@ class AgentFactory:
                     query=query,
                     filters=filters,
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 _log_tool_failure("query_amenities", exc)
                 return []
 
@@ -952,7 +1069,37 @@ class AgentFactory:
             min_duration_minutes: int | None = None,
             max_duration_minutes: int | None = None,
         ) -> list[RetrievalItemLite]:
-            """Retrieve hotel services relevant to a user query."""
+            """Retrieve hotel services relevant to a user query.
+
+            This tool performs vector search over the **services** catalog (e.g.,
+            spa treatments, housekeeping add-ons, transportation, concierge offerings,
+            dining-related services, etc.).
+
+            You may optionally apply metadata constraints. All provided constraints are
+            combined using logical **AND**.
+
+            Use this tool when the user asks for *staff-provided* or *bookable* services
+            rather than physical amenities.
+
+            Args:
+                query: Natural-language query describing what the user wants.
+                booking_required: Restrict results to booking_required==True/False.
+                min_price: Minimum price in USD (inclusive).
+                max_price: Maximum price in USD (inclusive).
+                min_notice_hours: Minimum advance notice in hours (inclusive).
+                max_notice_hours: Maximum advance notice in hours (inclusive).
+                min_duration_minutes: Minimum duration in minutes (inclusive).
+                max_duration_minutes: Maximum duration in minutes (inclusive).
+
+            Returns:
+                list[RetrievalItemLite]: Up to ``top_k`` lightweight results.
+
+            Examples:
+                - "airport shuttle"
+                - "in-room massage under $200"
+                - "late checkout service"
+                - "laundry with at least 2 hours notice"
+            """
             filters = build_filters(
                 booking_required=booking_required,
                 min_price=min_price,
@@ -968,7 +1115,7 @@ class AgentFactory:
                     query=query,
                     filters=filters,
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 _log_tool_failure("query_services", exc)
                 return []
 
@@ -987,7 +1134,7 @@ class AgentFactory:
             """Hydrate reranked items into full text + metadata objects."""
             try:
                 return await resources.hydrate(items, best_effort=True)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 _log_tool_failure("hydrate_items", exc)
                 return []
 

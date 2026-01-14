@@ -11,6 +11,38 @@ Assumptions:
 - Each key stores fields: "_node_content" (JSON string) and "text" (string)
 - booking_required is stored as a Redis TAG field with values "True" / "False".
 
+Configuration:
+- All tunables live in a TOML file (see `InfoRagConfig`).
+- `system_prompt` in TOML is the *file name only* (no path). All prompts are assumed
+  to live in the same prompts folder.
+
+Example TOML (hotel_rag.toml):
+
+    [retrieval]
+    top_k = 4
+    vector_dims = 1536
+    retriever_cache_max = 64
+
+    [embeddings]
+    model = "text-embedding-3-small"
+    batch_size = 64
+    timeout_s = 20.0
+    max_retries = 2
+
+    [chat]
+    model = "gpt-5.2"
+    temperature = 0.0
+    timeout_s = 20.0
+    max_retries = 2
+
+    [redis]
+    connect_timeout_s = 2.0
+    socket_timeout_s = 4.0
+    health_check_interval_s = 30
+
+    [prompts]
+    system_prompt = "information_prompt.txt"
+
 Versions (per user):
 - langchain==1.2.3, langgraph==1.0.5, llama-index==0.14.12
 - redis==5.3.1, redisvl==0.4.1
@@ -21,6 +53,7 @@ import json
 import logging
 import math
 import os
+import tomllib
 from collections import OrderedDict
 from dataclasses import dataclass
 from enum import StrEnum
@@ -50,28 +83,6 @@ from redisvl.schema import IndexSchema
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_TOP_K = 4
-DEFAULT_EMBED_MODEL = "text-embedding-3-small"
-DEFAULT_VECTOR_DIMS = 1536  # default length for text-embedding-3-small
-
-# OpenAI client behavior: keep these bounded so requests don't hang indefinitely.
-DEFAULT_OPENAI_TIMEOUT_S = 20.0
-DEFAULT_OPENAI_MAX_RETRIES = 2
-
-# Redis timeouts: keep these short so user-facing requests fail fast.
-DEFAULT_REDIS_CONNECT_TIMEOUT_S = 2.0
-DEFAULT_REDIS_SOCKET_TIMEOUT_S = 4.0
-DEFAULT_REDIS_HEALTH_CHECK_INTERVAL_S = 30
-
-# Retriever cache: bound this to avoid unbounded growth if the LLM emits many filter combos.
-DEFAULT_RETRIEVER_CACHE_MAX = 64
-
-# Resolve and validate the prompt path once per worker at import time.
-# If packaging/layout differs across environments, override via build_system_prompt(prompt_path=...).
-DEFAULT_SYSTEM_PROMPT_PATH = (
-    Path(__file__).parent / "system_prompts" / "information_prompt.txt"
-).resolve()
-
 
 class OperationalError(RuntimeError):
     """An expected operational failure (Redis, retrieval, hydration).
@@ -81,41 +92,172 @@ class OperationalError(RuntimeError):
     """
 
 
-def resolve_system_prompt_path(path: Path | None = None) -> Path:
-    """Resolve and validate the system prompt template path.
+@dataclass(frozen=True, slots=True)
+class RetrievalConfig:
+    """Retrieval configuration."""
+
+    top_k: int
+    vector_dims: int
+    retriever_cache_max: int
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddingsConfig:
+    """Embedding client configuration."""
+
+    model: str
+    batch_size: int
+    timeout_s: float
+    max_retries: int
+
+
+@dataclass(frozen=True, slots=True)
+class ChatConfig:
+    """Chat model configuration."""
+
+    model: str
+    temperature: float
+    timeout_s: float
+    max_retries: int
+
+
+@dataclass(frozen=True, slots=True)
+class RedisConfig:
+    """Redis client configuration."""
+
+    connect_timeout_s: float
+    socket_timeout_s: float
+    health_check_interval_s: int
+
+
+@dataclass(frozen=True, slots=True)
+class PromptsConfig:
+    """Prompt file configuration."""
+
+    system_prompt: str
+
+
+@dataclass(frozen=True, slots=True)
+class InfoRagConfig:
+    """Top-level configuration loaded from TOML."""
+
+    retrieval: RetrievalConfig
+    embeddings: EmbeddingsConfig
+    chat: ChatConfig
+    redis: RedisConfig
+    prompts: PromptsConfig
+
+
+def load_config(config_path: Path) -> InfoRagConfig:
+    """Load configuration from a TOML file.
 
     Args:
-        path: Optional path override.
+        config_path: Path to TOML config.
 
     Returns:
-        Path: Resolved, existing file path.
+        InfoRagConfig: Parsed config.
 
     Raises:
-        RuntimeError: If the file does not exist or is not readable.
+        RuntimeError: If the file is missing/unreadable or required keys are missing.
     """
-    candidate = (path or DEFAULT_SYSTEM_PROMPT_PATH).expanduser().resolve()
+    path = config_path.expanduser().resolve()
+    if not path.exists() or not path.is_file():
+        msg = f"Config file not found: {path}"
+        raise RuntimeError(msg)
+
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        msg = f"Failed to read config file: {path}"
+        raise RuntimeError(msg) from exc
+    except tomllib.TOMLDecodeError as exc:
+        msg = f"Invalid TOML in config file: {path}"
+        raise RuntimeError(msg) from exc
+
+    try:
+        retrieval = data["retrieval"]
+        embeddings = data["embeddings"]
+        chat = data["chat"]
+        redis = data["redis"]
+        prompts = data["prompts"]
+
+        return InfoRagConfig(
+            retrieval=RetrievalConfig(
+                top_k=int(retrieval["top_k"]),
+                vector_dims=int(retrieval["vector_dims"]),
+                retriever_cache_max=max(1, int(retrieval["retriever_cache_max"])),
+            ),
+            embeddings=EmbeddingsConfig(
+                model=str(embeddings["model"]),
+                batch_size=int(embeddings["batch_size"]),
+                timeout_s=float(embeddings["timeout_s"]),
+                max_retries=int(embeddings["max_retries"]),
+            ),
+            chat=ChatConfig(
+                model=str(chat["model"]),
+                temperature=float(chat["temperature"]),
+                timeout_s=float(chat["timeout_s"]),
+                max_retries=int(chat["max_retries"]),
+            ),
+            redis=RedisConfig(
+                connect_timeout_s=float(redis["connect_timeout_s"]),
+                socket_timeout_s=float(redis["socket_timeout_s"]),
+                health_check_interval_s=int(redis["health_check_interval_s"]),
+            ),
+            prompts=PromptsConfig(system_prompt=str(prompts["system_prompt"])),
+        )
+    except KeyError as exc:
+        msg = f"Missing required config key: {exc}"
+        raise RuntimeError(msg) from exc
+    except (TypeError, ValueError) as exc:
+        msg = "Invalid config value type"
+        raise RuntimeError(msg) from exc
+
+
+def resolve_prompts_dir(*, prompts_folder: str = "system_prompts") -> Path:
+    """Resolve the prompts directory.
+
+    Assumes prompts live in a single folder next to this module.
+
+    Args:
+        prompts_folder: Folder name.
+
+    Returns:
+        Path: Resolved prompts directory.
+
+    Raises:
+        RuntimeError: If the directory does not exist.
+    """
+    prompts_dir = (Path(__file__).parent / prompts_folder).resolve()
+    if not prompts_dir.exists() or not prompts_dir.is_dir():
+        msg = f"Prompts folder not found: {prompts_dir}"
+        raise RuntimeError(msg)
+    return prompts_dir
+
+
+def resolve_system_prompt_path(*, filename: str, prompts_dir: Path) -> Path:
+    """Resolve a prompt template file within the prompts directory.
+
+    Args:
+        filename: Prompt file name (no path).
+        prompts_dir: Directory that contains all prompt files.
+
+    Returns:
+        Path: Resolved path to the prompt file.
+
+    Raises:
+        RuntimeError: If the file does not exist.
+    """
+    candidate = (prompts_dir / filename).resolve()
     if not candidate.exists() or not candidate.is_file():
         msg = f"System prompt template not found: {candidate}"
         raise RuntimeError(msg)
     return candidate
 
 
-# Fail fast on startup if the default template is missing.
-SYSTEM_PROMPT_PATH = resolve_system_prompt_path(DEFAULT_SYSTEM_PROMPT_PATH)
-
-
 @lru_cache(maxsize=1)
 def get_redis_url() -> str:
-    """Return the Redis connection URL from environment.
-
-    The value is cached per process to avoid repeated environment parsing.
-
-    Returns:
-        str: Redis connection URL.
-
-    Raises:
-        RuntimeError: If REDIS_URL is not set.
-    """
+    """Return the Redis connection URL from environment."""
     load_dotenv()
     url = os.getenv("REDIS_URL")
     if not url:
@@ -125,10 +267,7 @@ def get_redis_url() -> str:
 
 
 class Source(StrEnum):
-    """Canonical sources for hotel knowledge retrieval.
-
-    Values are also used as Redis key prefixes.
-    """
+    """Canonical sources for hotel knowledge retrieval."""
 
     FAQ = "faq"
     AMENITIES = "amenities"
@@ -180,22 +319,7 @@ def build_filters(
     min_duration_minutes: int | None = None,
     max_duration_minutes: int | None = None,
 ) -> MetadataFilters | None:
-    """Build metadata filters for LlamaIndex retrieval.
-
-    All provided constraints are combined with logical AND.
-
-    Args:
-        booking_required: If set, filter by booking requirement.
-        min_price: Minimum price (inclusive).
-        max_price: Maximum price (inclusive).
-        min_notice_hours: Minimum notice in hours (inclusive).
-        max_notice_hours: Maximum notice in hours (inclusive).
-        min_duration_minutes: Minimum duration in minutes (inclusive).
-        max_duration_minutes: Maximum duration in minutes (inclusive).
-
-    Returns:
-        MetadataFilters | None: Filters object if any constraints are provided, else None.
-    """
+    """Build metadata filters for LlamaIndex retrieval."""
     filters: list[MetadataFilter] = []
 
     if booking_required is not None:
@@ -256,17 +380,7 @@ def build_index_schema(
     extra_fields: list[dict[str, Any]],
     vector_dims: int,
 ) -> IndexSchema:
-    """Create a RedisVL index schema for a RedisVectorStore.
-
-    Args:
-        name: RediSearch index name.
-        prefix: Redis key prefix for documents in this index.
-        extra_fields: Additional metadata fields to index (e.g., tags/numerics).
-        vector_dims: Embedding vector dimensionality.
-
-    Returns:
-        IndexSchema: Schema instance used to create/open the RediSearch index.
-    """
+    """Create a RedisVL index schema for a RedisVectorStore."""
     fields: list[dict[str, Any]] = [
         {"type": "tag", "name": "id"},
         {"type": "tag", "name": "doc_id"},
@@ -292,67 +406,38 @@ class VectorIndexes:
     services: VectorStoreIndex
 
 
-class HotelRagResources:
-    """Own shared, async-first resources used by retrieval tools.
-
-    Create one instance at FastAPI startup and reuse across requests.
-
-    Attributes:
-        redis_async: Async Redis client used for hydration and vector store I/O.
-        indexes: Built VectorStoreIndex objects for FAQ, amenities, and services.
-    """
+class InfoRagResources:
+    """Shared, async-first resources used by retrieval tools."""
 
     def __init__(
         self,
         *,
         redis_url: str,
-        top_k: int = DEFAULT_TOP_K,
-        embed_model_name: str = DEFAULT_EMBED_MODEL,
-        vector_dims: int = DEFAULT_VECTOR_DIMS,
-        embed_batch_size: int = 64,
-        retriever_cache_max: int = DEFAULT_RETRIEVER_CACHE_MAX,
-        openai_timeout_s: float = DEFAULT_OPENAI_TIMEOUT_S,
-        openai_max_retries: int = DEFAULT_OPENAI_MAX_RETRIES,
-        redis_connect_timeout_s: float = DEFAULT_REDIS_CONNECT_TIMEOUT_S,
-        redis_socket_timeout_s: float = DEFAULT_REDIS_SOCKET_TIMEOUT_S,
-        redis_health_check_interval_s: int = DEFAULT_REDIS_HEALTH_CHECK_INTERVAL_S,
+        config: InfoRagConfig,
     ) -> None:
         """Initialize embedding settings, Redis client, and indexes.
 
         Note: This constructor is synchronous; call ``await startup_check()`` during
-        FastAPI startup to validate connectivity and capability.
+        FastAPI startup to validate connectivity and index schema.
 
         Args:
             redis_url: Redis connection URL.
-            top_k: Number of nodes to retrieve per source.
-            embed_model_name: OpenAI embedding model name.
-            vector_dims: Embedding dimensionality used in Redis schema.
-            embed_batch_size: Batch size used by the embedding client.
-            retriever_cache_max: Max cached retrievers per process.
-            redis_connect_timeout_s: Redis connect timeout in seconds.
-            redis_socket_timeout_s: Redis socket timeout in seconds.
-            redis_health_check_interval_s: Redis health check interval.
+            config: Parsed TOML configuration.
         """
-        self._top_k = int(top_k)
-        self._vector_dims = int(vector_dims)
-        self._embed_batch_size = int(embed_batch_size)
-        self._retriever_cache_max = max(1, int(retriever_cache_max))
-        self._openai_timeout_s = float(openai_timeout_s)
-        self._openai_max_retries = int(openai_max_retries)
+        self._config = config
+        self._top_k = int(config.retrieval.top_k)
+        self._vector_dims = int(config.retrieval.vector_dims)
+        self._embed_batch_size = int(config.embeddings.batch_size)
+        self._retriever_cache_max = max(1, int(config.retrieval.retriever_cache_max))
 
-        self._init_llamaindex(
-            embed_model_name,
-            embed_batch_size=self._embed_batch_size,
-            timeout_s=self._openai_timeout_s,
-            max_retries=self._openai_max_retries,
-        )
+        self._init_llamaindex(config.embeddings)
 
         self.redis_async: AsyncRedis = AsyncRedis.from_url(
             redis_url,
             decode_responses=True,
-            socket_connect_timeout=float(redis_connect_timeout_s),
-            socket_timeout=float(redis_socket_timeout_s),
-            health_check_interval=int(redis_health_check_interval_s),
+            socket_connect_timeout=float(config.redis.connect_timeout_s),
+            socket_timeout=float(config.redis.socket_timeout_s),
+            health_check_interval=int(config.redis.health_check_interval_s),
         )
 
         self.indexes = self._build_indexes(
@@ -362,21 +447,12 @@ class HotelRagResources:
 
         self._faq_retriever = self.indexes.faq.as_retriever(similarity_top_k=self._top_k)
 
-        # Cache catalog retrievers (amenities/services) by (source, filters_signature)
-        # to reduce per-request allocations.
         self._catalog_retrievers: OrderedDict[
             tuple[Source, tuple[tuple[str, str, str], ...]], VectorIndexRetriever
         ] = OrderedDict()
 
     async def startup_check(self) -> None:
-        """Validate Redis connectivity, retriever capability, and index schema.
-
-        Call this once per worker during FastAPI startup.
-
-        Raises:
-            OperationalError: If Redis is unreachable, retrievers cannot run async,
-                or the Redis index schema does not match configured expectations.
-        """
+        """Validate Redis connectivity, retriever capability, and index schema."""
         try:
             await self.redis_async.ping()
         except Exception as exc:  # noqa: BLE001
@@ -387,19 +463,11 @@ class HotelRagResources:
             msg = "FAQ retriever does not support aretrieve()"
             raise OperationalError(msg)
 
-        # Validate catalog retrievers support aretrieve() by constructing one.
         _ = self._get_catalog_retriever(source=Source.AMENITIES, filters=None)
-
-        # Verify the Redis index schemas match our expected vector dimensions.
         await self._validate_vector_dims()
 
     async def _validate_vector_dims(self) -> None:
-        """Validate that Redis vector index dimensions match the configured value.
-
-        Raises:
-            OperationalError: If any index is missing, FT.INFO fails, the vector field
-                cannot be located, or the dims do not match ``self._vector_dims``.
-        """
+        """Validate that Redis vector index dimensions match the configured value."""
         for src in (Source.FAQ, Source.AMENITIES, Source.SERVICES):
             expected = self._vector_dims
             actual = await self._get_index_vector_dims(str(src))
@@ -408,17 +476,7 @@ class HotelRagResources:
                 raise OperationalError(msg)
 
     async def _get_index_vector_dims(self, index_name: str) -> int:
-        """Extract vector dims for the 'vector' field from FT.INFO.
-
-        Args:
-            index_name: RediSearch index name.
-
-        Returns:
-            int: Vector dimensionality.
-
-        Raises:
-            OperationalError: If the index cannot be inspected or dims cannot be found.
-        """
+        """Extract vector dims for the 'vector' field from FT.INFO."""
         try:
             reply = await self.redis_async.execute_command("FT.INFO", index_name)
         except Exception as exc:  # noqa: BLE001
@@ -441,10 +499,8 @@ class HotelRagResources:
             if str(name).lower() != "vector":
                 continue
 
-            # Common keys are "dims" or "dim" depending on module/version.
             dims = attr_dict.get("dims") or attr_dict.get("dim")
             if dims is None:
-                # Some outputs nest vector params under "vecsim" or similar.
                 for v in attr_dict.values():
                     nested = self._redis_kv_list_to_dict(v)
                     dims = nested.get("dims") or nested.get("dim")
@@ -466,7 +522,7 @@ class HotelRagResources:
 
     @staticmethod
     def _redis_kv_list_to_dict(reply: Any) -> dict[str, Any]:
-        """Convert Redis module replies (flat [k,v,k,v,...]) to dict recursively."""
+        """Convert Redis module replies (flat [k,v,k,v,...]) to dict."""
         if isinstance(reply, dict):
             return {str(k).lower(): v for k, v in reply.items()}
         if not isinstance(reply, list):
@@ -483,45 +539,26 @@ class HotelRagResources:
         return out
 
     @staticmethod
-    def _init_llamaindex(
-        embed_model_name: str,
-        *,
-        embed_batch_size: int,
-        timeout_s: float,
-        max_retries: int,
-    ) -> None:
+    def _init_llamaindex(cfg: EmbeddingsConfig) -> None:
         """Configure LlamaIndex global embedding settings.
-
-        This sets the embedding model unconditionally to avoid relying on internal
-        attribute names that may change across LlamaIndex versions.
 
         Side effects:
             Updates the global ``llama_index.core.Settings.embed_model`` for the
             current process.
 
         Args:
-            embed_model_name: OpenAI embedding model name.
-            embed_batch_size: Embedding batch size.
-            timeout_s: Per-request timeout (seconds) for embedding calls.
-            max_retries: Maximum number of retries for embedding calls.
+            cfg: Embedding configuration.
         """
         Settings.embed_model = OpenAIEmbedding(
-            model=embed_model_name,
-            embed_batch_size=int(embed_batch_size),
-            timeout=float(timeout_s),
-            max_retries=int(max_retries),
+            model=cfg.model,
+            embed_batch_size=int(cfg.batch_size),
+            timeout=float(cfg.timeout_s),
+            max_retries=int(cfg.max_retries),
         )
 
     @staticmethod
     def _coerce_score(node: Any) -> float:
-        """Convert a retrieved node score to a safe float.
-
-        Args:
-            node: A LlamaIndex node-like object that may have a ``score`` attribute.
-
-        Returns:
-            float: A finite float score. Missing/None/unparseable/NaN becomes 0.0.
-        """
+        """Convert a retrieved node score to a safe float."""
         raw = getattr(node, "score", None)
         if raw is None:
             return 0.0
@@ -535,14 +572,7 @@ class HotelRagResources:
 
     @staticmethod
     def _filters_signature(filters: MetadataFilters | None) -> tuple[tuple[str, str, str], ...]:
-        """Create a stable cache key for metadata filters.
-
-        Args:
-            filters: Filters object or None.
-
-        Returns:
-            tuple[tuple[str, str, str], ...]: A stable, hashable signature.
-        """
+        """Create a stable cache key for metadata filters."""
         if not filters:
             return tuple()
 
@@ -553,7 +583,6 @@ class HotelRagResources:
             val = str(getattr(f, "value", ""))
             signature.append((key, op, val))
 
-        # Order-independent signature.
         signature.sort()
         return tuple(signature)
 
@@ -574,19 +603,7 @@ class HotelRagResources:
         source: Source,
         filters: MetadataFilters | None,
     ) -> VectorIndexRetriever:
-        """Return a cached VectorIndexRetriever for amenities/services.
-
-        Args:
-            source: Source.AMENITIES or Source.SERVICES.
-            filters: Optional metadata filters.
-
-        Returns:
-            VectorIndexRetriever: Cached or newly created retriever.
-
-        Raises:
-            KeyError: If an unsupported source is provided.
-            OperationalError: If the retriever does not support async retrieval.
-        """
+        """Return a cached VectorIndexRetriever for amenities/services."""
         sig = self._filters_signature(filters)
         cache_key = (source, sig)
 
@@ -610,7 +627,6 @@ class HotelRagResources:
             msg = "VectorIndexRetriever does not support aretrieve()"
             raise OperationalError(msg)
 
-        # Cache after validation.
         self._cache_retriever(cache_key, retriever)
         return retriever
 
@@ -736,21 +752,7 @@ class HotelRagResources:
         *,
         best_effort: bool = True,
     ) -> list[RetrievalItem]:
-        """Hydrate lite results into full objects by fetching Redis document fields.
-
-        If best_effort=True, any individual hydration failures are logged and skipped,
-        returning fewer results rather than raising.
-
-        Args:
-            items: Lightweight items returned from reranking.
-            best_effort: If True, skip bad/missing items instead of raising.
-
-        Returns:
-            list[RetrievalItem]: Hydrated items with metadata and text.
-
-        Raises:
-            OperationalError: If best_effort is False and an item cannot be hydrated.
-        """
+        """Hydrate lite results into full objects by fetching Redis document fields."""
         item_list = list(items)
         if not item_list:
             return []
@@ -819,48 +821,29 @@ class HotelRagResources:
 
 
 @lru_cache(maxsize=5)
-def _load_system_prompt_template(path: Path) -> Template:
-    """Load and cache the system prompt template from disk."""
+def _load_prompt_template(path: Path) -> Template:
+    """Load and cache a prompt template from disk."""
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
-        msg = f"Failed to read system prompt template at: {path}"
+        msg = f"Failed to read prompt template at: {path}"
         raise RuntimeError(msg) from exc
     return Template(text)
 
 
-def build_system_prompt(*, top_k: int, prompt_path: Path | None = None) -> str:
+def build_system_prompt(*, top_k: int, prompt_path: Path) -> str:
     """Render the system prompt with runtime substitutions."""
-    path = resolve_system_prompt_path(prompt_path)
-    template = _load_system_prompt_template(path)
+    template = _load_prompt_template(prompt_path)
     return template.safe_substitute(top_k=top_k)
 
 
-def build_chat_model(
-    *,
-    model: str,
-    temperature: float = 0.0,
-    timeout_s: float = DEFAULT_OPENAI_TIMEOUT_S,
-    max_retries: int = DEFAULT_OPENAI_MAX_RETRIES,
-    **kwargs: Any,
-) -> ChatOpenAI:
-    """Create a ChatOpenAI instance with bounded timeout and retries.
-
-    Args:
-        model: Model name.
-        temperature: Sampling temperature.
-        timeout_s: Request timeout in seconds.
-        max_retries: Maximum number of retries.
-        **kwargs: Additional ChatOpenAI kwargs.
-
-    Returns:
-        ChatOpenAI: Configured chat model.
-    """
+def build_chat_model(*, cfg: ChatConfig, **kwargs: Any) -> ChatOpenAI:
+    """Create a ChatOpenAI instance configured from TOML."""
     return ChatOpenAI(
-        model=model,
-        temperature=temperature,
-        timeout=float(timeout_s),
-        max_retries=int(max_retries),
+        model=cfg.model,
+        temperature=float(cfg.temperature),
+        timeout=float(cfg.timeout_s),
+        max_retries=int(cfg.max_retries),
         **kwargs,
     )
 
@@ -868,9 +851,26 @@ def build_chat_model(
 class AgentFactory:
     """Factory for constructing the LangChain agent with bound async tools."""
 
-    def __init__(self, *, resources: HotelRagResources, chat_model: Any) -> None:
+    def __init__(
+        self,
+        *,
+        resources: InfoRagResources,
+        chat_model: Any,
+        config: InfoRagConfig,
+        prompts_dir: Path,
+    ) -> None:
+        """Initialize the agent factory.
+
+        Args:
+            resources: Shared async resources (Redis client, indexes, retrievers).
+            chat_model: LangChain chat model instance used by the agent.
+            config: Parsed TOML configuration.
+            prompts_dir: Directory containing all prompt templates.
+        """
         self._resources = resources
         self._chat_model = chat_model
+        self._config = config
+        self._prompts_dir = prompts_dir
 
     def build(self) -> CompiledStateGraph:
         """Build and return a compiled agent graph."""
@@ -878,7 +878,6 @@ class AgentFactory:
         top_k = resources.top_k
 
         def _log_tool_failure(tool_name: str, exc: Exception) -> None:
-            # Single place to log tool failures without leaking details to users.
             logger.exception("Tool %s failed: %s", tool_name, exc)
 
         @tool(parse_docstring=True)
@@ -912,10 +911,7 @@ class AgentFactory:
 
             Args:
                 query: Natural-language query describing what the user wants.
-                    Examples: "pool hours", "spa", "yoga class", "bike rental".
-                booking_required: If provided, restrict results to amenities where
-                    metadata field ``booking_required`` equals "True" or "False".
-                    Note: ``False`` does NOT imply ``min_notice_hours == 0``.
+                booking_required: Restrict results to booking_required==True/False.
                 min_price: Minimum price in USD (inclusive).
                 max_price: Maximum price in USD (inclusive).
                 min_notice_hours: Minimum advance notice in hours (inclusive).
@@ -924,26 +920,7 @@ class AgentFactory:
                 max_duration_minutes: Maximum duration in minutes (inclusive).
 
             Returns:
-                list[RetrievalItemLite]: Up to ``top_k`` lightweight results containing:
-                    - source: always ``amenities``
-                    - item_id: stable Redis/LlamaIndex node identifier
-                    - score: similarity score for reranking
-
-            Notes:
-                - Omit a filter argument to avoid constraining on that field.
-                - Range filters are inclusive.
-                - Returned items are *not* hydrated; the caller should rerank and then
-                  call ``hydrate_items`` to fetch full text + metadata.
-
-            Example:
-                Find bookable amenities under $50 that last <= 60 minutes:
-
-                query_amenities(
-                    query="massage or spa treatment",
-                    booking_required=True,
-                    max_price=50,
-                    max_duration_minutes=60,
-                )
+                list[RetrievalItemLite]: Up to ``top_k`` lightweight results.
             """
             filters = build_filters(
                 booking_required=booking_required,
@@ -975,50 +952,7 @@ class AgentFactory:
             min_duration_minutes: int | None = None,
             max_duration_minutes: int | None = None,
         ) -> list[RetrievalItemLite]:
-            """Retrieve hotel services relevant to a user query.
-
-            This tool performs vector search over the **services** catalog and can apply
-            optional metadata constraints. All provided constraints are combined using
-            logical **AND**.
-
-            Use this tool when the user asks about operational services such as dining
-            delivery, housekeeping, laundry, concierge, transportation, business services,
-            or other staff-provided offerings.
-
-            Args:
-                query: Natural-language query describing what the user wants.
-                    Examples: "airport shuttle", "laundry", "room service", "concierge".
-                booking_required: If provided, restrict results to services where
-                    metadata field ``booking_required`` equals "True" or "False".
-                    Note: ``False`` does NOT imply ``min_notice_hours == 0``.
-                min_price: Minimum price in USD (inclusive).
-                max_price: Maximum price in USD (inclusive).
-                min_notice_hours: Minimum advance notice in hours (inclusive).
-                max_notice_hours: Maximum advance notice in hours (inclusive).
-                min_duration_minutes: Minimum duration in minutes (inclusive).
-                max_duration_minutes: Maximum duration in minutes (inclusive).
-
-            Returns:
-                list[RetrievalItemLite]: Up to ``top_k`` lightweight results containing:
-                    - source: always ``services``
-                    - item_id: stable Redis/LlamaIndex node identifier
-                    - score: similarity score for reranking
-
-            Notes:
-                - Omit a filter argument to avoid constraining on that field.
-                - Range filters are inclusive.
-                - Returned items are *not* hydrated; the caller should rerank and then
-                  call ``hydrate_items`` to fetch full text + metadata.
-
-            Example:
-                Find services that do not require booking and cost <= $25:
-
-                query_services(
-                    query="laundry and pressing",
-                    booking_required=False,
-                    max_price=25,
-                )
-            """
+            """Retrieve hotel services relevant to a user query."""
             filters = build_filters(
                 booking_required=booking_required,
                 min_price=min_price,
@@ -1057,7 +991,12 @@ class AgentFactory:
                 _log_tool_failure("hydrate_items", exc)
                 return []
 
-        system_prompt = build_system_prompt(top_k=top_k)
+        prompts_dir = self._prompts_dir
+        prompt_path = resolve_system_prompt_path(
+            filename=self._config.prompts.system_prompt,
+            prompts_dir=prompts_dir,
+        )
+        system_prompt = build_system_prompt(top_k=top_k, prompt_path=prompt_path)
 
         return create_agent(
             model=self._chat_model,

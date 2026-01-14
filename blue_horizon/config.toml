@@ -1,0 +1,60 @@
+# Single source of truth for all tunables used by the hotel RAG agent.
+# Keep this file under version control, and override secrets via env vars (e.g. REDIS_URL).
+
+[retrieval]
+# Number of candidates to retrieve per source tool call (faq/amenities/services).
+top_k = 4
+
+# Embedding dimensionality used by your Redis vector field schema.
+# Must match the index schema in Redis (validated at startup via FT.INFO).
+vector_dims = 1536
+
+# Max number of cached retrievers (amenities/services) per process.
+# This prevents filter-combo explosions from eating RAM.
+retriever_cache_max = 64
+
+
+[embeddings]
+# OpenAI embedding model used by LlamaIndex Settings.embed_model.
+model = "text-embedding-3-small"
+
+# Batch size for embedding calls (tradeoff: throughput vs memory/latency).
+batch_size = 64
+
+# Network timeout for embedding requests (seconds). Keep bounded.
+timeout_s = 20.0
+
+# Max retries for embedding requests (small, to avoid request pileups under load).
+max_retries = 2
+
+
+[chat]
+# Chat model used by LangChain ChatOpenAI.
+model = "gpt-5.2"
+
+# Temperature for responses (0 is deterministic-ish).
+temperature = 0.0
+
+# Network timeout for chat requests (seconds).
+timeout_s = 20.0
+
+# Max retries for chat requests.
+max_retries = 2
+
+
+[redis]
+# Redis connection timeout (seconds).
+connect_timeout_s = 2.0
+
+# Redis socket timeout (seconds). Bounds slow ops.
+socket_timeout_s = 4.0
+
+# Redis client health check interval (seconds).
+# Helps detect dead connections in long-running processes.
+health_check_interval_s = 30
+
+
+[prompts]
+# File name ONLY (no path). The code assumes all prompts live in one folder
+# (e.g., ./system_prompts/ next to the module).
+system_prompt = "information_prompt.txt"

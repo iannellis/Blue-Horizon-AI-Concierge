@@ -187,7 +187,7 @@ updated AS (
 SELECT
   (SELECT nights_requested FROM counts) AS nights_requested,
   (SELECT COUNT(*) FROM updated) AS nights_booked,
-  (SELECT COALESCE(SUM(price), 0) FROM updated) AS total_price;
+  (SELECT COALESCE(SUM(price), 0) FROM updated) AS total_price
 ```
 
 ### Interpretation rules for booking
@@ -269,7 +269,7 @@ SELECT
   (SELECT nights_expected_total FROM counts) AS nights_expected_total,
   (SELECT COUNT(*) FROM updated) AS nights_booked_total,
   (SELECT COUNT(DISTINCT room_number) FROM updated) AS rooms_booked,
-  (SELECT COALESCE(SUM(price), 0) FROM updated) AS total_price;
+  (SELECT COALESCE(SUM(price), 0) FROM updated) AS total_price
 ```
 
 ### Interpretation rules for multi-room booking
@@ -331,7 +331,7 @@ updated AS (
 SELECT
   (SELECT COUNT(*) FROM requested_dates) AS nights_requested,
   (SELECT COUNT(*) FROM updated) AS nights_canceled,
-  (SELECT COALESCE(SUM(price), 0) FROM updated) AS canceled_value;
+  (SELECT COALESCE(SUM(price), 0) FROM updated) AS canceled_value
 ```
 
 ### Interpretation rules for cancellation

@@ -10,16 +10,11 @@ requires-python = ">=3.13,<3.14"
 dependencies = [
     "llama-index (>=0.14.6,<0.15.0)",
     "llama-index-vector-stores-redis (>=0.6.1,<0.7.0)",
-    "llama-index-readers-file (>=0.5.4,<0.6.0)",
-    "llama-index-embeddings-huggingface (>=0.6.1,<0.7.0)",
-    "llama-index-llms-openai (>=0.6.6,<0.7.0)",
     "python-dotenv (>=1.2.1,<2.0.0)",
     "psycopg[binary, pool] (>=3.2.12,<4.0.0)",
-    "langchain-community (>=0.4.1,<0.5.0)",
     "langchain-openai (>=1.1.0,<2.0.0)",
     "langgraph (>=1.0.4,<2.0.0)",
     "pydantic-settings (>=2.12.0,<3.0.0)",
-    "llama-index-embeddings-google-genai (>=0.3.1,<0.4.0)",
 ]
 
 [dependency-groups]
@@ -29,7 +24,11 @@ dev = [
     "openai (>=2.7.2,<3.0.0)",
     "ruff (>=0.14.5,<0.15.0)",
     "langchain (>=1.1.0,<2.0.0)",
-    "pydantic-ai-slim[openai, google, duckduckgo, logfire] (>=1.20.0,<2.0.0)"
+    "langchain-community (>=0.4.1,<0.5.0)",
+    "pydantic-ai-slim[openai, google, duckduckgo, logfire] (>=1.20.0,<2.0.0)",
+    "llama-index-embeddings-huggingface (>=0.6.1,<0.7.0)",
+    "llama-index-llms-openai (>=0.6.6,<0.7.0)",
+    "llama-index-embeddings-google-genai (>=0.3.1,<0.4.0)",
 ]
 
 [build-system]

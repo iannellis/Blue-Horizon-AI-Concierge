@@ -17,8 +17,8 @@ Configuration:
   to live in the same prompts folder.
 
 Versions:
-- langchain==1.2.3, langgraph==1.0.5, llama-index==0.14.12
-- redis==5.3.1, redisvl==0.4.1
+- langgraph (>=1.0.4,<2.0.0), llama-index(>=0.14.6,<0.15.0)
+- llama-index-vector-stores-redis (>=0.6.1,<0.7.0)
 """
 
 import heapq
@@ -67,6 +67,11 @@ class OperationalError(RuntimeError):
     user-friendly response rather than crashing the request.
 
     """
+
+
+# ============================
+# Settings (loaded from TOML config)
+# ============================
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,6 +178,11 @@ class InfoRagConfig:
     prompts: PromptsConfig
 
 
+# ============================
+# Configuration loading
+# ============================
+
+
 def load_config(config_path: Path) -> InfoRagConfig:
     """Load configuration from a TOML file.
 
@@ -242,6 +252,11 @@ def load_config(config_path: Path) -> InfoRagConfig:
         raise RuntimeError(msg) from exc
 
 
+# ============================
+# Prompts (file resolution + template loading)
+# ============================
+
+
 def resolve_prompts_dir(*, prompts_folder: str = "../system_prompts") -> Path:
     """Resolve the prompts directory.
 
@@ -285,6 +300,49 @@ def resolve_system_prompt_path(*, filename: str, prompts_dir: Path) -> Path:
     return candidate
 
 
+
+@lru_cache(maxsize=5)
+def _load_prompt_template(path: Path) -> Template:
+    """Load and cache a prompt template from disk.
+
+    Args:
+        path: Path to a prompt template file.
+
+    Returns:
+        Template: Cached string.Template instance.
+
+    Raises:
+        RuntimeError: If the file cannot be read.
+
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        msg = f"Failed to read prompt template at: {path}"
+        raise RuntimeError(msg) from exc
+    return Template(text)
+
+
+def build_system_prompt(*, top_k: int, prompt_path: Path) -> str:
+    """Render the system prompt with runtime substitutions.
+
+    Args:
+        top_k: Retrieval top-k used to render the template.
+        prompt_path: Path to the system prompt template.
+
+    Returns:
+        str: Rendered system prompt string.
+
+    """
+    template = _load_prompt_template(prompt_path)
+    return template.safe_substitute(top_k=top_k)
+
+
+# ============================
+# Environment
+# ============================
+
+
 @lru_cache(maxsize=1)
 def get_redis_url() -> str:
     """Return the Redis connection URL from environment.
@@ -305,6 +363,11 @@ def get_redis_url() -> str:
         msg = "REDIS_URL is not set"
         raise RuntimeError(msg)
     return url
+
+
+# ============================
+# Domain models
+# ============================
 
 
 class Source(StrEnum):
@@ -391,6 +454,11 @@ class HydrateInput(BaseModel):
     """
 
     items: list[RetrievalItemLite] = Field(..., description="Top items from reranker")
+
+
+# ============================
+# Retrieval helpers
+# ============================
 
 
 def build_filters(  # noqa: PLR0913
@@ -519,6 +587,11 @@ def build_index_schema(
 
     schema_dict = {"index": {"name": name, "prefix": prefix}, "fields": fields}
     return IndexSchema.from_dict(schema_dict)
+
+
+# ============================
+# Shared resources (Redis + indexes)
+# ============================
 
 
 @dataclass(frozen=True)
@@ -1217,41 +1290,9 @@ class InfoRagResources:
         return hydrated
 
 
-@lru_cache(maxsize=5)
-def _load_prompt_template(path: Path) -> Template:
-    """Load and cache a prompt template from disk.
-
-    Args:
-        path: Path to a prompt template file.
-
-    Returns:
-        Template: Cached string.Template instance.
-
-    Raises:
-        RuntimeError: If the file cannot be read.
-
-    """
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        msg = f"Failed to read prompt template at: {path}"
-        raise RuntimeError(msg) from exc
-    return Template(text)
-
-
-def build_system_prompt(*, top_k: int, prompt_path: Path) -> str:
-    """Render the system prompt with runtime substitutions.
-
-    Args:
-        top_k: Retrieval top-k used to render the template.
-        prompt_path: Path to the system prompt template.
-
-    Returns:
-        str: Rendered system prompt string.
-
-    """
-    template = _load_prompt_template(prompt_path)
-    return template.safe_substitute(top_k=top_k)
+# ============================
+# Agent construction
+# ============================
 
 
 def build_chat_model(*, cfg: ChatConfig, **kwargs: Any) -> ChatOpenAI:  # noqa: ANN401

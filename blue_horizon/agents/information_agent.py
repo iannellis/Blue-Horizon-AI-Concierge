@@ -16,35 +16,7 @@ Configuration:
 - `system_prompt` in TOML is the *file name only* (no path). All prompts are assumed
   to live in the same prompts folder.
 
-Example TOML (hotel_rag.toml):
-
-    [retrieval]
-    top_k = 4
-    vector_dims = 1536
-    retriever_cache_max = 64
-
-    [embeddings]
-    model = "text-embedding-3-small"
-    batch_size = 64
-    timeout_s = 20.0
-    max_retries = 2
-
-    [chat]
-    model = "gpt-5.2"
-    temperature = 0.0
-    timeout_s = 20.0
-    max_retries = 2
-    reasoning_effort = "medium"
-
-    [redis]
-    connect_timeout_s = 2.0
-    socket_timeout_s = 4.0
-    health_check_interval_s = 30
-
-    [prompts]
-    system_prompt = "information_prompt.txt"
-
-Versions (per user):
+Versions:
 - langchain==1.2.3, langgraph==1.0.5, llama-index==0.14.12
 - redis==5.3.1, redisvl==0.4.1
 """
@@ -87,16 +59,26 @@ logger = logging.getLogger(__name__)
 
 
 class OperationalError(RuntimeError):
-    """An expected operational failure (Redis, retrieval, hydration).
+    """Raised for expected operational failures.
 
-    These should be logged and turned into safe/partial outputs rather than bubbling
-    up to the user.
+    This exception type is used for failures that can occur during normal operation
+    (e.g., transient Redis connectivity issues, retrieval failures, malformed
+    hydration payloads). Callers should generally log the error and return a safe,
+    user-friendly response rather than crashing the request.
+
     """
 
 
 @dataclass(frozen=True, slots=True)
 class RetrievalConfig:
-    """Retrieval configuration."""
+    """Configuration for retrieval behavior.
+
+    Attributes:
+        top_k: Number of results to retrieve per source.
+        vector_dims: Embedding dimensionality used by the Redis vector field.
+        retriever_cache_max: Max number of cached retrievers per process.
+
+    """
 
     top_k: int
     vector_dims: int
@@ -105,7 +87,15 @@ class RetrievalConfig:
 
 @dataclass(frozen=True, slots=True)
 class EmbeddingsConfig:
-    """Embedding client configuration."""
+    """Configuration for embedding generation.
+
+    Attributes:
+        model: Embedding model name.
+        batch_size: Number of inputs per embeddings request during batch operations.
+        timeout_s: Per-request timeout (seconds) for embedding calls.
+        max_retries: Maximum number of retries for embedding calls.
+
+    """
 
     model: str
     batch_size: int
@@ -115,7 +105,17 @@ class EmbeddingsConfig:
 
 @dataclass(frozen=True, slots=True)
 class ChatConfig:
-    """Chat model configuration."""
+    """Configuration for the chat model used by the agent.
+
+    Attributes:
+        model: Chat model name.
+        temperature: Sampling temperature.
+        timeout_s: Per-request timeout (seconds) for chat calls.
+        max_retries: Maximum number of retries for chat calls.
+        reasoning_effort: Reasoning effort hint (passed to ChatOpenAI as
+            reasoning={"effort": ...}).
+
+    """
 
     model: str
     temperature: float
@@ -126,7 +126,15 @@ class ChatConfig:
 
 @dataclass(frozen=True, slots=True)
 class RedisConfig:
-    """Redis client configuration."""
+    """Configuration for Redis connectivity.
+
+    Attributes:
+        connect_timeout_s: Connection timeout (seconds).
+        socket_timeout_s: Socket read/write timeout (seconds).
+        health_check_interval_s: Interval (seconds) after which an idle connection is
+            health-checked before reuse.
+
+    """
 
     connect_timeout_s: float
     socket_timeout_s: float
@@ -135,14 +143,28 @@ class RedisConfig:
 
 @dataclass(frozen=True, slots=True)
 class PromptsConfig:
-    """Prompt file configuration."""
+    """Configuration for prompt templates.
+
+    Attributes:
+        system_prompt: File name of the system prompt template.
+
+    """
 
     system_prompt: str
 
 
 @dataclass(frozen=True, slots=True)
 class InfoRagConfig:
-    """Top-level configuration loaded from TOML."""
+    """Top-level configuration loaded from TOML.
+
+    Attributes:
+        retrieval: Retrieval-related configuration.
+        embeddings: Embedding-related configuration.
+        chat: Chat model configuration.
+        redis: Redis connectivity configuration.
+        prompts: Prompt template configuration.
+
+    """
 
     retrieval: RetrievalConfig
     embeddings: EmbeddingsConfig
@@ -155,13 +177,15 @@ def load_config(config_path: Path) -> InfoRagConfig:
     """Load configuration from a TOML file.
 
     Args:
-        config_path: Path to TOML config.
+        config_path: Path to the TOML configuration file.
 
     Returns:
-        InfoRagConfig: Parsed config.
+        InfoRagConfig: Parsed configuration.
 
     Raises:
-        RuntimeError: If the file is missing/unreadable or required keys are missing.
+        RuntimeError: If the file is missing, unreadable, contains invalid TOML, or
+            required keys are missing.
+
     """
     path = config_path.expanduser().resolve()
     if not path.exists() or not path.is_file():
@@ -221,16 +245,17 @@ def load_config(config_path: Path) -> InfoRagConfig:
 def resolve_prompts_dir(*, prompts_folder: str = "../system_prompts") -> Path:
     """Resolve the prompts directory.
 
-    Assumes prompts live in a single folder next to this module.
+    The prompts directory is resolved relative to this module file.
 
     Args:
-        prompts_folder: Folder name.
+        prompts_folder: Folder name (relative to this module).
 
     Returns:
-        Path: Resolved prompts directory.
+        Path: Absolute path to the prompts directory.
 
     Raises:
         RuntimeError: If the directory does not exist.
+
     """
     prompts_dir = (Path(__file__).parent / prompts_folder).resolve()
     if not prompts_dir.exists() or not prompts_dir.is_dir():
@@ -243,14 +268,15 @@ def resolve_system_prompt_path(*, filename: str, prompts_dir: Path) -> Path:
     """Resolve a prompt template file within the prompts directory.
 
     Args:
-        filename: Prompt file name (no path).
-        prompts_dir: Directory that contains all prompt files.
+        filename: Prompt file name only (no path components).
+        prompts_dir: Directory containing all prompt templates.
 
     Returns:
-        Path: Resolved path to the prompt file.
+        Path: Absolute path to the prompt template.
 
     Raises:
         RuntimeError: If the file does not exist.
+
     """
     candidate = (prompts_dir / filename).resolve()
     if not candidate.exists() or not candidate.is_file():
@@ -261,7 +287,18 @@ def resolve_system_prompt_path(*, filename: str, prompts_dir: Path) -> Path:
 
 @lru_cache(maxsize=1)
 def get_redis_url() -> str:
-    """Return the Redis connection URL from environment."""
+    """Return the Redis connection URL from environment.
+
+    This function loads environment variables via ``python-dotenv`` and returns the
+    ``REDIS_URL`` value.
+
+    Returns:
+        str: Redis connection URL.
+
+    Raises:
+        RuntimeError: If ``REDIS_URL`` is not set.
+
+    """
     load_dotenv()
     url = os.getenv("REDIS_URL")
     if not url:
@@ -271,7 +308,14 @@ def get_redis_url() -> str:
 
 
 class Source(StrEnum):
-    """Canonical sources for hotel knowledge retrieval."""
+    """Enumeration of knowledge sources.
+
+    Values correspond to:
+        - Redis index names
+        - Redis key prefixes
+        - The ``source`` field in retrieval results
+
+    """
 
     FAQ = "faq"
     AMENITIES = "amenities"
@@ -279,7 +323,17 @@ class Source(StrEnum):
 
 
 class RetrievalItemLite(BaseModel):
-    """Lightweight retrieval result used for reranking and hydration."""
+    """Lightweight retrieval result.
+
+    This model is used for cross-source reranking. The actual text and metadata are
+    fetched later during hydration.
+
+    Attributes:
+        source: Origin source of the item (faq/amenities/services).
+        item_id: Stable identifier used to hydrate the item from Redis.
+        score: Similarity score used for ranking.
+
+    """
 
     source: Source = Field(..., description="faq | amenities | services")
     item_id: str = Field(..., description="Stable identifier for this item")
@@ -287,33 +341,59 @@ class RetrievalItemLite(BaseModel):
 
 
 class RetrievalItem(BaseModel):
-    """Hydrated retrieval result containing text and metadata."""
+    """Hydrated retrieval result containing text and metadata.
+
+    Attributes:
+        source: Origin source of the item.
+        metadata: Metadata payload associated with the node.
+        text: Human-readable text for the node.
+        score: Similarity score used for ranking.
+
+    """
 
     source: Source = Field(..., description="Which retriever produced this item")
-    metadata: dict[str, Any] = Field(..., description="Metadata associated with the text")
+    metadata: dict[str, Any] = Field(
+        ..., description="Metadata associated with the text",
+    )
     text: str = Field(..., description="The item name and description")
     score: float = Field(..., description="Similarity score; higher is more relevant")
 
 
 class RerankInput(BaseModel):
-    """Schema for reranker tool input."""
+    """Input schema for the reranker tool.
 
-    faq_results: list[RetrievalItemLite] = Field(..., description="Output from query_faq")
+    Attributes:
+        faq_results: Results returned by ``query_faq``.
+        amenities_results: Results returned by ``query_amenities``.
+        services_results: Results returned by ``query_services``.
+
+    """
+
+    faq_results: list[RetrievalItemLite] = Field(
+        ..., description="Output from query_faq",
+    )
     amenities_results: list[RetrievalItemLite] = Field(
-        ..., description="Output from query_amenities"
+        ...,
+        description="Output from query_amenities",
     )
     services_results: list[RetrievalItemLite] = Field(
-        ..., description="Output from query_services"
+        ...,
+        description="Output from query_services",
     )
 
 
 class HydrateInput(BaseModel):
-    """Schema for hydrate_items tool input."""
+    """Input schema for the hydrate_items tool.
+
+    Attributes:
+        items: Top items selected by the reranker.
+
+    """
 
     items: list[RetrievalItemLite] = Field(..., description="Top items from reranker")
 
 
-def build_filters(
+def build_filters(  # noqa: PLR0913
     *,
     booking_required: bool | None = None,
     min_price: float | None = None,
@@ -323,7 +403,24 @@ def build_filters(
     min_duration_minutes: int | None = None,
     max_duration_minutes: int | None = None,
 ) -> MetadataFilters | None:
-    """Build metadata filters for LlamaIndex retrieval."""
+    """Build metadata filters for LlamaIndex retrieval.
+
+    All provided constraints are combined using logical AND.
+
+    Args:
+        booking_required: If provided, filters on booking_required == "True"/"False".
+        min_price: Minimum price (inclusive).
+        max_price: Maximum price (inclusive).
+        min_notice_hours: Minimum notice hours (inclusive).
+        max_notice_hours: Maximum notice hours (inclusive).
+        min_duration_minutes: Minimum duration minutes (inclusive).
+        max_duration_minutes: Maximum duration minutes (inclusive).
+
+    Returns:
+        MetadataFilters | None: Filter object when any constraints are provided;
+        otherwise None.
+
+    """
     filters: list[MetadataFilter | MetadataFilters] = []
 
     if booking_required is not None:
@@ -332,16 +429,20 @@ def build_filters(
                 key="booking_required",
                 operator=FilterOperator.EQ,
                 value="True" if booking_required else "False",
-            )
+            ),
         )
 
     if min_price is not None:
         filters.append(
-            MetadataFilter(key="price", operator=FilterOperator.GTE, value=float(min_price))
+            MetadataFilter(
+                key="price", operator=FilterOperator.GTE, value=float(min_price),
+            ),
         )
     if max_price is not None:
         filters.append(
-            MetadataFilter(key="price", operator=FilterOperator.LTE, value=float(max_price))
+            MetadataFilter(
+                key="price", operator=FilterOperator.LTE, value=float(max_price),
+            ),
         )
 
     if min_notice_hours is not None:
@@ -350,7 +451,7 @@ def build_filters(
                 key="min_notice_hours",
                 operator=FilterOperator.GTE,
                 value=int(min_notice_hours),
-            )
+            ),
         )
     if max_notice_hours is not None:
         filters.append(
@@ -358,20 +459,24 @@ def build_filters(
                 key="min_notice_hours",
                 operator=FilterOperator.LTE,
                 value=int(max_notice_hours),
-            )
+            ),
         )
 
     if min_duration_minutes is not None:
         filters.append(
             MetadataFilter(
-                key="duration", operator=FilterOperator.GTE, value=int(min_duration_minutes)
-            )
+                key="duration",
+                operator=FilterOperator.GTE,
+                value=int(min_duration_minutes),
+            ),
         )
     if max_duration_minutes is not None:
         filters.append(
             MetadataFilter(
-                key="duration", operator=FilterOperator.LTE, value=int(max_duration_minutes)
-            )
+                key="duration",
+                operator=FilterOperator.LTE,
+                value=int(max_duration_minutes),
+            ),
         )
 
     return MetadataFilters(filters=filters) if filters else None
@@ -384,7 +489,18 @@ def build_index_schema(
     extra_fields: list[dict[str, Any]],
     vector_dims: int,
 ) -> IndexSchema:
-    """Create a RedisVL index schema for a RedisVectorStore."""
+    """Create a RedisVL index schema for a RedisVectorStore.
+
+    Args:
+        name: RedisSearch index name.
+        prefix: Key prefix for documents in this index.
+        extra_fields: Additional schema fields for metadata filtering.
+        vector_dims: Dimensionality of the vector field.
+
+    Returns:
+        IndexSchema: RedisVL schema instance.
+
+    """
     fields: list[dict[str, Any]] = [
         {"type": "tag", "name": "id"},
         {"type": "tag", "name": "doc_id"},
@@ -407,7 +523,14 @@ def build_index_schema(
 
 @dataclass(frozen=True)
 class VectorIndexes:
-    """Container for the three VectorStoreIndex instances."""
+    """Container for the three VectorStoreIndex instances.
+
+    Attributes:
+        faq: Vector index for FAQs.
+        amenities: Vector index for amenities.
+        services: Vector index for services.
+
+    """
 
     faq: VectorStoreIndex
     amenities: VectorStoreIndex
@@ -415,7 +538,16 @@ class VectorIndexes:
 
 
 class InfoRagResources:
-    """Shared, async-first resources used by retrieval tools."""
+    """Shared, async-first resources used by retrieval tools.
+
+    This class owns:
+        - the async Redis client
+        - LlamaIndex vector indexes + retrievers
+        - a bounded cache of per-filter retrievers
+
+    It is intended to be created once per process and reused across requests.
+
+    """
 
     def __init__(
         self,
@@ -431,6 +563,7 @@ class InfoRagResources:
         Args:
             redis_url: Redis connection URL.
             config: Parsed TOML configuration.
+
         """
         self._config = config
         self._top_k = int(config.retrieval.top_k)
@@ -453,14 +586,23 @@ class InfoRagResources:
             vector_dims=self._vector_dims,
         )
 
-        self._faq_retriever = self.indexes.faq.as_retriever(similarity_top_k=self._top_k)
+        self._faq_retriever = self.indexes.faq.as_retriever(
+            similarity_top_k=self._top_k,
+        )
 
         self._catalog_retrievers: OrderedDict[
-            tuple[Source, tuple[tuple[str, str, str], ...]], VectorIndexRetriever
+            tuple[Source, tuple[tuple[str, str, str], ...]],
+            VectorIndexRetriever,
         ] = OrderedDict()
 
     async def startup_check(self) -> None:
-        """Validate Redis connectivity, retriever capability, and index schema."""
+        """Validate Redis connectivity, retriever capability, and index schema.
+
+        Raises:
+            OperationalError: If Redis is unreachable, retrievers do not support
+                async retrieval, or the index schema does not match configuration.
+
+        """
         try:
             await self.redis_async.ping()
         except Exception as exc:
@@ -475,16 +617,37 @@ class InfoRagResources:
         await self._validate_vector_dims()
 
     async def _validate_vector_dims(self) -> None:
-        """Validate that Redis vector index dimensions match the configured value."""
+        """Validate that Redis vector index dimensions match the configured value.
+
+        Raises:
+            OperationalError: If any index reports a vector dimension that does not
+                match the configured value.
+
+        """
         for src in (Source.FAQ, Source.AMENITIES, Source.SERVICES):
             expected = self._vector_dims
             actual = await self._get_index_vector_dims(str(src))
             if actual != expected:
-                msg = f"Index '{src}' vector dims mismatch: expected={expected} actual={actual}"
+                msg = (
+                    f"Index '{src}' vector dims mismatch: "
+                    f"expected={expected} actual={actual}"
+                )
                 raise OperationalError(msg)
 
     async def _get_index_vector_dims(self, index_name: str) -> int:
-        """Extract vector dims for the 'vector' field from FT.INFO."""
+        """Extract vector dims for the 'vector' field from FT.INFO.
+
+        Args:
+            index_name: RedisSearch index name.
+
+        Returns:
+            int: Vector dimensionality for the "vector" field.
+
+        Raises:
+            OperationalError: If FT.INFO fails or the response is missing required
+                fields.
+
+        """
         try:
             reply = await self.redis_async.execute_command("FT.INFO", index_name)
         except Exception as exc:
@@ -525,17 +688,29 @@ class InfoRagResources:
                 msg = f"FT.INFO for '{index_name}' returned non-int dims: {dims!r}"
                 raise OperationalError(msg) from exc
 
-        msg = f"FT.INFO for '{index_name}' did not include a vector field named 'vector'"
+        msg = (
+            f"FT.INFO for '{index_name}' did not include a vector field named 'vector'"
+        )
         raise OperationalError(msg)
 
     @staticmethod
     def _redis_kv_list_to_dict(reply: object | None) -> dict[str, Any]:
-        """Convert Redis module replies (flat [k,v,k,v,...]) to dict."""
+        """Convert Redis module replies (flat [k, v, k, v, ...]) to dict.
+
+        Args:
+            reply: Redis module response (mapping-like or flat sequence) or None.
+
+        Returns:
+            dict[str, Any]: Lowercased-key dictionary representation.
+
+        """
         if reply is None:
             return {}
         if isinstance(reply, Mapping):
             return {str(k).lower(): v for k, v in reply.items()}
-        if not isinstance(reply, Sequence) or isinstance(reply, (str, bytes, bytearray)):
+        if not isinstance(reply, Sequence) or isinstance(
+            reply, (str, bytes, bytearray),
+        ):
             return {}
 
         out: dict[str, Any] = {}
@@ -552,12 +727,13 @@ class InfoRagResources:
     def _init_llamaindex(cfg: EmbeddingsConfig) -> None:
         """Configure LlamaIndex global embedding settings.
 
-        Side effects:
+        Side Effects:
             Updates the global ``llama_index.core.Settings.embed_model`` for the
             current process.
 
         Args:
             cfg: Embedding configuration.
+
         """
         Settings.embed_model = OpenAIEmbedding(
             model=cfg.model,
@@ -567,8 +743,17 @@ class InfoRagResources:
         )
 
     @staticmethod
-    def _coerce_score(node: Any) -> float:
-        """Convert a retrieved node score to a safe float."""
+    def _coerce_score(node: Any) -> float:  # noqa: ANN401
+        """Convert a retrieved node score to a safe float.
+
+        Args:
+            node: Retrieved node object (may or may not define a score).
+
+        Returns:
+            float: A finite float score; returns 0.0 for missing, invalid, NaN, or
+            infinite scores.
+
+        """
         raw = getattr(node, "score", None)
         if raw is None:
             return 0.0
@@ -584,7 +769,15 @@ class InfoRagResources:
     def _filters_signature(
         filters: MetadataFilters | None,
     ) -> tuple[tuple[str, str, str], ...]:
-        """Create a stable cache key for metadata filters."""
+        """Create a stable cache key for metadata filters.
+
+        Args:
+            filters: Optional metadata filters.
+
+        Returns:
+            tuple[tuple[str, str, str], ...]: Order-independent signature for caching.
+
+        """
         if not filters:
             return ()
 
@@ -603,7 +796,13 @@ class InfoRagResources:
         cache_key: tuple[Source, tuple[tuple[str, str, str], ...]],
         retriever: VectorIndexRetriever,
     ) -> None:
-        """Insert a retriever into the bounded LRU cache."""
+        """Insert a retriever into the bounded LRU cache.
+
+        Args:
+            cache_key: Cache key (source, filter signature).
+            retriever: Retriever instance to cache.
+
+        """
         self._catalog_retrievers[cache_key] = retriever
         self._catalog_retrievers.move_to_end(cache_key)
         while len(self._catalog_retrievers) > self._retriever_cache_max:
@@ -615,7 +814,19 @@ class InfoRagResources:
         source: Source,
         filters: MetadataFilters | None,
     ) -> VectorIndexRetriever:
-        """Return a cached VectorIndexRetriever for amenities/services."""
+        """Return a cached VectorIndexRetriever for amenities/services.
+
+        Args:
+            source: Source.AMENITIES or Source.SERVICES.
+            filters: Optional metadata filters.
+
+        Returns:
+            VectorIndexRetriever: Cached or newly-created retriever.
+
+        Raises:
+            OperationalError: If the retriever does not support async retrieval.
+
+        """
         sig = self._filters_signature(filters)
         cache_key = (source, sig)
 
@@ -648,7 +859,16 @@ class InfoRagResources:
         *,
         vector_dims: int,
     ) -> VectorIndexes:
-        """Build VectorStoreIndex instances backed by RedisVectorStore."""
+        """Build VectorStoreIndex instances backed by RedisVectorStore.
+
+        Args:
+            redis_client_async: Async Redis client used by RedisVectorStore.
+            vector_dims: Vector dimension for the schema.
+
+        Returns:
+            VectorIndexes: Container with all three indexes.
+
+        """
         faq_schema = build_index_schema(
             name=Source.FAQ,
             prefix=Source.FAQ,
@@ -662,7 +882,8 @@ class InfoRagResources:
         )
         faq_storage = StorageContext.from_defaults(vector_store=faq_store)
         faq_index = VectorStoreIndex.from_vector_store(
-            vector_store=faq_store, storage_context=faq_storage
+            vector_store=faq_store,
+            storage_context=faq_storage,
         )
 
         amenities_schema = build_index_schema(
@@ -684,7 +905,8 @@ class InfoRagResources:
         )
         amenities_storage = StorageContext.from_defaults(vector_store=amenities_store)
         amenities_index = VectorStoreIndex.from_vector_store(
-            vector_store=amenities_store, storage_context=amenities_storage
+            vector_store=amenities_store,
+            storage_context=amenities_storage,
         )
 
         services_schema = build_index_schema(
@@ -707,7 +929,8 @@ class InfoRagResources:
         )
         services_storage = StorageContext.from_defaults(vector_store=services_store)
         services_index = VectorStoreIndex.from_vector_store(
-            vector_store=services_store, storage_context=services_storage
+            vector_store=services_store,
+            storage_context=services_storage,
         )
 
         return VectorIndexes(
@@ -718,11 +941,27 @@ class InfoRagResources:
 
     @property
     def top_k(self) -> int:
-        """Return the configured retrieval top-k."""
+        """Return the configured retrieval top-k.
+
+        Returns:
+            int: Top-k value used for retrieval.
+
+        """
         return self._top_k
 
     async def retrieve_faq(self, query: str) -> list[RetrievalItemLite]:
-        """Retrieve FAQ nodes relevant to a query."""
+        """Retrieve FAQ nodes relevant to a query.
+
+        Args:
+            query: Natural-language query.
+
+        Returns:
+            list[RetrievalItemLite]: Lightweight FAQ matches.
+
+        Raises:
+            OperationalError: If retrieval fails.
+
+        """
         try:
             nodes = await self._faq_retriever.aretrieve(query)
         except Exception as exc:
@@ -745,7 +984,20 @@ class InfoRagResources:
         query: str,
         filters: MetadataFilters | None,
     ) -> list[RetrievalItemLite]:
-        """Retrieve amenity/service nodes for a query with optional metadata filters."""
+        """Retrieve amenity/service nodes for a query with optional metadata filters.
+
+        Args:
+            source: Source.AMENITIES or Source.SERVICES.
+            query: Natural-language query.
+            filters: Optional metadata filters.
+
+        Returns:
+            list[RetrievalItemLite]: Lightweight matches for the given source.
+
+        Raises:
+            OperationalError: If retrieval fails.
+
+        """
         retriever = self._get_catalog_retriever(source=source, filters=filters)
         try:
             nodes = await retriever.aretrieve(query)
@@ -766,7 +1018,15 @@ class InfoRagResources:
         self,
         items: list[RetrievalItemLite],
     ) -> tuple[Any, list[str]]:
-        """Build a Redis pipeline to fetch hydration fields for a list of items."""
+        """Build a Redis pipeline to fetch hydration fields for a list of items.
+
+        Args:
+            items: Items to hydrate.
+
+        Returns:
+            tuple[Any, list[str]]: (pipeline, redis_keys) in matching order.
+
+        """
         pipe = self.redis_async.pipeline(transaction=False)
         keys: list[str] = []
         for item in items:
@@ -783,7 +1043,22 @@ class InfoRagResources:
         result: object,
         best_effort: bool,
     ) -> tuple[str, str] | None:
-        """Parse a single HMGET result into (_node_content, text)."""
+        """Parse a single HMGET result into (_node_content, text).
+
+        Args:
+            item: Item being hydrated.
+            key: Redis key used for hydration.
+            result: Raw HMGET result.
+            best_effort: If True, return None on malformed/missing results.
+
+        Returns:
+            tuple[str, str] | None: (node_content_json, text) or None if best_effort
+            skips this item.
+
+        Raises:
+            OperationalError: If best_effort is False and the result is malformed.
+
+        """
         try:
             node_content_str, text = result  # type: ignore[misc]
         except Exception as exc:
@@ -803,7 +1078,8 @@ class InfoRagResources:
                 )
                 return None
             msg = (
-                f"Could not hydrate item_id={item.item_id} from source={item.source} (key={key})"
+                f"Could not hydrate item_id={item.item_id} "
+                "from source={item.source} (key={key})"
             )
             raise OperationalError(msg)
 
@@ -816,7 +1092,20 @@ class InfoRagResources:
         key: str,
         best_effort: bool,
     ) -> dict[str, Any] | None:
-        """Decode the JSON stored in _node_content."""
+        """Decode the JSON stored in _node_content.
+
+        Args:
+            node_content_str: JSON string stored under the _node_content field.
+            key: Redis key used for logging and error messages.
+            best_effort: If True, return None on invalid payloads.
+
+        Returns:
+            dict[str, Any] | None: Parsed JSON dict or None if best_effort skips.
+
+        Raises:
+            OperationalError: If best_effort is False and JSON decoding fails.
+
+        """
         try:
             node_content = json.loads(node_content_str)
         except json.JSONDecodeError as exc:
@@ -842,7 +1131,17 @@ class InfoRagResources:
         node_content: dict[str, Any],
         text: str,
     ) -> RetrievalItem:
-        """Convert parsed Redis payload to a hydrated RetrievalItem."""
+        """Convert parsed Redis payload to a hydrated RetrievalItem.
+
+        Args:
+            item: Lightweight item containing source/id/score.
+            node_content: Parsed JSON dict from _node_content.
+            text: Text field fetched from Redis.
+
+        Returns:
+            RetrievalItem: Hydrated result.
+
+        """
         metadata = node_content.get("metadata")
         if not isinstance(metadata, dict):
             metadata = {}
@@ -859,7 +1158,23 @@ class InfoRagResources:
         *,
         best_effort: bool = True,
     ) -> list[RetrievalItem]:
-        """Hydrate lite results into full objects by fetching Redis document fields."""
+        """Hydrate lite results into full objects by fetching Redis document fields.
+
+        This method fetches the Redis fields "_node_content" and "text" for each item
+        and converts them into ``RetrievalItem`` instances.
+
+        Args:
+            items: Lightweight items selected by the reranker.
+            best_effort: If True, logs and skips malformed/missing items instead of
+                raising.
+
+        Returns:
+            list[RetrievalItem]: Hydrated items.
+
+        Raises:
+            OperationalError: If best_effort is False and hydration fails.
+
+        """
         item_list = list(items)
         if not item_list:
             return []
@@ -896,7 +1211,7 @@ class InfoRagResources:
                 continue
 
             hydrated.append(
-                self._to_hydrated_item(item=item, node_content=node_content, text=text)
+                self._to_hydrated_item(item=item, node_content=node_content, text=text),
             )
 
         return hydrated
@@ -904,7 +1219,18 @@ class InfoRagResources:
 
 @lru_cache(maxsize=5)
 def _load_prompt_template(path: Path) -> Template:
-    """Load and cache a prompt template from disk."""
+    """Load and cache a prompt template from disk.
+
+    Args:
+        path: Path to a prompt template file.
+
+    Returns:
+        Template: Cached string.Template instance.
+
+    Raises:
+        RuntimeError: If the file cannot be read.
+
+    """
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -914,7 +1240,16 @@ def _load_prompt_template(path: Path) -> Template:
 
 
 def build_system_prompt(*, top_k: int, prompt_path: Path) -> str:
-    """Render the system prompt with runtime substitutions."""
+    """Render the system prompt with runtime substitutions.
+
+    Args:
+        top_k: Retrieval top-k used to render the template.
+        prompt_path: Path to the system prompt template.
+
+    Returns:
+        str: Rendered system prompt string.
+
+    """
     template = _load_prompt_template(prompt_path)
     return template.safe_substitute(top_k=top_k)
 
@@ -928,6 +1263,10 @@ def build_chat_model(*, cfg: ChatConfig, **kwargs: Any) -> ChatOpenAI:  # noqa: 
 
     Returns:
         ChatOpenAI: Configured chat model.
+
+    Raises:
+        ValueError: If configuration values cannot be coerced to required types.
+
     """
     return ChatOpenAI(
         model=cfg.model,
@@ -940,7 +1279,17 @@ def build_chat_model(*, cfg: ChatConfig, **kwargs: Any) -> ChatOpenAI:  # noqa: 
 
 
 class AgentFactory:
-    """Factory for constructing the LangChain agent with bound async tools."""
+    """Factory for constructing the LangChain agent with bound async tools.
+
+    This factory wires together:
+        - configuration
+        - shared async retrieval resources
+        - a chat model (instance or model name)
+        - prompt templates
+
+    The resulting agent uses tool calls for retrieval/reranking/hydration.
+
+    """
 
     def __init__(
         self,
@@ -958,18 +1307,31 @@ class AgentFactory:
                 agent.
             config: Parsed TOML configuration.
             prompts_dir: Directory containing all prompt templates.
+
         """
         self._resources = resources
         self._chat_model = chat_model
         self._config = config
         self._prompts_dir = prompts_dir
 
-    def build(self) -> CompiledStateGraph:
-        """Build and return a compiled agent graph."""
+    def build(self) -> CompiledStateGraph:  # noqa: C901
+        """Build and return a compiled agent graph.
+
+        Returns:
+            CompiledStateGraph: A compiled agent graph created by LangChain.
+
+        """
         resources = self._resources
         top_k = resources.top_k
 
         def _log_tool_failure(tool_name: str, exc: Exception) -> None:
+            """Log a tool failure with traceback.
+
+            Args:
+                tool_name: Name of the tool that failed.
+                exc: Exception raised by the tool.
+
+            """
             logger.exception("Tool %s failed: %s", tool_name, exc)
 
         @tool(parse_docstring=True)
@@ -999,17 +1361,18 @@ class AgentFactory:
                 - "Do you allow pets?"
                 - "Is there parking and how much does it cost?"
                 - "What is the cancellation policy?"
+
             """
             try:
                 return await resources.retrieve_faq(query)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 _log_tool_failure("query_faq", exc)
                 return []
 
         @tool(parse_docstring=True)
-        async def query_amenities(
+        async def query_amenities(  # noqa: PLR0913
             query: str,
-            booking_required: bool | None = None,
+            booking_required: bool | None = None,  # noqa: FBT001
             min_price: float | None = None,
             max_price: float | None = None,
             min_notice_hours: int | None = None,
@@ -1019,9 +1382,9 @@ class AgentFactory:
         ) -> list[RetrievalItemLite]:
             """Retrieve hotel amenities relevant to a user query.
 
-            This tool performs vector search over the **amenities** catalog and can apply
-            optional metadata constraints. All provided constraints are combined using
-            logical **AND**.
+            This tool performs vector search over the **amenities** catalog and can
+            apply optional metadata constraints. All provided constraints are combined
+            using logical **AND**.
 
             Use this tool when the user asks about amenities such as facilities,
             on-property features, classes, rentals, or other amenity offerings.
@@ -1038,6 +1401,7 @@ class AgentFactory:
 
             Returns:
                 list[RetrievalItemLite]: Up to ``top_k`` lightweight results.
+
             """
             filters = build_filters(
                 booking_required=booking_required,
@@ -1054,14 +1418,14 @@ class AgentFactory:
                     query=query,
                     filters=filters,
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 _log_tool_failure("query_amenities", exc)
                 return []
 
         @tool(parse_docstring=True)
-        async def query_services(
+        async def query_services(  # noqa: PLR0913
             query: str,
-            booking_required: bool | None = None,
+            booking_required: bool | None = None,  # noqa: FBT001
             min_price: float | None = None,
             max_price: float | None = None,
             min_notice_hours: int | None = None,
@@ -1099,6 +1463,7 @@ class AgentFactory:
                 - "in-room massage under $200"
                 - "late checkout service"
                 - "laundry with at least 2 hours notice"
+
             """
             filters = build_filters(
                 booking_required=booking_required,
@@ -1115,7 +1480,7 @@ class AgentFactory:
                     query=query,
                     filters=filters,
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 _log_tool_failure("query_services", exc)
                 return []
 
@@ -1125,16 +1490,38 @@ class AgentFactory:
             amenities_results: list[RetrievalItemLite],
             services_results: list[RetrievalItemLite],
         ) -> list[RetrievalItemLite]:
-            """Select the top-k results across FAQ, amenities, and services."""
+            """Select the top-k results across FAQ, amenities, and services.
+
+            This tool merges results from earlier retrieval tools and selects the
+            highest-scoring items.
+
+            Args:
+                faq_results: Output from ``query_faq``.
+                amenities_results: Output from ``query_amenities``.
+                services_results: Output from ``query_services``.
+
+            Returns:
+                list[RetrievalItemLite]: The top-k items by score.
+
+            """
             all_results = [*faq_results, *amenities_results, *services_results]
             return heapq.nlargest(top_k, all_results, key=lambda x: x.score)
 
         @tool(args_schema=HydrateInput)
         async def hydrate_items(items: list[RetrievalItemLite]) -> list[RetrievalItem]:
-            """Hydrate reranked items into full text + metadata objects."""
+            """Hydrate reranked items into full text + metadata objects.
+
+            Args:
+                items: Lightweight items returned by the reranker.
+
+            Returns:
+                list[RetrievalItem]: Hydrated results. Returns an empty list on
+                operational failures.
+
+            """
             try:
                 return await resources.hydrate(items, best_effort=True)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 _log_tool_failure("hydrate_items", exc)
                 return []
 

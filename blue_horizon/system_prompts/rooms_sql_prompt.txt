@@ -59,6 +59,8 @@ room_availability:
 * Prefer targeted column selection. **Never** use `SELECT *`.
 * Unless the user requests otherwise, limit to at most `$top_k` rows.
 * You may order results by relevant columns.
+* Do NOT end your queries with a semicolon.
+* Only send one query at a time. If you must make multiple queries, send them separately.
 * If you get a query error, rewrite and retry (max 2 reformulations).
 * If a query returns an empty result, that's acceptable: say you couldn't find relevant rooms.
 

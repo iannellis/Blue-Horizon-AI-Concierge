@@ -183,7 +183,7 @@ class InfoRagConfig:
 # ============================
 
 
-def load_config(config_path: Path) -> InfoRagConfig:
+def load_info_config(config_path: Path) -> InfoRagConfig:
     """Load configuration from a TOML file.
 
     Args:

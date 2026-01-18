@@ -58,6 +58,9 @@ health_check_interval_s = 30
 
 
 [prompts]
+# Folder relative to this Python file.
+folder = "../system_prompts"
+
 # File name ONLY (no path). The code assumes all prompts live in one folder
 # (e.g., ../system_prompts/ next to the module).
-system_prompt = "information_prompt.txt"
+system_prompt_filename = "information_prompt.txt"

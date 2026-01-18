@@ -23,7 +23,7 @@ max_retries = 2
 folder = "../system_prompts"
 
 # Prompt template filename inside the folder.
-system_prompt = "rooms_sql_prompt.txt"
+system_prompt_filename = "rooms_sql_prompt.txt"
 
 
 [agent]

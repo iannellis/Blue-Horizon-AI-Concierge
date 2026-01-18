@@ -1,22 +1,20 @@
 """Provide a rooms SQL agent module.
 
 This module defines an async LangGraph/LangChain agent backed by a PostgreSQL
-(Neon) database. The agent uses a single tool, `run_sql`, to execute exactly one
-SQL statement per tool call (no semicolons).
+ database. It follows the same separation of concerns as
+`information_agent.py`:
 
-The `run_sql` tool applies lightweight guardrails to:
-- Block DDL/privileged statements (e.g., DROP, ALTER, GRANT).
-- Block common catalog/extension escape hatches (e.g., pg_catalog).
-- Optionally restrict table references to a hotel table allowlist.
-- Truncate large result sets for model safety.
+- A resources class owns long-lived dependencies and performs startup checks.
+- A factory class builds the agent and binds tools that call into resources.
 
 Configuration is loaded from a TOML file into typed dataclasses. Secrets (e.g.,
-NEON_DB_URL, API keys) come from environment variables.
+PGSQL_DB_URL, API keys) come from environment variables.
 
-FastAPI integration:
-- Optionally call `initialize_rooms_agent()` at startup.
-- In request handlers, call `await get_rooms_agent()` and then `agent.ainvoke(...)`.
-- Call `shutdown_rooms_agent()` at shutdown.
+FastAPI integration (suggested):
+- Create `RoomsSqlResources` at startup and call `await resources.startup_check()`.
+- Build the agent once with `RoomsAgentFactory(...).build()` and store it on
+  `app.state`.
+- Close resources at shutdown with `await resources.aclose()`.
 
 """
 
@@ -33,7 +31,7 @@ from typing import Any, Final, LiteralString, cast
 
 import psycopg
 from langchain.agents import create_agent
-from langchain_core.tools import BaseTool, tool
+from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.graph.state import CompiledStateGraph
 from psycopg import sql
@@ -107,12 +105,12 @@ class PromptsConfig:
 
     Attributes:
         folder: Folder (relative to this module) containing prompt templates.
-        system_prompt: System prompt template filename (no path).
+        system_prompt_filename: System prompt template filename (no path).
 
     """
 
     folder: str
-    system_prompt: str
+    system_prompt_filename: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,8 +118,8 @@ class DbPoolConfig:
     """Configure the client-side async connection pool.
 
     Notes:
-        Neon may also pool on the server side. This pool controls concurrency and
-        connection reuse within the application process.
+        The database provider may also pool on the server side. This pool controls
+        concurrency and connection reuse within the application process.
 
     Attributes:
         min_size: Minimum number of connections to keep in the pool.
@@ -224,7 +222,7 @@ def load_rooms_sql_config(config_path: Path) -> RoomsSqlConfig:
         config_path: Path to TOML config.
 
     Returns:
-        RoomsSqlConfig: Parsed config.
+        Parsed rooms SQL configuration.
 
     Raises:
         RuntimeError: If missing/unreadable TOML or required keys are missing.
@@ -268,7 +266,7 @@ def load_rooms_sql_config(config_path: Path) -> RoomsSqlConfig:
             ),
             prompts=PromptsConfig(
                 folder=str(prompts["folder"]),
-                system_prompt=str(prompts["system_prompt"]),
+                system_prompt_filename=str(prompts["system_prompt_filename"]),
             ),
             db=DbConfig(
                 pool=DbPoolConfig(
@@ -307,19 +305,19 @@ def load_rooms_sql_config(config_path: Path) -> RoomsSqlConfig:
 
 
 @lru_cache(maxsize=1)
-def get_neon_db_url() -> str:
-    """Get the Neon connection URL from the environment.
+def get_pgsql_db_url() -> str:
+    """Get the PostgreSQL connection URL from the environment.
 
     Returns:
-        Neon Postgres connection URL.
+        PostgreSQL connection URL.
 
     Raises:
-        RuntimeError: If NEON_DB_URL is not set.
+        RuntimeError: If PGSQL_DB_URL is not set.
 
     """
-    url = os.getenv("NEON_DB_URL")
+    url = os.getenv("PGSQL_DB_URL")
     if not url:
-        msg = "NEON_DB_URL is not set"
+        msg = "PGSQL_DB_URL is not set"
         raise RuntimeError(msg)
     return url
 
@@ -391,7 +389,7 @@ def load_prompt_template(path: Path) -> StringTemplate:
         path: Path to the template file.
 
     Returns:
-        Parsed Template object.
+        Parsed template object.
 
     Raises:
         RuntimeError: If the file cannot be read.
@@ -449,7 +447,7 @@ def render_system_prompt(  # noqa: PLR0913
 
 
 async def fetch_rooms_metadata(
-    neon_db_url: str,
+    pgsql_db_url: str,
 ) -> tuple[dict[str, list[str]], list[str], list[str], list[str]]:
     """Fetch database metadata used to fill the system prompt.
 
@@ -458,7 +456,7 @@ async def fetch_rooms_metadata(
       - Distinct values from array columns in the rooms table.
 
     Args:
-        neon_db_url: Database URL.
+        pgsql_db_url: Database URL.
 
     Returns:
         Tuple of (enum_values, basic_amenities, additional_amenities, view_types).
@@ -471,7 +469,7 @@ async def fetch_rooms_metadata(
 
     try:
         async with (
-            await psycopg.AsyncConnection.connect(neon_db_url) as conn,
+            await psycopg.AsyncConnection.connect(pgsql_db_url) as conn,
             conn.cursor() as cur,
         ):
             for enum_type in ENUM_TYPES:
@@ -703,8 +701,19 @@ def validate_sql(query: str, *, allow_only_hotel_tables: bool) -> None:
 
 
 # ============================
-# Tool: async SQL execution
+# Resources (long-lived dependencies)
 # ============================
+
+
+async def _sleep_backoff(base_s: float, attempt: int) -> None:
+    """Sleep using exponential backoff.
+
+    Args:
+        base_s: Base backoff in seconds.
+        attempt: Zero-based attempt index.
+
+    """
+    await asyncio.sleep(base_s * (2**attempt))
 
 
 def _is_write_sql(query: str) -> bool:
@@ -745,17 +754,6 @@ def _is_transient_conn_error(exc: BaseException) -> bool:
     return any(p in msg for p in patterns)
 
 
-async def _sleep_backoff(base_s: float, attempt: int) -> None:
-    """Sleep using exponential backoff.
-
-    Args:
-        base_s: Base backoff in seconds.
-        attempt: Zero-based attempt index.
-
-    """
-    await asyncio.sleep(base_s * (2**attempt))
-
-
 def _truncate_rows(
     rows: list[dict[str, Any]],
     *,
@@ -776,51 +774,113 @@ def _truncate_rows(
     return rows[:max_rows], True
 
 
-def _tool_result(*, rows: list[dict[str, Any]], truncated: bool) -> dict[str, Any]:
-    """Build the tool response payload.
+class RoomsSqlResources:
+    """Own long-lived resources for the rooms SQL agent.
 
-    Args:
-        rows: Rows to return.
-        truncated: Whether rows were truncated.
+    This mirrors the resources pattern used by `information_agent.py`. The pool,
+    rendered system prompt, and helper methods live here.
 
-    Returns:
-        Tool response dictionary.
-
-    """
-    return {"truncated": truncated, "rows": rows}
-
-
-def _tool_error_result(message: str) -> dict[str, Any]:
-    """Build a safe error response for the SQL tool.
-
-    Args:
-        message: User-facing error message.
-
-    Returns:
-        Tool response dict including 'error' and empty 'rows'.
-
-    """
-    return {"truncated": False, "rows": [], "error": message}
-
-
-def build_run_sql_tool(
-    *,
-    pool: AsyncConnectionPool,
-    config: RoomsSqlConfig,
-) -> BaseTool:
-    """Build the async `run_sql` tool bound to a pool and configuration.
-
-    Args:
-        pool: Async database connection pool.
+    Attributes:
         config: Parsed configuration.
-
-    Returns:
-        Async tool callable named "run_sql".
+        pgsql_db_url: Database URL.
+        pool: Async connection pool used for SQL execution.
+        system_prompt: Rendered system prompt used to build the agent.
 
     """
 
-    @tool(parse_docstring=True)
-    async def run_sql(query: str) -> dict[str, Any]:
+    __slots__ = (
+        "_prompts_dir",
+        "_system_prompt_path",
+        "config",
+        "pgsql_db_url",
+        "pool",
+        "system_prompt",
+    )
+
+    config: RoomsSqlConfig
+    pgsql_db_url: str
+    pool: AsyncConnectionPool[Any] | None
+    system_prompt: str | None
+    _prompts_dir: Path
+    _system_prompt_path: Path
+
+    def __init__(self, *, config: RoomsSqlConfig, pgsql_db_url: str) -> None:
+        """Construct rooms SQL resources.
+
+        This initializer performs only lightweight setup and validation:
+        - Store configuration and the database URL.
+        - Resolve the prompts directory and system prompt template path.
+
+        Call `await startup_check()` to open the pool and render the prompt.
+
+        Args:
+            config: Parsed configuration loaded from TOML.
+            pgsql_db_url: Database URL.
+
+        Raises:
+            RuntimeError: If the prompt template folder or template file is missing.
+
+        """
+        self.config = config
+        self.pgsql_db_url = pgsql_db_url
+        self.pool: AsyncConnectionPool[Any] | None = None
+        self.system_prompt = None
+
+        prompts_dir = resolve_prompts_dir(prompts_folder=self.config.prompts.folder)
+        prompt_path = resolve_prompt_path(
+            prompts_dir=prompts_dir,
+            filename=self.config.prompts.system_prompt_filename,
+        )
+        self._prompts_dir = prompts_dir
+        self._system_prompt_path = prompt_path
+
+    async def startup_check(self) -> None:
+        """Initialize resources and validate readiness.
+
+        This method opens the database pool, fetches metadata used by the system
+        prompt template, and renders the final system prompt.
+
+        Raises:
+            OperationalError: If resources cannot be initialized.
+
+        """
+        try:
+            await self._open_pool()
+            await self._render_system_prompt()
+        except OperationalError:
+            raise
+        except Exception as exc:
+            msg = "Rooms SQL resources failed during startup"
+            raise OperationalError(msg) from exc
+
+    def get_system_prompt(self) -> str:
+        """Get the rendered system prompt.
+
+        Returns:
+            The rendered system prompt.
+
+        Raises:
+            RuntimeError: If the system prompt is not available because
+                `startup_check()` has not been called or failed.
+
+        """
+        if self.system_prompt is None:
+            msg = "RoomsSqlResources not initialized; call await startup_check() first"
+            raise RuntimeError(msg)
+        return self.system_prompt
+
+    async def aclose(self) -> None:
+        """Close resources owned by this instance.
+
+        This method is idempotent.
+
+        """
+        if self.pool is not None:
+            await self.pool.close()
+        self.pool = None
+        self.system_prompt = None
+
+    async def execute_sql(self, query: str) -> dict[str, Any]:
         """Execute a single SQL statement and return rows.
 
         Args:
@@ -833,44 +893,48 @@ def build_run_sql_tool(
               - truncated: bool
               - error: str (only present on failure)
 
+        Raises:
+            RuntimeError: If resources were not initialized.
+
         """
+        if self.pool is None:
+            msg = "RoomsSqlResources not initialized; call await startup_check() first"
+            raise RuntimeError(msg)
+
         try:
             validate_sql(
                 query,
-                allow_only_hotel_tables=config.db.guardrails.allow_only_hotel_tables,
+                allow_only_hotel_tables=self.config.db.guardrails.allow_only_hotel_tables,
             )
         except ValueError as exc:
             msg = str(exc)
             logger.info("run_sql rejected by guardrails: %s", msg)
-            return _tool_error_result(msg)
+            return {"truncated": False, "rows": [], "error": msg}
 
         is_write = _is_write_sql(query)
-        attempts = config.db.retry.max_transient_retries + 1
+        attempts = self.config.db.retry.max_transient_retries + 1
 
         for attempt in range(attempts):
             try:
                 async with (
-                    pool.connection(timeout=config.db.pool.timeout_s) as conn,
+                    self.pool.connection(timeout=self.config.db.pool.timeout_s) as conn,
                     conn.cursor(row_factory=dict_row) as cur,
                 ):
-                    # Connections in the pool are configured for autocommit so that
-                    # single-statement booking/cancel updates commit reliably.
-                    #
                     # NOTE: psycopg's type stubs expect a LiteralString for `execute()`.
                     # This cast is only to satisfy static type checkers. Runtime safety
                     # is provided by `validate_sql(...)` above.
                     await cur.execute(cast("LiteralString", query))
 
                     if cur.description is None:
-                        return _tool_result(rows=[], truncated=False)
+                        return {"truncated": False, "rows": []}
 
                     rows_raw = await cur.fetchall()
                     rows = [dict(r) for r in rows_raw]
                     rows, truncated = _truncate_rows(
                         rows,
-                        max_rows=config.db.guardrails.max_rows,
+                        max_rows=self.config.db.guardrails.max_rows,
                     )
-                    return _tool_result(rows=rows, truncated=truncated)
+                    return {"truncated": truncated, "rows": rows}
 
             except (
                 psycopg.OperationalError,
@@ -883,7 +947,7 @@ def build_run_sql_tool(
                     and attempt < attempts - 1
                     and (
                         (not is_write)
-                        or config.db.retry.retry_writes_on_transient_errors
+                        or self.config.db.retry.retry_writes_on_transient_errors
                     )
                 )
 
@@ -895,7 +959,7 @@ def build_run_sql_tool(
                         exc_info=True,
                     )
                     await _sleep_backoff(
-                        config.db.retry.transient_retry_backoff_s,
+                        self.config.db.retry.transient_retry_backoff_s,
                         attempt,
                     )
                     continue
@@ -906,86 +970,33 @@ def build_run_sql_tool(
                     attempts,
                     exc_info=True,
                 )
-                return _tool_error_result(_user_facing_db_message())
+                return {
+                    "truncated": False,
+                    "rows": [],
+                    "error": _user_facing_db_message(),
+                }
 
             except Exception:
                 logger.exception("run_sql unexpected failure")
-                return _tool_error_result(_user_facing_db_message())
+                return {
+                    "truncated": False,
+                    "rows": [],
+                    "error": _user_facing_db_message(),
+                }
 
         logger.warning("run_sql failed after retries")
-        return _tool_error_result(_user_facing_db_message())
+        return {"truncated": False, "rows": [], "error": _user_facing_db_message()}
 
-    return run_sql
-
-
-# ============================
-# Factory: initialize once, serve fast
-# ============================
-
-
-@dataclass
-class RoomsAgentFactory:
-    """Create and manage the DB pool and compiled rooms agent.
-
-    Attributes:
-        config: Parsed configuration loaded from TOML.
-        neon_db_url: Database URL used to create connections.
-        pool: Async connection pool used by the SQL tool.
-        agent: Compiled LangGraph agent created after initialization.
-
-    """
-
-    config: RoomsSqlConfig
-    neon_db_url: str
-    pool: AsyncConnectionPool | None = None
-    agent: CompiledStateGraph | None = None
-
-    _init_lock: asyncio.Lock | None = None
-
-    async def ensure_initialized(self) -> None:
-        """Ensure the pool and agent are initialized.
-
-        This method is safe to call concurrently; only one initializer will run and
-        subsequent callers will wait for completion.
+    async def _open_pool(self) -> None:
+        """Open the async connection pool.
 
         Raises:
-            OperationalError: If initialization fails for an expected operational
-                reason.
+            OperationalError: If the pool cannot be opened.
 
         """
-        if self.agent is not None and self.pool is not None:
+        if self.pool is not None:
             return
 
-        if self._init_lock is None:
-            self._init_lock = asyncio.Lock()
-
-        async with self._init_lock:
-            if self.agent is not None and self.pool is not None:
-                return
-            try:
-                await self._initialize()
-            except OperationalError:
-                raise
-            except Exception as exc:
-                msg = "Rooms agent failed to initialize"
-                raise OperationalError(msg) from exc
-
-    async def _initialize(self) -> None:
-        """Initialize the pool, render the system prompt, and build the agent.
-
-        Creates the database pool, fetches metadata used to fill the system prompt,
-        constructs the LLM client, and builds the compiled agent.
-
-        Notes:
-            The pool config sets connections to autocommit mode so that booking/cancel
-            writes (single SQL statements) commit reliably when the connection is
-            returned to the pool.
-
-        Raises:
-            OperationalError: If database metadata cannot be fetched.
-            RuntimeError: If required internal state cannot be established.
-
-        """
         timeout_ms = self.config.db.timeouts.statement_timeout_ms
 
         async def configure_connection(conn: psycopg.AsyncConnection[Any]) -> None:
@@ -1002,38 +1013,95 @@ class RoomsAgentFactory:
                     ),
                 )
 
-        self.pool = AsyncConnectionPool(
-            conninfo=self.neon_db_url,
-            min_size=self.config.db.pool.min_size,
-            max_size=self.config.db.pool.max_size,
-            timeout=self.config.db.pool.timeout_s,
-            configure=configure_connection,
-            open=False,
-        )
-        await self.pool.open()
+        try:
+            pool = AsyncConnectionPool(
+                conninfo=self.pgsql_db_url,
+                min_size=self.config.db.pool.min_size,
+                max_size=self.config.db.pool.max_size,
+                timeout=self.config.db.pool.timeout_s,
+                configure=configure_connection,
+                open=False,
+            )
+            await pool.open()
+        except Exception as exc:
+            msg = "Failed to open rooms DB pool"
+            raise OperationalError(msg) from exc
 
-        (
-            enum_values,
-            basic_amenities,
-            additional_amenities,
-            view_types,
-        ) = await fetch_rooms_metadata(self.neon_db_url)
+        self.pool = pool
 
-        prompts_dir = resolve_prompts_dir(prompts_folder=self.config.prompts.folder)
-        prompt_path = resolve_prompt_path(
-            prompts_dir=prompts_dir,
-            filename=self.config.prompts.system_prompt,
-        )
+    async def _render_system_prompt(self) -> None:
+        """Render and store the system prompt.
 
-        system_prompt = render_system_prompt(
-            template_path=prompt_path,
-            top_k=self.config.agent.top_k,
-            dialect=self.config.agent.dialect,
-            enum_values=enum_values,
-            basic_amenities=basic_amenities,
-            additional_amenities=additional_amenities,
-            view_types=view_types,
-        )
+        Raises:
+            OperationalError: If prompt rendering fails.
+
+        """
+        try:
+            (
+                enum_values,
+                basic_amenities,
+                additional_amenities,
+                view_types,
+            ) = await fetch_rooms_metadata(self.pgsql_db_url)
+
+            self.system_prompt = render_system_prompt(
+                template_path=self._system_prompt_path,
+                top_k=self.config.agent.top_k,
+                dialect=self.config.agent.dialect,
+                enum_values=enum_values,
+                basic_amenities=basic_amenities,
+                additional_amenities=additional_amenities,
+                view_types=view_types,
+            )
+
+        except Exception as exc:
+            msg = "Failed to render rooms system prompt"
+            raise OperationalError(msg) from exc
+
+
+# ============================
+# Agent factory (builder)
+# ============================
+
+
+class RoomsAgentFactory:
+    """Build the rooms agent using initialized resources.
+
+    This mirrors the `AgentFactory` pattern used by `information_agent.py`.
+
+    Attributes:
+        config: Parsed configuration.
+        resources: Initialized resources instance.
+
+    """
+
+    __slots__ = ("config", "resources")
+
+    config: RoomsSqlConfig
+    resources: RoomsSqlResources
+
+    def __init__(self, *, config: RoomsSqlConfig, resources: RoomsSqlResources) -> None:
+        """Construct the rooms agent factory.
+
+        Args:
+            config: Parsed configuration loaded from TOML.
+            resources: Initialized resources instance.
+
+        """
+        self.config = config
+        self.resources = resources
+
+    def build(self) -> CompiledStateGraph:
+        """Build and return a compiled rooms agent.
+
+        Returns:
+            Compiled LangGraph agent.
+
+        Raises:
+            RuntimeError: If resources were not initialized.
+
+        """
+        system_prompt = self.resources.get_system_prompt()
 
         llm = ChatOpenAI(
             model=self.config.llm.model,
@@ -1043,152 +1111,25 @@ class RoomsAgentFactory:
             max_retries=self.config.llm.max_retries,
         )
 
-        if self.pool is None:
-            msg = "DB pool not initialized"
-            raise RuntimeError(msg)
+        @tool(parse_docstring=True)
+        async def run_sql(query: str) -> dict[str, Any]:
+            """Execute a single SQL statement and return rows.
 
-        run_sql_tool = build_run_sql_tool(pool=self.pool, config=self.config)
+            Args:
+                query: One SQL statement (no semicolons). May be SELECT or DML. If DML
+                    uses RETURNING, returned rows are provided.
 
-        self.agent = create_agent(
+            Returns:
+                Dict with keys:
+                  - rows: list[dict[str, Any]]
+                  - truncated: bool
+                  - error: str (only present on failure)
+
+            """
+            return await self.resources.execute_sql(query)
+
+        return create_agent(
             model=llm,
-            tools=[run_sql_tool],
+            tools=[run_sql],
             system_prompt=system_prompt,
         )
-
-    def get_agent(self) -> CompiledStateGraph:
-        """Return the compiled rooms agent.
-
-        Returns:
-            The compiled LangGraph agent.
-
-        Raises:
-            RuntimeError: If the factory has not been initialized.
-
-        """
-        if self.agent is None:
-            msg = (
-                "RoomsAgentFactory not initialized. Call await ensure_initialized() "
-                "(or initialize_rooms_agent()) first."
-            )
-            raise RuntimeError(msg)
-        return self.agent
-
-    async def aclose(self) -> None:
-        """Close the connection pool if it exists.
-
-        This method is idempotent.
-
-        """
-        if self.pool is not None:
-            await self.pool.close()
-
-
-# ============================
-# Public helpers for FastAPI
-# ============================
-
-
-_FACTORY: dict[str, RoomsAgentFactory] = {}
-
-
-def get_factory(*, config: RoomsSqlConfig, neon_db_url: str) -> RoomsAgentFactory:
-    """Return the singleton RoomsAgentFactory.
-
-    Args:
-        config: Parsed configuration loaded from TOML.
-        neon_db_url: Database URL.
-
-    Returns:
-        A singleton RoomsAgentFactory instance.
-
-    Raises:
-        OperationalError: If the factory cannot be constructed due to an expected
-            operational failure.
-
-    """
-    existing = _FACTORY.get("factory")
-    if existing is not None:
-        return existing
-
-    try:
-        created = RoomsAgentFactory(config=config, neon_db_url=neon_db_url)
-    except OperationalError:
-        raise
-    except Exception as exc:
-        msg = "Rooms agent is not configured correctly"
-        raise OperationalError(msg) from exc
-
-    _FACTORY["factory"] = created
-    return created
-
-
-async def initialize_rooms_agent(*, config: RoomsSqlConfig, neon_db_url: str) -> None:
-    """Initialize the rooms agent at application startup.
-
-    Args:
-        config: Parsed configuration loaded from TOML.
-        neon_db_url: Database URL.
-
-    Raises:
-        OperationalError: If initialization fails.
-
-    """
-    try:
-        await get_factory(config=config, neon_db_url=neon_db_url).ensure_initialized()
-    except OperationalError:
-        raise
-    except Exception as exc:
-        msg = "Rooms agent failed during startup"
-        raise OperationalError(msg) from exc
-
-
-async def shutdown_rooms_agent() -> None:
-    """Close DB resources for the rooms agent at application shutdown.
-
-    This function is safe to call even if initialization did not complete.
-
-    """
-    factory = _FACTORY.get("factory")
-    if factory is None:
-        return
-
-    try:
-        await factory.aclose()
-    except Exception:  # noqa: BLE001
-        logger.debug("shutdown_rooms_agent failed to close DB resources", exc_info=True)
-    finally:
-        _FACTORY.clear()
-
-
-async def get_rooms_agent(
-    *,
-    config: RoomsSqlConfig,
-    neon_db_url: str,
-) -> CompiledStateGraph:
-    """Get an initialized rooms agent.
-
-    Args:
-        config: Parsed configuration loaded from TOML.
-        neon_db_url: Database URL.
-
-    Returns:
-        A compiled LangGraph agent that is ready to handle requests.
-
-    Raises:
-        OperationalError: If the agent cannot be created or initialized.
-
-    """
-    try:
-        factory = get_factory(config=config, neon_db_url=neon_db_url)
-        await factory.ensure_initialized()
-        agent = factory.agent
-        if agent is None:
-            msg = "Rooms agent failed to initialize"
-            raise OperationalError(msg)  # noqa: TRY301
-    except OperationalError:
-        raise
-    except Exception as exc:
-        msg = "Rooms agent is temporarily unavailable"
-        raise OperationalError(msg) from exc
-    else:
-        return agent

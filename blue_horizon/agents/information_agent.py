@@ -13,14 +13,15 @@ Assumptions:
 
 Configuration:
 - All tunables live in a TOML file (see `InfoRagConfig`).
-- `system_prompt_filename` in TOML is the *file name only* (no path). All prompts are assumed
-  to live in the same prompts folder.
+- `system_prompt_filename` in TOML is the *file name only* (no path). All prompts are
+  assumed to live in the same prompts folder.
 
 Versions:
 - langgraph (>=1.0.4,<2.0.0), llama-index(>=0.14.6,<0.15.0)
 - llama-index-vector-stores-redis (>=0.6.1,<0.7.0)
 """
 
+import asyncio
 import heapq
 import json
 import logging
@@ -675,6 +676,9 @@ class InfoRagResources:
             VectorIndexRetriever,
         ] = OrderedDict()
 
+        self._prompts_dir = resolve_prompts_dir(prompts_folder=config.prompts.folder)
+        self.system_prompt: str | None = None
+
     async def startup_check(self) -> None:
         """Validate Redis connectivity, retriever capability, and index schema.
 
@@ -695,6 +699,28 @@ class InfoRagResources:
 
         _ = self._get_catalog_retriever(source=Source.AMENITIES, filters=None)
         await self._validate_vector_dims()
+
+        try:
+            self.system_prompt = await asyncio.to_thread(self._render_system_prompt)
+        except Exception as exc:
+            msg = "Failed to render system prompt"
+            raise OperationalError(msg) from exc
+
+    def _render_system_prompt(self) -> str:
+        """Render and return the system prompt string.
+
+        Returns:
+            str: Rendered system prompt.
+
+        Raises:
+            RuntimeError: If prompt resolution or template loading fails.
+
+        """
+        prompt_path = resolve_system_prompt_path(
+            filename=self._config.prompts.system_prompt_filename,
+            prompts_dir=self._prompts_dir,
+        )
+        return build_system_prompt(top_k=self._top_k, prompt_path=prompt_path)
 
     async def _validate_vector_dims(self) -> None:
         """Validate that Redis vector index dimensions match the configured value.
@@ -1029,6 +1055,28 @@ class InfoRagResources:
         """
         return self._top_k
 
+    def get_system_prompt(self) -> str:
+        """Return the rendered system prompt.
+
+        The system prompt is rendered during ``startup_check()`` and cached on the
+        instance. Callers should use this getter rather than accessing the internal
+        attribute directly.
+
+        Returns:
+            str: Rendered system prompt.
+
+        Raises:
+            RuntimeError: If the system prompt has not been rendered yet.
+
+        """
+        if self.system_prompt is None:
+            msg = (
+                "System prompt is not initialized; call "
+                "await InfoRagResources.startup_check() first"
+            )
+            raise RuntimeError(msg)
+        return self.system_prompt
+
     async def retrieve_faq(self, query: str) -> list[RetrievalItemLite]:
         """Retrieve FAQ nodes relevant to a query.
 
@@ -1319,19 +1367,16 @@ class InfoAgentFactory:
         *,
         resources: InfoRagResources,
         config: InfoRagConfig,
-        prompts_dir: Path,
     ) -> None:
         """Initialize the agent factory.
 
         Args:
             resources: Shared async resources (Redis client, indexes, retrievers).
             config: Parsed TOML configuration.
-            prompts_dir: Directory containing all prompt templates.
 
         """
         self._resources = resources
         self._config = config
-        self._prompts_dir = prompts_dir
 
     def build(self) -> CompiledStateGraph:  # noqa: C901
         """Build and return a compiled agent graph.
@@ -1565,11 +1610,7 @@ class InfoAgentFactory:
                 _log_tool_failure("hydrate_items", exc)
                 return []
 
-        prompt_path = resolve_system_prompt_path(
-            filename=self._config.prompts.system_prompt_filename,
-            prompts_dir=self._prompts_dir,
-        )
-        system_prompt = build_system_prompt(top_k=top_k, prompt_path=prompt_path)
+        system_prompt = resources.get_system_prompt()
 
         return create_agent(
             model=chat_model,

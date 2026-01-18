@@ -72,7 +72,8 @@ class LlmConfig:
     Attributes:
         model: Model identifier passed to ChatOpenAI.
         temperature: Sampling temperature.
-        reasoning_effort: Provider-specific reasoning control.
+        reasoning_effort: Reasoning effort hint (passed to ChatOpenAI as
+            reasoning={"effort": ...}).
         timeout_s: Per-request network timeout in seconds.
         max_retries: Retry count for transient provider/network errors.
 

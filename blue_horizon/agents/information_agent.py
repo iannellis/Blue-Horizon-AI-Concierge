@@ -109,14 +109,14 @@ class EmbeddingsConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class ChatConfig:
-    """Configuration for the chat model used by the agent.
+class LlmConfig:
+    """Configuration for the ChatOpenAI client used by the agent.
 
     Attributes:
         model: Chat model name.
         temperature: Sampling temperature.
-        timeout_s: Per-request timeout (seconds) for chat calls.
-        max_retries: Maximum number of retries for chat calls.
+        timeout_s: Per-request timeout (seconds) for LLM calls.
+        max_retries: Maximum number of retries for LLM calls.
         reasoning_effort: Reasoning effort hint (passed to ChatOpenAI as
             reasoning={"effort": ...}).
 
@@ -168,7 +168,7 @@ class InfoRagConfig:
     Attributes:
         retrieval: Retrieval-related configuration.
         embeddings: Embedding-related configuration.
-        chat: Chat model configuration.
+        llm: LLM model configuration.
         redis: Redis connectivity configuration.
         prompts: Prompt template configuration.
 
@@ -176,7 +176,7 @@ class InfoRagConfig:
 
     retrieval: RetrievalConfig
     embeddings: EmbeddingsConfig
-    chat: ChatConfig
+    llm: LlmConfig
     redis: RedisConfig
     prompts: PromptsConfig
 
@@ -217,7 +217,7 @@ def load_info_config(config_path: Path) -> InfoRagConfig:
     try:
         retrieval = data["retrieval"]
         embeddings = data["embeddings"]
-        chat = data["chat"]
+        llm = data["llm"]
         redis = data["redis"]
         prompts = data["prompts"]
 
@@ -233,12 +233,12 @@ def load_info_config(config_path: Path) -> InfoRagConfig:
                 timeout_s=float(embeddings["timeout_s"]),
                 max_retries=int(embeddings["max_retries"]),
             ),
-            chat=ChatConfig(
-                model=str(chat["model"]),
-                temperature=float(chat["temperature"]),
-                timeout_s=float(chat["timeout_s"]),
-                max_retries=int(chat["max_retries"]),
-                reasoning_effort=str(chat["reasoning_effort"]),
+            llm=LlmConfig(
+                model=str(llm["model"]),
+                temperature=float(llm["temperature"]),
+                timeout_s=float(llm["timeout_s"]),
+                max_retries=int(llm["max_retries"]),
+                reasoning_effort=str(llm["reasoning_effort"]),
             ),
             redis=RedisConfig(
                 connect_timeout_s=float(redis["connect_timeout_s"]),
@@ -1422,13 +1422,13 @@ class InfoAgentFactory:
         resources = self._resources
         top_k = resources.top_k
 
-        chat_cfg = self._config.chat
-        chat_model = ChatOpenAI(
-            model=str(chat_cfg.model),
-            temperature=float(chat_cfg.temperature),
-            timeout=float(chat_cfg.timeout_s),
-            max_retries=int(chat_cfg.max_retries),
-            reasoning={"effort": chat_cfg.reasoning_effort},
+        llm_cfg = self._config.llm
+        llm = ChatOpenAI(
+            model=str(llm_cfg.model),
+            temperature=float(llm_cfg.temperature),
+            timeout=float(llm_cfg.timeout_s),
+            max_retries=int(llm_cfg.max_retries),
+            reasoning={"effort": llm_cfg.reasoning_effort},
         )
 
         def _log_tool_failure(tool_name: str, exc: Exception) -> None:
@@ -1647,7 +1647,7 @@ class InfoAgentFactory:
         system_prompt = resources.get_system_prompt()
 
         return create_agent(
-            model=chat_model,
+            model=llm,
             tools=[query_faq, query_amenities, query_services, reranker, hydrate_items],
             system_prompt=system_prompt,
         )

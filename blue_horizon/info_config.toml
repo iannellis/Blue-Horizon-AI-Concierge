@@ -28,7 +28,7 @@ timeout_s = 20.0
 max_retries = 2
 
 
-[chat]
+[llm]
 # Chat model used by LangChain ChatOpenAI.
 model = "gpt-5.2"
 

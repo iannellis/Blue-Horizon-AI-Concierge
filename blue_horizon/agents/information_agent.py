@@ -13,7 +13,7 @@ Assumptions:
 
 Configuration:
 - All tunables live in a TOML file (see `InfoRagConfig`).
-- `system_prompt` in TOML is the *file name only* (no path). All prompts are assumed
+- `system_prompt_filename` in TOML is the *file name only* (no path). All prompts are assumed
   to live in the same prompts folder.
 
 Versions:
@@ -150,11 +150,14 @@ class PromptsConfig:
     """Configuration for prompt templates.
 
     Attributes:
-        system_prompt: File name of the system prompt template.
+        folder: Folder name (relative to this module) that contains all prompt
+            templates.
+        system_prompt_filename: File name of the system prompt template.
 
     """
 
-    system_prompt: str
+    folder: str
+    system_prompt_filename: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,7 +244,10 @@ def load_info_config(config_path: Path) -> InfoRagConfig:
                 socket_timeout_s=float(redis["socket_timeout_s"]),
                 health_check_interval_s=int(redis["health_check_interval_s"]),
             ),
-            prompts=PromptsConfig(system_prompt=str(prompts["system_prompt"])),
+            prompts=PromptsConfig(
+                folder=str(prompts["folder"]),
+                system_prompt_filename=str(prompts["system_prompt_filename"]),
+            ),
         )
     except KeyError as exc:
         msg = f"Missing required config key: {exc}"
@@ -256,13 +262,14 @@ def load_info_config(config_path: Path) -> InfoRagConfig:
 # ============================
 
 
-def resolve_prompts_dir(*, prompts_folder: str = "../system_prompts") -> Path:
+def resolve_prompts_dir(*, prompts_folder: str) -> Path:
     """Resolve the prompts directory.
 
     The prompts directory is resolved relative to this module file.
 
     Args:
-        prompts_folder: Folder name (relative to this module).
+        prompts_folder: Folder name (relative to this module). Typically read from
+            ``InfoRagConfig.prompts.folder``.
 
     Returns:
         Path: Absolute path to the prompts directory.
@@ -283,7 +290,8 @@ def resolve_system_prompt_path(*, filename: str, prompts_dir: Path) -> Path:
 
     Args:
         filename: Prompt file name only (no path components).
-        prompts_dir: Directory containing all prompt templates.
+        prompts_dir: Directory containing all prompt templates. Typically resolved via
+                ``resolve_prompts_dir(prompts_folder=config.prompts.folder)``.
 
     Returns:
         Path: Absolute path to the prompt template.
@@ -1558,7 +1566,7 @@ class InfoAgentFactory:
                 return []
 
         prompt_path = resolve_system_prompt_path(
-            filename=self._config.prompts.system_prompt,
+            filename=self._config.prompts.system_prompt_filename,
             prompts_dir=self._prompts_dir,
         )
         system_prompt = build_system_prompt(top_k=top_k, prompt_path=prompt_path)

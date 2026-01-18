@@ -43,7 +43,7 @@ from langchain.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.graph.state import CompiledStateGraph
 from llama_index.core import Settings, StorageContext, VectorStoreIndex
-from llama_index.core.retrievers import VectorIndexRetriever
+from llama_index.core.retrievers import BaseRetriever, VectorIndexRetriever
 from llama_index.core.vector_stores.types import (
     FilterOperator,
     MetadataFilter,
@@ -629,6 +629,35 @@ class InfoRagResources:
     It is intended to be created once per process and reused across requests.
 
     """
+
+    __slots__ = (
+        "_catalog_retrievers",
+        "_config",
+        "_embed_batch_size",
+        "_faq_retriever",
+        "_prompts_dir",
+        "_retriever_cache_max",
+        "_top_k",
+        "_vector_dims",
+        "indexes",
+        "redis_async",
+        "system_prompt",
+    )
+
+    _config: InfoRagConfig
+    _top_k: int
+    _vector_dims: int
+    _embed_batch_size: int
+    _retriever_cache_max: int
+    redis_async: AsyncRedis
+    indexes: VectorIndexes
+    _faq_retriever: BaseRetriever
+    _catalog_retrievers: OrderedDict[
+        tuple[Source, tuple[tuple[str, str, str], ...]],
+        VectorIndexRetriever,
+    ]
+    _prompts_dir: Path
+    system_prompt: str | None
 
     def __init__(
         self,
@@ -1361,6 +1390,11 @@ class InfoAgentFactory:
     The resulting agent uses tool calls for retrieval/reranking/hydration.
 
     """
+
+    __slots__ = ("_config", "_resources")
+
+    _resources: InfoRagResources
+    _config: InfoRagConfig
 
     def __init__(
         self,

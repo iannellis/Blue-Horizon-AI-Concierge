@@ -39,7 +39,6 @@ from typing import Any
 from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain.tools import tool
-from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 from langgraph.graph.state import CompiledStateGraph
 from llama_index.core import Settings, StorageContext, VectorStoreIndex
@@ -699,10 +698,10 @@ class InfoRagResources:
         """
         for src in (Source.FAQ, Source.AMENITIES, Source.SERVICES):
             expected = self._vector_dims
-            actual = await self._get_index_vector_dims(str(src))
+            actual = await self._get_index_vector_dims(src.value)
             if actual != expected:
                 msg = (
-                    f"Index '{src}' vector dims mismatch: "
+                    f"Index '{src.value}' vector dims mismatch: "
                     f"expected={expected} actual={actual}"
                 )
                 raise OperationalError(msg)
@@ -943,8 +942,8 @@ class InfoRagResources:
 
         """
         faq_schema = build_index_schema(
-            name=Source.FAQ,
-            prefix=Source.FAQ,
+            name=Source.FAQ.value,
+            prefix=Source.FAQ.value,
             extra_fields=[{"type": "tag", "name": "category"}],
             vector_dims=vector_dims,
         )
@@ -960,8 +959,8 @@ class InfoRagResources:
         )
 
         amenities_schema = build_index_schema(
-            name=Source.AMENITIES,
-            prefix=Source.AMENITIES,
+            name=Source.AMENITIES.value,
+            prefix=Source.AMENITIES.value,
             extra_fields=[
                 {"type": "tag", "name": "category"},
                 {"type": "numeric", "name": "price"},
@@ -983,8 +982,8 @@ class InfoRagResources:
         )
 
         services_schema = build_index_schema(
-            name=Source.SERVICES,
-            prefix=Source.SERVICES,
+            name=Source.SERVICES.value,
+            prefix=Source.SERVICES.value,
             extra_fields=[
                 {"type": "tag", "name": "service_type"},
                 {"type": "numeric", "name": "price"},
@@ -1152,7 +1151,7 @@ class InfoRagResources:
                 return None
             msg = (
                 f"Could not hydrate item_id={item.item_id} "
-                "from source={item.source} (key={key})"
+                f"from source={item.source} (key={key})"
             )
             raise OperationalError(msg)
 
@@ -1295,37 +1294,12 @@ class InfoRagResources:
 # ============================
 
 
-def build_chat_model(*, cfg: ChatConfig, **kwargs: Any) -> ChatOpenAI:  # noqa: ANN401
-    """Create a ChatOpenAI instance configured from TOML.
-
-    Args:
-        cfg: Chat model configuration.
-        **kwargs: Extra keyword arguments forwarded to ``ChatOpenAI``.
-
-    Returns:
-        ChatOpenAI: Configured chat model.
-
-    Raises:
-        ValueError: If configuration values cannot be coerced to required types.
-
-    """
-    return ChatOpenAI(
-        model=cfg.model,
-        temperature=float(cfg.temperature),
-        timeout=float(cfg.timeout_s),
-        max_retries=int(cfg.max_retries),
-        reasoning={"effort": cfg.reasoning_effort},
-        **kwargs,
-    )
-
-
-class AgentFactory:
+class InfoAgentFactory:
     """Factory for constructing the LangChain agent with bound async tools.
 
     This factory wires together:
         - configuration
         - shared async retrieval resources
-        - a chat model (instance or model name)
         - prompt templates
 
     The resulting agent uses tool calls for retrieval/reranking/hydration.
@@ -1336,7 +1310,6 @@ class AgentFactory:
         self,
         *,
         resources: InfoRagResources,
-        chat_model: str | BaseChatModel,
         config: InfoRagConfig,
         prompts_dir: Path,
     ) -> None:
@@ -1344,14 +1317,11 @@ class AgentFactory:
 
         Args:
             resources: Shared async resources (Redis client, indexes, retrievers).
-            chat_model: LangChain chat model instance (or model name string) used by the
-                agent.
             config: Parsed TOML configuration.
             prompts_dir: Directory containing all prompt templates.
 
         """
         self._resources = resources
-        self._chat_model = chat_model
         self._config = config
         self._prompts_dir = prompts_dir
 
@@ -1364,6 +1334,15 @@ class AgentFactory:
         """
         resources = self._resources
         top_k = resources.top_k
+
+        chat_cfg = self._config.chat
+        chat_model = ChatOpenAI(
+            model=str(chat_cfg.model),
+            temperature=float(chat_cfg.temperature),
+            timeout=float(chat_cfg.timeout_s),
+            max_retries=int(chat_cfg.max_retries),
+            reasoning={"effort": chat_cfg.reasoning_effort},
+        )
 
         def _log_tool_failure(tool_name: str, exc: Exception) -> None:
             """Log a tool failure with traceback.
@@ -1406,6 +1385,9 @@ class AgentFactory:
             """
             try:
                 return await resources.retrieve_faq(query)
+            except OperationalError as exc:
+                logger.warning("query_faq operational failure: %s", exc)
+                return []
             except Exception as exc:  # noqa: BLE001
                 _log_tool_failure("query_faq", exc)
                 return []
@@ -1459,6 +1441,9 @@ class AgentFactory:
                     query=query,
                     filters=filters,
                 )
+            except OperationalError as exc:
+                logger.warning("query_amenities operational failure: %s", exc)
+                return []
             except Exception as exc:  # noqa: BLE001
                 _log_tool_failure("query_amenities", exc)
                 return []
@@ -1521,6 +1506,9 @@ class AgentFactory:
                     query=query,
                     filters=filters,
                 )
+            except OperationalError as exc:
+                logger.warning("query_services operational failure: %s", exc)
+                return []
             except Exception as exc:  # noqa: BLE001
                 _log_tool_failure("query_services", exc)
                 return []
@@ -1562,19 +1550,21 @@ class AgentFactory:
             """
             try:
                 return await resources.hydrate(items, best_effort=True)
+            except OperationalError as exc:
+                logger.warning("hydrate_items operational failure: %s", exc)
+                return []
             except Exception as exc:  # noqa: BLE001
                 _log_tool_failure("hydrate_items", exc)
                 return []
 
-        prompts_dir = self._prompts_dir
         prompt_path = resolve_system_prompt_path(
             filename=self._config.prompts.system_prompt,
-            prompts_dir=prompts_dir,
+            prompts_dir=self._prompts_dir,
         )
         system_prompt = build_system_prompt(top_k=top_k, prompt_path=prompt_path)
 
         return create_agent(
-            model=self._chat_model,
+            model=chat_model,
             tools=[query_faq, query_amenities, query_services, reranker, hydrate_items],
             system_prompt=system_prompt,
         )

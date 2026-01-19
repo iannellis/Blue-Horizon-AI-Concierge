@@ -735,6 +735,18 @@ class InfoRagResources:
             msg = "Failed to render system prompt"
             raise OperationalError(msg) from exc
 
+    async def aclose(self) -> None:
+        """Close network resources owned by this instance.
+
+        This method should be called during FastAPI shutdown to ensure Redis
+        connections are properly released.
+
+        """
+        try:
+            await self.redis_async.close()
+        finally:
+            self.redis_async.connection_pool.disconnect()
+
     def _render_system_prompt(self) -> str:
         """Render and return the system prompt string.
 

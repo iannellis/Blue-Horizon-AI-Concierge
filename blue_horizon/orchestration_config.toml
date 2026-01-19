@@ -26,7 +26,7 @@ router_timeout_s = 20.0
 
 [prompts]
 # Folder (relative to orchestration.py) containing prompt files
-folder = "system_prompts"
+folder = "../system_prompts"
 # Router system prompt filename within the prompts folder
 orchestration_prompt_filename = "orchestration_prompt.txt"
 

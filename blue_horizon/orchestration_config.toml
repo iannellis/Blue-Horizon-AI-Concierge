@@ -22,7 +22,11 @@ max_retries = 2
 init_retry_base_s = 2.0
 init_retry_max_s = 60.0
 # Wall-clock cap for the router node (wraps the router LLM call)
-router_timeout_s = 20.0
+router_timeout_s = 30.0
+# Wall-clock cap for the info node (wraps the info LLM call)
+info_timeout_s = 60
+# Wall-clock cap for the rooms node (wraps the rooms LLM call)
+rooms_timeout_s = 60
 
 [prompts]
 # Folder (relative to orchestration.py) containing prompt files

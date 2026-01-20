@@ -112,13 +112,17 @@ class OrchestrationRuntimeConfig:
     Attributes:
         init_retry_base_s: Initial backoff (seconds) between init retries.
         init_retry_max_s: Maximum backoff (seconds) between init retries.
-        route_timeout_s: Wall-clock timeout (seconds) for router decision step.
+        router_timeout_s: Wall-clock timeout (seconds) for router decision step.
+        info_timeout_s: Wall-clock timeout (seconds) for the info agent step.
+        rooms_timeout_s: Wall-clock timeout (seconds) for the rooms agent step.
 
     """
 
     init_retry_base_s: float
     init_retry_max_s: float
     router_timeout_s: float
+    info_timeout_s: float
+    rooms_timeout_s: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,6 +207,8 @@ def load_orchestration_config() -> OrchestrationConfig:
                 init_retry_base_s=float(orchestration["init_retry_base_s"]),
                 init_retry_max_s=float(orchestration["init_retry_max_s"]),
                 router_timeout_s=float(orchestration["router_timeout_s"]),
+                info_timeout_s=float(orchestration["info_timeout_s"]),
+                rooms_timeout_s=float(orchestration["rooms_timeout_s"]),
             ),
             prompts=PromptsConfig(
                 folder=str(prompts["folder"]),
@@ -723,10 +729,23 @@ class OrchestrationAgentFactory:
 
             """
             logger.info("Dispatching to info agent")
-            return cast(
-                "dict[str, Any]",
-                await resources.get_info_agent().ainvoke(state),
-            )
+
+            try:
+                result = await asyncio.wait_for(
+                    resources.get_info_agent().ainvoke(state),
+                    timeout=cfg.orchestration.info_timeout_s,
+                )
+            except asyncio.TimeoutError:  # noqa: UP041
+                logger.warning(
+                    "Info agent timed out after %s s",
+                    cfg.orchestration.info_timeout_s,
+                )
+                return {"messages": [AIMessage(content=cfg.messages.error)]}
+            except Exception:
+                logger.exception("Info agent failed")
+                return {"messages": [AIMessage(content=cfg.messages.error)]}
+
+            return cast("dict[str, Any]", result)
 
         async def rooms_node(state: ConversationState) -> dict[str, Any]:
             """Invoke the compiled rooms agent.
@@ -739,10 +758,23 @@ class OrchestrationAgentFactory:
 
             """
             logger.info("Dispatching to rooms agent")
-            return cast(
-                "dict[str, Any]",
-                await resources.get_rooms_agent().ainvoke(state),
-            )
+
+            try:
+                result = await asyncio.wait_for(
+                    resources.get_rooms_agent().ainvoke(state),
+                    timeout=cfg.orchestration.rooms_timeout_s,
+                )
+            except asyncio.TimeoutError:  # noqa: UP041
+                logger.warning(
+                    "Rooms agent timed out after %s s",
+                    cfg.orchestration.rooms_timeout_s,
+                )
+                return {"messages": [AIMessage(content=cfg.messages.error)]}
+            except Exception:
+                logger.exception("Rooms agent failed")
+                return {"messages": [AIMessage(content=cfg.messages.error)]}
+
+            return cast("dict[str, Any]", result)
 
         def refuse_node(_: ConversationState) -> dict[str, Any]:
             """Return an out-of-scope refusal response."""

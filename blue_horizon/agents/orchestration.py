@@ -112,7 +112,7 @@ class OrchestrationRuntimeConfig:
     Attributes:
         init_retry_base_s: Initial backoff (seconds) between init retries.
         init_retry_max_s: Maximum backoff (seconds) between init retries.
-        routerouter_timeout_s: Wall-clock timeout (seconds) for router decision step.
+        route_timeout_s: Wall-clock timeout (seconds) for router decision step.
 
     """
 

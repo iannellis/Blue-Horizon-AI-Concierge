@@ -309,9 +309,12 @@ def as_resource_file(relative_path: str) -> Iterator[Path]:
 # ============================
 
 
-@lru_cache(maxsize=5)
 def load_prompt_text(relative_path: str) -> str:
-    """Load and cache prompt text from a packaged resource.
+    """Load prompt text from a packaged resource.
+
+    Note:
+        This function does not apply an additional cache layer. Resource text is
+        already cached by load_resource_text().
 
     Args:
         relative_path: Resource path relative to the blue_horizon package root.
@@ -746,14 +749,19 @@ class OrchestrationAgentFactory:
             return {"messages": [AIMessage(content=cfg.messages.error)]}
 
         def finalize_node(state: ConversationState) -> dict[str, Any]:
-            """Prune intermediate messages and persist only user+final assistant turns.
+            """Prune intermediate tool chatter and keep user+final assistant messages.
 
             This graph includes tool-using sub-agents. Their intermediate AI/tool
-            messages are useful for execution but should not be retained or
-            returned to the API client.
+            messages are useful for execution but should not be retained or returned
+            to the API client.
 
-            The resulting persisted message history is:
-                (prior turns) + (latest user message) + (latest final AIMessage)
+            This implementation keeps:
+                - Every HumanMessage
+                - All AIMessage objects following that HumanMessage that do NOT
+                  contain tool calls (to preserve legitimate multi-message replies)
+
+            If a user message has no corresponding final AIMessage, an error message
+            is appended for that turn.
 
             Args:
                 state: Current conversation state.
@@ -763,36 +771,58 @@ class OrchestrationAgentFactory:
                 the pruned history.
 
             """
+
+            def _is_tool_call_message(msg: AIMessage) -> bool:
+                """Return True if an AIMessage represents a tool-call request.
+
+                Args:
+                    msg: Candidate assistant message.
+
+                Returns:
+                    True if the message includes tool call metadata.
+
+                """
+                tool_calls = getattr(msg, "tool_calls", None) or []
+                tool_calls_kw = (
+                    msg.additional_kwargs.get("tool_calls")
+                    if isinstance(msg.additional_kwargs, dict)
+                    else None
+                )
+                return bool(tool_calls) or bool(tool_calls_kw)
+
             messages = state["messages"]
 
             kept: list[BaseMessage] = []
-            expecting_assistant = False
+            current_user: HumanMessage | None = None
+            current_assistants: list[AIMessage] = []
+
+            def _flush_turn() -> None:
+                """Append current turn to kept, ensuring a final assistant message."""
+                nonlocal current_user, current_assistants
+                if current_user is None:
+                    return
+                kept.append(current_user)
+                if current_assistants:
+                    kept.extend(current_assistants)
+                else:
+                    kept.append(AIMessage(content=cfg.messages.error))
+                current_user = None
+                current_assistants = []
 
             for msg in messages:
                 if isinstance(msg, HumanMessage):
-                    kept.append(msg)
-                    expecting_assistant = True
+                    _flush_turn()
+                    current_user = msg
+                    current_assistants = []
                     continue
 
-                if not expecting_assistant:
+                if current_user is None:
                     continue
 
-                if isinstance(msg, AIMessage):
-                    tool_calls = getattr(msg, "tool_calls", None) or []
-                    tool_calls_kw: list[Any]
-                    try:
-                        tool_calls_kw = list(
-                            msg.additional_kwargs.get("tool_calls", []),
-                        )
-                    except Exception:  # noqa: BLE001
-                        tool_calls_kw = []
+                if isinstance(msg, AIMessage) and not _is_tool_call_message(msg):
+                    current_assistants.append(msg)
 
-                    if not tool_calls and not tool_calls_kw:
-                        kept.append(msg)
-                        expecting_assistant = False
-
-            if kept and isinstance(kept[-1], HumanMessage):
-                kept.append(AIMessage(content=cfg.messages.error))
+            _flush_turn()
 
             return {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES), *kept]}
 
@@ -839,13 +869,21 @@ class OrchestrationManager:
 
     """
 
-    __slots__ = ("_agent", "_factory", "_init_task", "_lock", "_resources")
+    __slots__ = (
+        "_agent",
+        "_factory",
+        "_init_task",
+        "_lock",
+        "_resources",
+        "_stop_event",
+    )
 
     _resources: OrchestrationResources
     _factory: OrchestrationAgentFactory
     _agent: CompiledStateGraph | None
     _init_task: asyncio.Task[None] | None
     _lock: asyncio.Lock
+    _stop_event: asyncio.Event
 
     def __init__(self) -> None:
         """Initialize the orchestration manager."""
@@ -855,6 +893,7 @@ class OrchestrationManager:
         self._agent = None
         self._init_task = None
         self._lock = asyncio.Lock()
+        self._stop_event = asyncio.Event()
 
     @property
     def is_ready(self) -> bool:
@@ -879,6 +918,7 @@ class OrchestrationManager:
         """Start background initialization with retries."""
         if self._init_task is not None:
             return
+        self._stop_event.clear()
         self._init_task = asyncio.create_task(
             self._init_loop(),
             name="orchestration-init",
@@ -886,6 +926,8 @@ class OrchestrationManager:
 
     async def stop(self) -> None:
         """Stop background initialization and close resources."""
+        self._stop_event.set()
+
         if self._init_task is not None:
             self._init_task.cancel()
             try:
@@ -932,6 +974,26 @@ class OrchestrationManager:
             ),
         )
 
+    async def _sleep_or_stop(self, *, timeout_s: float) -> bool:
+        """Wait for either a stop signal or a timeout.
+
+        Args:
+            timeout_s: Maximum wait duration in seconds.
+
+        Returns:
+            True if a stop signal was received, otherwise False.
+
+        """
+        if self._stop_event.is_set():
+            return True
+
+        try:
+            await asyncio.wait_for(self._stop_event.wait(), timeout=timeout_s)
+        except TimeoutError:
+            return False
+        else:
+            return True
+
     async def _reset_and_backoff(self, *, backoff: float, max_backoff: float) -> float:
         """Reset runtime state and sleep for the current backoff.
 
@@ -945,7 +1007,11 @@ class OrchestrationManager:
         """
         self._resources.reset_runtime_state()
         self._agent = None
-        await asyncio.sleep(backoff)
+
+        stopped = await self._sleep_or_stop(timeout_s=backoff)
+        if stopped:
+            return backoff
+
         return min(backoff * 2.0, max_backoff)
 
     async def _init_loop(self) -> None:
@@ -953,14 +1019,14 @@ class OrchestrationManager:
 
         The loop:
             - Attempts initialization if the agent is not ready.
-            - On success, sleeps until cancelled.
+            - On success, waits for a stop signal.
             - On failure, logs, resets, and retries with exponential backoff.
 
         """
         cfg = self._resources.get_config().orchestration
         backoff = cfg.init_retry_base_s
 
-        while True:
+        while not self._stop_event.is_set():
             try:
                 async with self._lock:
                     if self._agent is None:
@@ -968,8 +1034,9 @@ class OrchestrationManager:
                         await self._resources.startup_check()
                         self._agent = self._factory.build()
                         logger.info("Orchestration agent ready")
+                        backoff = cfg.init_retry_base_s
 
-                await asyncio.sleep(3600)
+                await self._stop_event.wait()
 
             except asyncio.CancelledError:
                 raise

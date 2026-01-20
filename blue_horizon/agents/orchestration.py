@@ -41,6 +41,7 @@ from langchain_core.messages import (
     HumanMessage,
     RemoveMessage,
     SystemMessage,
+    filter_messages,
 )
 from langchain_core.runnables import Runnable, RunnableLambda
 from langchain_openai import ChatOpenAI
@@ -809,33 +810,20 @@ class OrchestrationAgentFactory:
                 the pruned history.
 
             """
-
-            def _is_tool_call_message(msg: AIMessage) -> bool:
-                """Return True if an AIMessage represents a tool-call request.
-
-                Args:
-                    msg: Candidate assistant message.
-
-                Returns:
-                    True if the message includes tool call metadata.
-
-                """
-                tool_calls = getattr(msg, "tool_calls", None) or []
-                tool_calls_kw = (
-                    msg.additional_kwargs.get("tool_calls")
-                    if isinstance(msg.additional_kwargs, dict)
-                    else None
-                )
-                return bool(tool_calls) or bool(tool_calls_kw)
-
             messages = state["messages"]
+            filtered_messages = filter_messages(messages, exclude_tool_calls=True)
 
             kept: list[BaseMessage] = []
             current_user: HumanMessage | None = None
             current_assistants: list[AIMessage] = []
 
             def _flush_turn() -> None:
-                """Append current turn to kept, ensuring a final assistant message."""
+                """Append current turn to kept, ensuring a final assistant message.
+
+                Real purpose is to make sure that, in the case of a system crash and
+                the last human message is stored without a system response, a response
+                to that human message is inserted to prevent system confusion.
+                """
                 nonlocal current_user, current_assistants
                 if current_user is None:
                     return
@@ -847,7 +835,7 @@ class OrchestrationAgentFactory:
                 current_user = None
                 current_assistants = []
 
-            for msg in messages:
+            for msg in filtered_messages:
                 if isinstance(msg, HumanMessage):
                     _flush_turn()
                     current_user = msg
@@ -857,7 +845,7 @@ class OrchestrationAgentFactory:
                 if current_user is None:
                     continue
 
-                if isinstance(msg, AIMessage) and not _is_tool_call_message(msg):
+                if isinstance(msg, AIMessage):
                     current_assistants.append(msg)
 
             _flush_turn()

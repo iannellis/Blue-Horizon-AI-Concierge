@@ -112,7 +112,7 @@ class OrchestrationRuntimeConfig:
     Attributes:
         init_retry_base_s: Initial backoff (seconds) between init retries.
         init_retry_max_s: Maximum backoff (seconds) between init retries.
-        router_timeout_s: Wall-clock timeout (seconds) for router decision step.
+        routerouter_timeout_s: Wall-clock timeout (seconds) for router decision step.
 
     """
 
@@ -698,6 +698,12 @@ class OrchestrationAgentFactory:
                     _invoke(),
                     timeout=cfg.orchestration.router_timeout_s,
                 )
+            except asyncio.TimeoutError:  # noqa: UP041
+                logger.warning(
+                    "Router timed out after %s s",
+                    cfg.orchestration.router_timeout_s,
+                )
+                return {"route": "error"}
             except Exception:
                 logger.exception("Router failed")
                 return {"route": "error"}
@@ -989,7 +995,7 @@ class OrchestrationManager:
 
         try:
             await asyncio.wait_for(self._stop_event.wait(), timeout=timeout_s)
-        except TimeoutError:
+        except asyncio.TimeoutError:  # noqa: UP041
             return False
         else:
             return True

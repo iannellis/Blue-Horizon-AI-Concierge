@@ -1,40 +1,52 @@
-"""Orchestration graph for the Blue-Horizon FastAPI app.
+"""LangGraph orchestration for the Blue-Horizon FastAPI app.
 
-This module provides a LangGraph orchestration layer that routes user requests to
+This module defines a LangGraph orchestration layer that routes user requests to
 one of two compiled sub-agents:
 
-- An information RAG agent (policies, amenities, services, etc.).
-- A rooms SQL agent (availability, booking/modify/cancel flows).
+- Information RAG agent (hotel policies, amenities, services, general info)
+- Rooms SQL agent (availability, booking/modify/cancel flows)
 
-The orchestration graph is compiled once and shared across requests. Startup is
-handled asynchronously with retry/backoff semantics so the FastAPI application
-can start even if dependencies (e.g., Redis/Postgres) are temporarily unavailable.
+The orchestration graph is compiled once and shared across concurrent requests.
+Initialization runs asynchronously with retry/backoff so the FastAPI process can
+start even if dependencies (e.g., Redis/Postgres) are temporarily unavailable.
 
-Architecture (mirrors rooms_sql_agent.py house style)
+Memory
+  Uses LangGraph MemorySaver checkpointer to persist message history in-process.
+  Each conversation is keyed by a thread_id. Invoke via
+  OrchestrationManager.ainvoke(thread_id=..., user_text=...) and the user's
+  message and final assistant response are appended to the stored history.
+
+Architecture
 - OrchestrationResources: owns long-lived dependencies + startup/close.
 - OrchestrationAgentFactory: compiles the LangGraph using initialized resources.
 - OrchestrationManager: operational wrapper that retries initialization and
-  exposes readiness.
-
-Configuration
-- Loaded from orchestration_config.toml into typed dataclasses.
-- Secrets (Redis/DB URLs, API keys) come from environment variables.
+  exposes readiness + a memory-aware invocation API.
 
 """
 
 import asyncio
+import importlib.resources as importlib_resources
 import logging
 import tomllib
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Final, Literal, cast
 
-from langchain.messages import AIMessage, SystemMessage
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    RemoveMessage,
+    SystemMessage,
+)
 from langchain_core.runnables import Runnable, RunnableLambda
 from langchain_openai import ChatOpenAI
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, MessagesState, StateGraph
+from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, Field
 
@@ -53,15 +65,17 @@ from blue_horizon.agents.rooms_sql import (
 
 logger = logging.getLogger(__name__)
 
+BASE_PACKAGE: Final[str] = "blue_horizon"
+
 
 class OperationalError(RuntimeError):
-    """Operational (expected) error.
+    """An operational (expected) runtime error.
 
     Use this exception for failures that can occur during normal operation
     (e.g., transient connectivity issues, dependency outages).
 
-    Callers should generally log the error and return a safe, user-friendly
-    response or retry later rather than crashing the process.
+    Callers should generally log the error and return a safe user-facing response
+    or retry later rather than crashing the process.
 
     """
 
@@ -76,11 +90,11 @@ class LlmConfig:
     """Chat model configuration.
 
     Attributes:
-        model: Model identifier passed to ChatOpenAI.
+        model: Model name passed to ChatOpenAI.
         temperature: Sampling temperature.
-        reasoning_effort: Reasoning effort hint passed as reasoning={"effort": ...}.
-        timeout_s: Per-request network timeout for the LLM client.
-        max_retries: Provider/client retry count for transient failures.
+        reasoning_effort: Reasoning effort string, passed via reasoning={"effort": ...}.
+        timeout_s: Client timeout in seconds.
+        max_retries: Max retries at the client level.
 
     """
 
@@ -96,9 +110,9 @@ class OrchestrationRuntimeConfig:
     """Orchestration behavior configuration.
 
     Attributes:
-        init_retry_base_s: Initial backoff delay after a failed init attempt.
-        init_retry_max_s: Maximum backoff delay between init attempts.
-        router_timeout_s: Wall-clock cap for the router node execution.
+        init_retry_base_s: Initial backoff (seconds) between init retries.
+        init_retry_max_s: Maximum backoff (seconds) between init retries.
+        router_timeout_s: Wall-clock timeout (seconds) for router decision step.
 
     """
 
@@ -112,8 +126,8 @@ class PromptsConfig:
     """Prompt file configuration.
 
     Attributes:
-        folder: Folder (relative to this module) containing prompt templates.
-        orchestration_prompt_filename: Router system prompt filename.
+        folder: Directory (relative to this module) containing prompt files.
+        orchestration_prompt_filename: The orchestration prompt filename.
 
     """
 
@@ -126,9 +140,9 @@ class MessagesConfig:
     """User-facing message configuration.
 
     Attributes:
-        refusal: Message returned when the router explicitly chooses "refuse".
-        error: Message returned when an internal error occurs.
-        unavailable: Message returned while the system is initializing.
+        refusal: Message returned when a request is out-of-scope.
+        error: Message returned when routing/processing fails.
+        unavailable: Message returned when the system is not initialized.
 
     """
 
@@ -142,9 +156,9 @@ class OrchestrationConfig:
     """Top-level orchestration configuration loaded from TOML.
 
     Attributes:
-        llm: LLM client configuration.
-        orchestration: Orchestration runtime settings.
-        prompts: Prompt locations and filenames.
+        llm: Chat model configuration.
+        orchestration: Operational runtime settings.
+        prompts: Prompt directory/filename settings.
         messages: User-facing message strings.
 
     """
@@ -155,33 +169,21 @@ class OrchestrationConfig:
     messages: MessagesConfig
 
 
-def load_orchestration_config(config_path: Path) -> OrchestrationConfig:
-    """Load orchestration configuration from a TOML file.
+def load_orchestration_config() -> OrchestrationConfig:
+    """Load orchestration configuration from a packaged TOML resource.
 
-    Args:
-        config_path: Path to the TOML configuration file.
+    The configuration file is expected to live under the base package directory
+    (blue_horizon), e.g. blue_horizon/orchestration_config.toml.
 
     Returns:
         Parsed orchestration configuration.
 
     Raises:
-        RuntimeError: If the file is missing, unreadable, invalid TOML, or
-            required keys are missing.
+        RuntimeError: If the resource is missing, unreadable, invalid TOML, or
+            missing required keys.
 
     """
-    path = config_path.expanduser().resolve()
-    if not path.exists() or not path.is_file():
-        msg = f"Config file not found: {path}"
-        raise RuntimeError(msg)
-
-    try:
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
-    except OSError as exc:
-        msg = f"Failed to read config file: {path}"
-        raise RuntimeError(msg) from exc
-    except tomllib.TOMLDecodeError as exc:
-        msg = f"Invalid TOML in config file: {path}"
-        raise RuntimeError(msg) from exc
+    data = _load_toml_resource("orchestration_config.toml")
 
     try:
         llm = data["llm"]
@@ -224,117 +226,104 @@ def load_orchestration_config(config_path: Path) -> OrchestrationConfig:
 
 
 # ============================
+# Packaged resource loading
+# ============================
+
+
+@lru_cache(maxsize=32)
+def load_resource_text(relative_path: str) -> str:
+    """Load UTF-8 text from a packaged resource under the base package.
+
+    Args:
+        relative_path: Resource path relative to the blue_horizon package root.
+
+    Returns:
+        Resource contents decoded as UTF-8.
+
+    Raises:
+        RuntimeError: If the resource cannot be located or read.
+
+    """
+    try:
+        traversable = importlib_resources.files(BASE_PACKAGE).joinpath(relative_path)
+        return traversable.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        msg = f"Resource not found: {BASE_PACKAGE}/{relative_path}"
+        raise RuntimeError(msg) from exc
+    except OSError as exc:
+        msg = f"Failed to read resource: {BASE_PACKAGE}/{relative_path}"
+        raise RuntimeError(msg) from exc
+
+
+def _load_toml_resource(relative_path: str) -> dict[str, Any]:
+    """Load and parse a TOML resource from the base package.
+
+    Args:
+        relative_path: Resource path relative to the blue_horizon package root.
+
+    Returns:
+        Parsed TOML as a dictionary.
+
+    Raises:
+        RuntimeError: If the TOML cannot be read or parsed.
+
+    """
+    try:
+        return tomllib.loads(load_resource_text(relative_path))
+    except tomllib.TOMLDecodeError as exc:
+        msg = f"Invalid TOML in resource: {BASE_PACKAGE}/{relative_path}"
+        raise RuntimeError(msg) from exc
+
+
+@contextmanager
+def as_resource_file(relative_path: str) -> Iterator[Path]:
+    """Materialize a packaged resource to a filesystem path.
+
+    This is useful when downstream code requires a Path (e.g., config loaders).
+
+    Args:
+        relative_path: Resource path relative to the blue_horizon package root.
+
+    Yields:
+        A filesystem path that can be passed to APIs expecting Path.
+
+    Raises:
+        RuntimeError: If the resource cannot be located.
+
+    """
+    try:
+        traversable = importlib_resources.files(BASE_PACKAGE).joinpath(relative_path)
+    except ModuleNotFoundError as exc:
+        msg = f"Base package not found: {BASE_PACKAGE}"
+        raise RuntimeError(msg) from exc
+    except (AttributeError, TypeError) as exc:
+        msg = f"Failed to locate resource: {BASE_PACKAGE}/{relative_path}"
+        raise RuntimeError(msg) from exc
+
+    with importlib_resources.as_file(traversable) as path:
+        yield path
+
+
+# ============================
 # Prompt loading
 # ============================
 
 
-def resolve_prompts_dir(*, prompts_folder: str) -> Path:
-    """Resolve the directory containing prompt templates.
-
-    Args:
-        prompts_folder: Folder name relative to this module.
-
-    Returns:
-        Resolved absolute path to the prompts directory.
-
-    Raises:
-        RuntimeError: If the folder does not exist or is not a directory.
-
-    """
-    prompts_dir = (Path(__file__).parent / prompts_folder).resolve()
-    if not prompts_dir.exists() or not prompts_dir.is_dir():
-        msg = f"Prompts folder not found: {prompts_dir}"
-        raise RuntimeError(msg)
-    return prompts_dir
-
-
-def resolve_prompt_path(*, prompts_dir: Path, filename: str) -> Path:
-    """Resolve a prompt file within the prompts directory.
-
-    Args:
-        prompts_dir: Directory containing prompt templates.
-        filename: Prompt filename within prompts_dir.
-
-    Returns:
-        Resolved absolute path to the prompt file.
-
-    Raises:
-        RuntimeError: If the file does not exist or is not a file.
-
-    """
-    candidate = (prompts_dir / filename).resolve()
-    if not candidate.exists() or not candidate.is_file():
-        msg = f"Prompt file not found: {candidate}"
-        raise RuntimeError(msg)
-    return candidate
-
-
 @lru_cache(maxsize=5)
-def load_prompt_text(path: Path) -> str:
-    """Load and cache prompt text.
+def load_prompt_text(relative_path: str) -> str:
+    """Load and cache prompt text from a packaged resource.
 
     Args:
-        path: Path to the prompt file.
+        relative_path: Resource path relative to the blue_horizon package root.
 
     Returns:
-        The prompt file contents.
+        Prompt text.
 
     Raises:
-        RuntimeError: If the file cannot be read.
+        RuntimeError: If the resource cannot be read.
 
     """
-    try:
-        return path.read_text(encoding="utf-8")
-    except OSError as exc:
-        msg = f"Failed to read prompt template at: {path}"
-        raise RuntimeError(msg) from exc
-
-
-# ============================
-# Paths
-# ============================
-
-
-def _config_dir() -> Path:
-    """Resolve the base configuration directory.
-
-    This is one level above the package/module directory.
-
-    Returns:
-        Absolute path to the base configuration directory.
-
-    """
-    return Path(__file__).resolve().parent.parent
-
-
-def _orchestration_config_path() -> Path:
-    """Get the orchestration TOML configuration path.
-
-    Returns:
-        Absolute path to orchestration_config.toml.
-
-    """
-    return (_config_dir() / "orchestration_config.toml").resolve()
-
-
-def _info_config_path() -> Path:
-    """Get the info-agent TOML configuration path.
-
-    Returns:
-        Absolute path to info_config.toml.
-
-    """
-    return (_config_dir() / "info_config.toml").resolve()
-
-
-def _rooms_sql_config_path() -> Path:
-    """Get the rooms SQL agent TOML configuration path.
-
-    Returns:
-        Absolute path to rooms_sql_config.toml.
-
-    """
-    return (_config_dir() / "rooms_sql_config.toml").resolve()
+    return load_resource_text(relative_path)
 
 
 # ============================
@@ -349,7 +338,12 @@ class RouteDecision(BaseModel):
     """Structured router output.
 
     Attributes:
-        step: The next step selected by the router.
+        step: The next step to take in answering the user's query.
+
+    Notes:
+        - This model is used with ChatOpenAI.with_structured_output() to request a
+          typed response from the router.
+        - The router prompt should constrain outputs to the RouteStep literal.
 
     """
 
@@ -360,13 +354,11 @@ class RouteDecision(BaseModel):
 
 
 class ConversationState(MessagesState, total=False):
-    """LangGraph state for orchestration.
-
-    This extends LangGraph's MessagesState with a single optional key `route`
-    produced by the router node.
+    """LangGraph state with persisted message history.
 
     Attributes:
-        route: Router-selected step (optional).
+        messages: Message history (provided by MessagesState).
+        route: Router decision.
 
     """
 
@@ -374,13 +366,13 @@ class ConversationState(MessagesState, total=False):
 
 
 def _route_from_state(state: ConversationState) -> RouteStep:
-    """Extract the routing decision from state.
+    """Select the next node to execute based on state.
 
     Args:
-        state: Current orchestration state.
+        state: Current LangGraph state.
 
     Returns:
-        The route step. Defaults to "error" if missing.
+        Route step key for conditional edges.
 
     """
     return cast("RouteStep", state.get("route") or "error")
@@ -394,17 +386,27 @@ def _route_from_state(state: ConversationState) -> RouteStep:
 class OrchestrationResources:
     """Long-lived dependencies for orchestration.
 
-    This object owns:
-    - OrchestrationConfig loaded from TOML.
-    - Prompt paths and cached prompt content.
-    - Sub-resources for info/rooms agents.
-    - Built sub-agents and router runnable.
+    Responsibilities:
+        - Load orchestration configuration.
+        - Resolve and load the orchestration system prompt.
+        - Construct and hold the router LLM runnable.
+        - Construct and hold sub-resources (InfoRagResources, RoomsSqlResources).
+        - Build and hold the compiled sub-agents for info + rooms.
+        - Provide a process-lifetime MemorySaver checkpointer for message history.
 
-    Call startup_check() once before using getters.
+    Lifecycle:
+        - Instantiate (cheap): reads TOML + resolves paths, creates lightweight clients.
+        - startup_check() (expensive): performs connectivity checks and builds agents.
+        - aclose(): closes underlying resource pools/clients.
+
+    Notes:
+        - If startup_check() raises, callers may retry.
+        - reset_runtime_state() clears partially-initialized runtime fields.
 
     """
 
     __slots__ = (
+        "_checkpointer",
         "_config",
         "_info_agent",
         "_info_config",
@@ -414,43 +416,65 @@ class OrchestrationResources:
         "_rooms_resources",
         "_router",
         "_system_prompt",
-        "_system_prompt_path",
+        "_system_prompt_resource",
     )
 
     _config: OrchestrationConfig
-    _system_prompt_path: Path
+    _system_prompt_resource: str
+    _system_prompt: str | None
+
     _info_config: Any
     _info_resources: InfoRagResources
     _info_agent: CompiledStateGraph | None
+
     _rooms_config: Any
     _rooms_resources: RoomsSqlResources
     _rooms_agent: CompiledStateGraph | None
+
     _router: Runnable[list[BaseMessage], RouteDecision]
-    _system_prompt: str | None
+    _checkpointer: MemorySaver
 
     def __init__(self) -> None:
-        """Initialize resources containers and load static configuration."""
-        self._config = load_orchestration_config(_orchestration_config_path())
+        """Initialize orchestration resources.
 
-        prompts_dir = resolve_prompts_dir(prompts_folder=self._config.prompts.folder)
-        self._system_prompt_path = resolve_prompt_path(
-            prompts_dir=prompts_dir,
-            filename=self._config.prompts.orchestration_prompt_filename,
-        )
+        This constructor performs only lightweight work: it reads the orchestration
+        TOML, resolves the orchestration prompt path, constructs resource objects,
+        and builds the router runnable.
 
-        self._info_config = load_info_config(_info_config_path())
+        Heavy work (connectivity checks, agent compilation) occurs in startup_check().
+
+        Raises:
+            RuntimeError: If configuration or prompt resolution fails.
+
+        """
+        self._config = load_orchestration_config()
+
+        prompts_folder = self._config.prompts.folder.strip("/")
+        if prompts_folder:
+            self._system_prompt_resource = (
+                f"{prompts_folder}/{self._config.prompts.orchestration_prompt_filename}"
+            )
+        else:
+            self._system_prompt_resource = (
+                self._config.prompts.orchestration_prompt_filename
+            )
+        self._system_prompt = None
+
+        with as_resource_file("info_config.toml") as cfg_path:
+            self._info_config = load_info_config(cfg_path)
         self._info_resources = InfoRagResources(
             redis_url=get_redis_url(),
             config=self._info_config,
         )
-        self._info_agent: CompiledStateGraph | None = None
+        self._info_agent = None
 
-        self._rooms_config = load_rooms_sql_config(_rooms_sql_config_path())
+        with as_resource_file("rooms_sql_config.toml") as cfg_path:
+            self._rooms_config = load_rooms_sql_config(cfg_path)
         self._rooms_resources = RoomsSqlResources(
             pgsql_db_url=get_pgsql_db_url(),
             config=self._rooms_config,
         )
-        self._rooms_agent: CompiledStateGraph | None = None
+        self._rooms_agent = None
 
         llm_cfg = self._config.llm
         llm = ChatOpenAI(
@@ -465,20 +489,22 @@ class OrchestrationResources:
             llm.with_structured_output(RouteDecision),
         )
 
-        self._system_prompt: str | None = None
+        self._checkpointer = MemorySaver()
 
     async def startup_check(self) -> None:
-        """Initialize and validate dependencies.
+        """Validate dependencies and build sub-agents.
 
-        This should be called once at startup. If it raises, the caller may
-        retry later.
+        This method should run once during FastAPI startup (or inside the
+        OrchestrationManager retry loop). It loads the orchestration prompt, runs
+        each sub-resource startup check, and builds the compiled info/rooms agents.
 
         Raises:
-            OperationalError: If resources cannot be initialized.
+            OperationalError: If startup fails for a reason that should be treated
+                as transient and retried (e.g., dependency outage).
 
         """
         try:
-            self._system_prompt = load_prompt_text(self._system_prompt_path)
+            self._system_prompt = load_prompt_text(self._system_prompt_resource)
 
             await self._info_resources.startup_check()
             self._info_agent = InfoAgentFactory(
@@ -499,29 +525,39 @@ class OrchestrationResources:
             raise OperationalError(msg) from exc
 
     async def aclose(self) -> None:
-        """Close underlying resources.
+        """Close underlying resource pools/clients.
 
-        This should be called during app shutdown.
+        This should be called during FastAPI shutdown.
 
         """
         await self._rooms_resources.aclose()
         await self._info_resources.aclose()
 
     def reset_runtime_state(self) -> None:
-        """Clear runtime-built objects after an initialization failure."""
+        """Clear runtime fields after a failed initialization attempt.
+
+        This enables the manager to retry startup cleanly without re-instantiating
+        the resources object.
+
+        """
         self._system_prompt = None
         self._info_agent = None
         self._rooms_agent = None
 
     def get_config(self) -> OrchestrationConfig:
-        """Return the loaded orchestration configuration."""
+        """Return the loaded orchestration configuration.
+
+        Returns:
+            Loaded orchestration configuration.
+
+        """
         return self._config
 
     def get_system_prompt(self) -> str:
-        """Return the router system prompt.
+        """Return the orchestration system prompt text.
 
         Returns:
-            Router system prompt text.
+            System prompt content.
 
         Raises:
             RuntimeError: If startup_check() has not been called.
@@ -533,14 +569,28 @@ class OrchestrationResources:
         return self._system_prompt
 
     def get_router(self) -> Runnable[list[BaseMessage], RouteDecision]:
-        """Return the router runnable."""
+        """Return the router runnable.
+
+        Returns:
+            Runnable that maps a list of messages to a RouteDecision.
+
+        """
         return self._router
+
+    def get_checkpointer(self) -> MemorySaver:
+        """Return the MemorySaver checkpointer.
+
+        Returns:
+            In-memory checkpointer for message history.
+
+        """
+        return self._checkpointer
 
     def get_info_agent(self) -> CompiledStateGraph:
         """Return the compiled info agent.
 
         Returns:
-            CompiledStateGraph for the info agent.
+            Compiled info agent.
 
         Raises:
             RuntimeError: If startup_check() has not been called.
@@ -555,7 +605,7 @@ class OrchestrationResources:
         """Return the compiled rooms agent.
 
         Returns:
-            CompiledStateGraph for the rooms agent.
+            Compiled rooms agent.
 
         Raises:
             RuntimeError: If startup_check() has not been called.
@@ -573,52 +623,64 @@ class OrchestrationResources:
 
 
 class OrchestrationAgentFactory:
-    """Compile the orchestration LangGraph from initialized resources."""
+    """Compile the orchestration LangGraph using initialized resources.
+
+    Contract:
+        - Assumes OrchestrationResources.startup_check() has completed successfully.
+        - Does not perform I/O or network checks.
+        - Returns a CompiledStateGraph that can be shared concurrently.
+
+    """
 
     __slots__ = ("_resources",)
 
     _resources: OrchestrationResources
 
     def __init__(self, *, resources: OrchestrationResources) -> None:
-        """Create the factory.
+        """Initialize the factory.
 
         Args:
-            resources: Initialized resources container.
+            resources: Initialized orchestration resources.
 
         """
         self._resources = resources
 
-    def build(self) -> CompiledStateGraph:
-        """Build and compile the orchestration graph.
+    def build(self) -> CompiledStateGraph:  # noqa: C901, PLR0915
+        """Compile and return the orchestration graph.
 
         Returns:
-            Compiled orchestration graph.
+            Compiled orchestration state graph.
 
         """
         resources = self._resources
         cfg = resources.get_config()
 
         async def router_node(state: ConversationState) -> dict[str, Any]:
-            """Route the request to the appropriate sub-agent.
+            """Route the conversation to the appropriate sub-agent.
 
             Args:
-                state: Current orchestration state.
+                state: Current conversation state.
 
             Returns:
-                State patch containing the selected route.
+                State patch containing the chosen route.
 
             """
             messages = state["messages"]
 
             async def _invoke() -> RouteDecision:
-                """Invoke the router LLM with the system prompt and message history.
+                """Invoke the router runnable.
+
+                This helper exists to keep the router call self-contained for
+                asyncio.wait_for(). It applies the orchestration system prompt as a
+                SystemMessage and then appends the current conversation messages.
 
                 Returns:
-                    Parsed RouteDecision produced by the router runnable.
+                    RouteDecision returned by the router runnable.
 
                 Raises:
-                    Exception: Propagates any exception raised by the underlying LLM
-                        call.
+                    Exception: Propagates any exception raised by the underlying
+                        router runnable (network errors, timeouts at the client
+                        layer, schema/parse errors, etc.).
 
                 """
                 return await resources.get_router().ainvoke(
@@ -642,28 +704,29 @@ class OrchestrationAgentFactory:
             return {"route": step}
 
         async def info_node(state: ConversationState) -> dict[str, Any]:
-            """Dispatch to the info agent.
+            """Invoke the compiled info agent.
 
             Args:
-                state: Current orchestration state.
+                state: Current conversation state.
 
             Returns:
-                Info agent result (state patch).
+                State patch from the info agent.
 
             """
             logger.info("Dispatching to info agent")
             return cast(
-                "dict[str, Any]", await resources.get_info_agent().ainvoke(state),
+                "dict[str, Any]",
+                await resources.get_info_agent().ainvoke(state),
             )
 
         async def rooms_node(state: ConversationState) -> dict[str, Any]:
-            """Dispatch to the rooms agent.
+            """Invoke the compiled rooms agent.
 
             Args:
-                state: Current orchestration state.
+                state: Current conversation state.
 
             Returns:
-                Rooms agent result (state patch).
+                State patch from the rooms agent.
 
             """
             logger.info("Dispatching to rooms agent")
@@ -673,30 +736,65 @@ class OrchestrationAgentFactory:
             )
 
         def refuse_node(_: ConversationState) -> dict[str, Any]:
-            """Return the configured refusal message.
-
-            Args:
-                _: Current orchestration state (unused).
-
-            Returns:
-                State patch containing a refusal AIMessage.
-
-            """
+            """Return an out-of-scope refusal response."""
             logger.info("Refusing request")
             return {"messages": [AIMessage(content=cfg.messages.refusal)]}
 
         def error_node(_: ConversationState) -> dict[str, Any]:
-            """Return the configured internal error message.
-
-            Args:
-                _: Current orchestration state (unused).
-
-            Returns:
-                State patch containing an error AIMessage.
-
-            """
+            """Return a user-friendly error response."""
             logger.info("Returning error message")
             return {"messages": [AIMessage(content=cfg.messages.error)]}
+
+        def finalize_node(state: ConversationState) -> dict[str, Any]:
+            """Prune intermediate messages and persist only user+final assistant turns.
+
+            This graph includes tool-using sub-agents. Their intermediate AI/tool
+            messages are useful for execution but should not be retained or
+            returned to the API client.
+
+            The resulting persisted message history is:
+                (prior turns) + (latest user message) + (latest final AIMessage)
+
+            Args:
+                state: Current conversation state.
+
+            Returns:
+                State patch that clears the messages channel and replaces it with
+                the pruned history.
+
+            """
+            messages = state["messages"]
+
+            kept: list[BaseMessage] = []
+            expecting_assistant = False
+
+            for msg in messages:
+                if isinstance(msg, HumanMessage):
+                    kept.append(msg)
+                    expecting_assistant = True
+                    continue
+
+                if not expecting_assistant:
+                    continue
+
+                if isinstance(msg, AIMessage):
+                    tool_calls = getattr(msg, "tool_calls", None) or []
+                    tool_calls_kw: list[Any]
+                    try:
+                        tool_calls_kw = list(
+                            msg.additional_kwargs.get("tool_calls", []),
+                        )
+                    except Exception:  # noqa: BLE001
+                        tool_calls_kw = []
+
+                    if not tool_calls and not tool_calls_kw:
+                        kept.append(msg)
+                        expecting_assistant = False
+
+            if kept and isinstance(kept[-1], HumanMessage):
+                kept.append(AIMessage(content=cfg.messages.error))
+
+            return {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES), *kept]}
 
         graph = StateGraph(ConversationState)
         graph.add_node("router", RunnableLambda(router_node))
@@ -704,6 +802,7 @@ class OrchestrationAgentFactory:
         graph.add_node("rooms", RunnableLambda(rooms_node))
         graph.add_node("refuse", RunnableLambda(refuse_node))
         graph.add_node("error", RunnableLambda(error_node))
+        graph.add_node("finalize", RunnableLambda(finalize_node))
 
         graph.add_edge(START, "router")
         graph.add_conditional_edges(
@@ -712,27 +811,31 @@ class OrchestrationAgentFactory:
             {"info": "info", "rooms": "rooms", "refuse": "refuse", "error": "error"},
         )
 
-        graph.add_edge("info", END)
-        graph.add_edge("rooms", END)
-        graph.add_edge("refuse", END)
-        graph.add_edge("error", END)
+        graph.add_edge("info", "finalize")
+        graph.add_edge("rooms", "finalize")
+        graph.add_edge("refuse", "finalize")
+        graph.add_edge("error", "finalize")
+        graph.add_edge("finalize", END)
 
-        return graph.compile()
+        return graph.compile(checkpointer=resources.get_checkpointer())
 
 
 # ============================
-# Manager for FastAPI startup + retry
+# Manager for FastAPI startup + retry + memory-aware invocation
 # ============================
 
 
 class OrchestrationManager:
     """Operational wrapper around resources + compiled graph.
 
-    This class is intended to be instantiated once and used by the FastAPI
-    lifespan to start initialization in the background.
+    Responsibilities:
+        - Run startup in a background task with retry/backoff.
+        - Expose readiness and a user-friendly unavailable message.
+        - Provide a memory-aware ainvoke() helper.
 
-    Requests can call get_agent() to obtain the compiled graph if available.
-    If unavailable, callers can return get_unavailable_message().
+    Threading/concurrency:
+        - The compiled graph and sub-agents are shared across requests.
+        - The init loop is guarded by a lock to avoid concurrent initialization.
 
     """
 
@@ -745,48 +848,35 @@ class OrchestrationManager:
     _lock: asyncio.Lock
 
     def __init__(self) -> None:
-        """Initialize the manager."""
+        """Initialize the orchestration manager."""
         self._resources = OrchestrationResources()
         self._factory = OrchestrationAgentFactory(resources=self._resources)
 
-        self._agent: CompiledStateGraph | None = None
-        self._init_task: asyncio.Task[None] | None = None
+        self._agent = None
+        self._init_task = None
         self._lock = asyncio.Lock()
 
     @property
     def is_ready(self) -> bool:
-        """Return whether the compiled orchestration agent is ready.
+        """Return whether the orchestration agent is ready.
 
         Returns:
-            True if the orchestration graph has been compiled and is available.
+            True if the compiled orchestration graph has been built.
 
         """
         return self._agent is not None
 
-    def get_agent(self) -> CompiledStateGraph | None:
-        """Return the compiled orchestration agent if ready.
-
-        Returns:
-            The compiled agent, or None if initialization has not completed.
-
-        """
-        return self._agent
-
     def get_unavailable_message(self) -> str:
-        """Return the configured user-facing unavailable message.
+        """Return the configured "unavailable" message.
 
         Returns:
-            The user-facing message returned while the system is initializing.
+            User-facing message to return when the system is not initialized.
 
         """
         return self._resources.get_config().messages.unavailable
 
     async def start(self) -> None:
-        """Start background initialization.
-
-        This method is idempotent.
-
-        """
+        """Start background initialization with retries."""
         if self._init_task is not None:
             return
         self._init_task = asyncio.create_task(
@@ -810,15 +900,47 @@ class OrchestrationManager:
         except Exception:  # noqa: BLE001
             logger.warning("Failed to close orchestration resources", exc_info=True)
 
-    async def _reset_and_backoff(self, *, backoff: float, max_backoff: float) -> float:
-        """Reset runtime state and sleep with exponential backoff.
+    async def ainvoke(self, *, thread_id: str, user_text: str) -> dict[str, Any]:
+        """Invoke the orchestration agent with MemorySaver-backed history.
+
+        Behavior:
+            - If the orchestration agent is not ready, returns an assistant message
+              with the configured "unavailable" text.
+            - Otherwise, sends only the new user message. The MemorySaver
+              checkpointer loads prior history for the given thread_id and
+              persists the updated history after the run.
 
         Args:
-            backoff: Current backoff duration.
-            max_backoff: Maximum backoff duration.
+            thread_id: Conversation identifier. Same id => shared history.
+            user_text: Latest user message.
 
         Returns:
-            Updated backoff duration (capped).
+            Final state patch from the orchestration agent.
+
+        """
+        if self._agent is None:
+            msg = self.get_unavailable_message()
+            return {"messages": [AIMessage(content=msg)]}
+
+        state: ConversationState = {"messages": [HumanMessage(content=user_text)]}
+
+        return cast(
+            "dict[str, Any]",
+            await self._agent.ainvoke(
+                state,
+                config={"configurable": {"thread_id": thread_id}},
+            ),
+        )
+
+    async def _reset_and_backoff(self, *, backoff: float, max_backoff: float) -> float:
+        """Reset runtime state and sleep for the current backoff.
+
+        Args:
+            backoff: Current backoff duration in seconds.
+            max_backoff: Maximum backoff duration in seconds.
+
+        Returns:
+            Next backoff duration in seconds.
 
         """
         self._resources.reset_runtime_state()
@@ -827,17 +949,12 @@ class OrchestrationManager:
         return min(backoff * 2.0, max_backoff)
 
     async def _init_loop(self) -> None:
-        """Initialize resources and compile the orchestration graph.
+        """Background loop that initializes and retries on failure.
 
-        This method runs as a background task. It attempts to initialize
-        dependencies via OrchestrationResources.startup_check(), compiles the
-        orchestration graph once, and then sleeps until cancelled.
-
-        If initialization fails, it resets runtime state and retries with
-        exponential backoff.
-
-        Raises:
-            asyncio.CancelledError: If the background task is cancelled.
+        The loop:
+            - Attempts initialization if the agent is not ready.
+            - On success, sleeps until cancelled.
+            - On failure, logs, resets, and retries with exponential backoff.
 
         """
         cfg = self._resources.get_config().orchestration
@@ -852,7 +969,6 @@ class OrchestrationManager:
                         self._agent = self._factory.build()
                         logger.info("Orchestration agent ready")
 
-                # Once ready, just sleep until cancelled.
                 await asyncio.sleep(3600)
 
             except asyncio.CancelledError:
@@ -880,7 +996,7 @@ class OrchestrationManager:
 # -----------------------------
 
 
-""" In your app module (e.g. main.py), you'd do something like:
+"""In your app module (e.g. main.py), you'd do something like:
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -897,12 +1013,8 @@ app = FastAPI(lifespan=lifespan)
 
 @app.post("/chat")
 async def chat(payload: dict):
-    agent = orchestration.get_agent()
-    if agent is None:
-        msg = orchestration.get_unavailable_message()
-        return {"messages": [{"role": "assistant", "content": msg}]}
-    return await agent.ainvoke(payload)
-
-@app.get("/health/orchestration")
-async def orchestration_health():
-    return {"ready": orchestration.is_ready}"""
+    # You must provide a stable conversation id.
+    thread_id = payload["thread_id"]
+    user_text = payload["text"]
+    return await orchestration.ainvoke(thread_id=thread_id, user_text=user_text)
+"""

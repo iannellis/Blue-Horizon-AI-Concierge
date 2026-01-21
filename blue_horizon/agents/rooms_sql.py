@@ -68,6 +68,8 @@ ENUM_TYPES: Final[tuple[str, ...]] = (
 def load_rooms_sql_config(config_path: Path | str | None = None) -> RoomsSqlConfig:
     """Load the rooms SQL configuration section.
 
+    For when using the rooms agent standalone.
+
     Args:
         config_path: Optional path to override the packaged config. If unset,
             ``app_config.toml`` from the package resources is used.

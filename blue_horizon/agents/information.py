@@ -82,6 +82,8 @@ class OperationalError(RuntimeError):
 def load_info_config(config_path: Path | str | None = None) -> InfoRagConfig:
     """Load the info configuration section.
 
+    For when using the information agent standalone.
+
     Args:
         config_path: Optional path to override the packaged config. If unset,
             ``app_config.toml`` from the package resources is used.

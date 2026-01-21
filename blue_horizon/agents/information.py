@@ -54,6 +54,7 @@ from pydantic import BaseModel, Field
 from redis.asyncio import Redis as AsyncRedis
 from redisvl.schema import IndexSchema
 
+from blue_horizon.agents.exceptions import OperationalError
 from blue_horizon.config import (
     InfoEmbeddingsConfig,
     InfoRagConfig,
@@ -61,17 +62,6 @@ from blue_horizon.config import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-class OperationalError(RuntimeError):
-    """Raised for expected operational failures.
-
-    This exception type is used for failures that can occur during normal operation
-    (e.g., transient Redis connectivity issues, retrieval failures, malformed
-    hydration payloads). Callers should generally log the error and return a safe,
-    user-friendly response rather than crashing the request.
-
-    """
 
 
 # ============================

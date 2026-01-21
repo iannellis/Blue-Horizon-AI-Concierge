@@ -36,20 +36,10 @@ from psycopg import sql
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
+from blue_horizon.agents.exceptions import OperationalError
 from blue_horizon.config import RoomsSqlConfig, load_app_config
 
 logger = logging.getLogger(__name__)
-
-
-class OperationalError(RuntimeError):
-    """Raise an operational error for expected failures.
-
-    This exception type is used for failures that can occur during normal operation
-    (e.g., transient connectivity issues, retrieval failures). Callers should
-    generally log the error and return a safe, user-friendly response rather than
-    crashing the request.
-
-    """
 
 
 ENUM_TYPES: Final[tuple[str, ...]] = (

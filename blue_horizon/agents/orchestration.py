@@ -46,6 +46,7 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, Field
 
+from blue_horizon.agents.exceptions import OperationalError
 from blue_horizon.agents.information import (
     InfoAgentFactory,
     InfoRagResources,
@@ -66,18 +67,6 @@ from blue_horizon.config import (
 logger = logging.getLogger(__name__)
 
 BASE_PACKAGE: Final[str] = "blue_horizon"
-
-
-class OperationalError(RuntimeError):
-    """An operational (expected) runtime error.
-
-    Use this exception for failures that can occur during normal operation
-    (e.g., transient connectivity issues, dependency outages).
-
-    Callers should generally log the error and return a safe user-facing response
-    or retry later rather than crashing the process.
-
-    """
 
 
 @lru_cache(maxsize=32)

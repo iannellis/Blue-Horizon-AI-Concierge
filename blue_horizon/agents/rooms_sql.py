@@ -22,8 +22,6 @@ import asyncio
 import logging
 import os
 import re
-import tomllib
-from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from string import Template as StringTemplate
@@ -37,6 +35,8 @@ from langgraph.graph.state import CompiledStateGraph
 from psycopg import sql
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
+
+from blue_horizon.config import RoomsSqlConfig, load_app_config
 
 logger = logging.getLogger(__name__)
 
@@ -65,239 +65,20 @@ ENUM_TYPES: Final[tuple[str, ...]] = (
 # ============================
 
 
-@dataclass(frozen=True, slots=True)
-class LlmConfig:
-    """Configure the ChatOpenAI client.
-
-    Attributes:
-        model: Model identifier passed to ChatOpenAI.
-        temperature: Sampling temperature.
-        reasoning_effort: Reasoning effort hint (passed to ChatOpenAI as
-            reasoning={"effort": ...}).
-        timeout_s: Per-request network timeout in seconds.
-        max_retries: Retry count for transient provider/network errors.
-
-    """
-
-    model: str
-    temperature: float
-    reasoning_effort: str
-    timeout_s: float
-    max_retries: int
-
-
-@dataclass(frozen=True, slots=True)
-class AgentConfig:
-    """Configure agent prompting.
-
-    Attributes:
-        dialect: SQL dialect label used in the system prompt.
-        top_k: Prompt parameter used by the system prompt template.
-
-    """
-
-    dialect: str
-    top_k: int
-
-
-@dataclass(frozen=True, slots=True)
-class PromptsConfig:
-    """Configure prompt template files.
-
-    Attributes:
-        folder: Folder (relative to this module) containing prompt templates.
-        system_prompt_filename: System prompt template filename (no path).
-
-    """
-
-    folder: str
-    system_prompt_filename: str
-
-
-@dataclass(frozen=True, slots=True)
-class DbPoolConfig:
-    """Configure the client-side async connection pool.
-
-    Notes:
-        The database provider may also pool on the server side. This pool controls
-        concurrency and connection reuse within the application process.
-
-    Attributes:
-        min_size: Minimum number of connections to keep in the pool.
-        max_size: Maximum number of connections to allow in the pool.
-        timeout_s: Timeout (seconds) for acquiring a connection.
-
-    """
-
-    min_size: int
-    max_size: int
-    timeout_s: float
-
-
-@dataclass(frozen=True, slots=True)
-class DbGuardrailsConfig:
-    """Configure SQL tool guardrails.
-
-    Attributes:
-        max_rows: Maximum number of rows returned to the model.
-        allow_only_hotel_tables: Whether to enforce a table allowlist.
-
-    """
-
-    max_rows: int
-    allow_only_hotel_tables: bool
-
-
-@dataclass(frozen=True, slots=True)
-class DbTimeoutsConfig:
-    """Configure database-side timeouts.
-
-    Attributes:
-        statement_timeout_ms: Postgres statement_timeout in milliseconds.
-            Use 0 to skip setting statement_timeout.
-
-    """
-
-    statement_timeout_ms: int
-
-
-@dataclass(frozen=True, slots=True)
-class DbRetryConfig:
-    """Configure retries for transient database connection failures.
-
-    Attributes:
-        max_transient_retries: Number of retries after the initial attempt.
-        transient_retry_backoff_s: Base backoff (seconds), exponential per attempt.
-        retry_writes_on_transient_errors: Whether to retry DML statements. Default
-            False to avoid accidental double-writes.
-
-    """
-
-    max_transient_retries: int
-    transient_retry_backoff_s: float
-    retry_writes_on_transient_errors: bool
-
-
-@dataclass(frozen=True, slots=True)
-class DbConfig:
-    """Group database configuration.
-
-    Attributes:
-        pool: Client-side pool settings.
-        guardrails: SQL validation and result-size guardrails.
-        timeouts: Database-side statement timeout settings.
-        retry: Transient connection retry policy.
-
-    """
-
-    pool: DbPoolConfig
-    guardrails: DbGuardrailsConfig
-    timeouts: DbTimeoutsConfig
-    retry: DbRetryConfig
-
-
-@dataclass(frozen=True, slots=True)
-class RoomsSqlConfig:
-    """Group top-level configuration loaded from TOML.
-
-    Attributes:
-        llm: LLM client configuration.
-        agent: Prompting configuration.
-        prompts: Prompt template configuration.
-        db: Database configuration.
-
-    """
-
-    llm: LlmConfig
-    agent: AgentConfig
-    prompts: PromptsConfig
-    db: DbConfig
-
-
-def load_rooms_sql_config(config_path: Path) -> RoomsSqlConfig:
-    """Load configuration from a TOML file.
-
-    Mirrors the style used by `information_agent.py`.
+def load_rooms_sql_config(config_path: Path | str | None = None) -> RoomsSqlConfig:
+    """Load the rooms SQL configuration section.
 
     Args:
-        config_path: Path to TOML config.
+        config_path: Optional path to override the packaged config. If unset,
+            ``app_config.toml`` from the package resources is used.
 
     Returns:
-        Parsed rooms SQL configuration.
+        RoomsSqlConfig: Parsed configuration for the rooms agent.
 
-    Raises:
-        RuntimeError: If missing/unreadable TOML or required keys are missing.
+    """  # noqa: D202
 
-    """
-    path = config_path.expanduser().resolve()
-    if not path.exists() or not path.is_file():
-        msg = f"Config file not found: {path}"
-        raise RuntimeError(msg)
-
-    try:
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
-    except OSError as exc:
-        msg = f"Failed to read config file: {path}"
-        raise RuntimeError(msg) from exc
-    except tomllib.TOMLDecodeError as exc:
-        msg = f"Invalid TOML in config file: {path}"
-        raise RuntimeError(msg) from exc
-
-    try:
-        llm = data["llm"]
-        agent = data["agent"]
-        prompts = data["prompts"]
-        db = data["db"]
-        pool = db["pool"]
-        guardrails = db["guardrails"]
-        timeouts = db["timeouts"]
-        retry = db["retry"]
-
-        return RoomsSqlConfig(
-            llm=LlmConfig(
-                model=str(llm["model"]),
-                temperature=float(llm["temperature"]),
-                reasoning_effort=str(llm["reasoning_effort"]),
-                timeout_s=float(llm["timeout_s"]),
-                max_retries=int(llm["max_retries"]),
-            ),
-            agent=AgentConfig(
-                dialect=str(agent["dialect"]),
-                top_k=int(agent["top_k"]),
-            ),
-            prompts=PromptsConfig(
-                folder=str(prompts["folder"]),
-                system_prompt_filename=str(prompts["system_prompt_filename"]),
-            ),
-            db=DbConfig(
-                pool=DbPoolConfig(
-                    min_size=int(pool["min_size"]),
-                    max_size=int(pool["max_size"]),
-                    timeout_s=float(pool["timeout_s"]),
-                ),
-                guardrails=DbGuardrailsConfig(
-                    max_rows=int(guardrails["max_rows"]),
-                    allow_only_hotel_tables=bool(guardrails["allow_only_hotel_tables"]),
-                ),
-                timeouts=DbTimeoutsConfig(
-                    statement_timeout_ms=int(timeouts["statement_timeout_ms"]),
-                ),
-                retry=DbRetryConfig(
-                    max_transient_retries=int(retry["max_transient_retries"]),
-                    transient_retry_backoff_s=float(retry["transient_retry_backoff_s"]),
-                    retry_writes_on_transient_errors=bool(
-                        retry["retry_writes_on_transient_errors"],
-                    ),
-                ),
-            ),
-        )
-
-    except KeyError as exc:
-        msg = f"Missing required config key: {exc}"
-        raise RuntimeError(msg) from exc
-    except (TypeError, ValueError) as exc:
-        msg = "Invalid config value type"
-        raise RuntimeError(msg) from exc
+    app_config = load_app_config(path=config_path)
+    return app_config.rooms_sql
 
 
 # ============================

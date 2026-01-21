@@ -27,12 +27,7 @@ Architecture
 import asyncio
 import importlib.resources as importlib_resources
 import logging
-import tomllib
-from collections.abc import Iterator
-from contextlib import contextmanager
-from dataclasses import dataclass
 from functools import lru_cache
-from pathlib import Path
 from typing import Any, Final, Literal, cast
 
 from langchain_core.messages import (
@@ -55,13 +50,17 @@ from blue_horizon.agents.information import (
     InfoAgentFactory,
     InfoRagResources,
     get_redis_url,
-    load_info_config,
 )
 from blue_horizon.agents.rooms_sql import (
     RoomsAgentFactory,
     RoomsSqlResources,
     get_pgsql_db_url,
-    load_rooms_sql_config,
+)
+from blue_horizon.config import (
+    InfoRagConfig,
+    OrchestrationConfig,
+    RoomsSqlConfig,
+    load_app_config,
 )
 
 logger = logging.getLogger(__name__)
@@ -79,162 +78,6 @@ class OperationalError(RuntimeError):
     or retry later rather than crashing the process.
 
     """
-
-
-# ============================
-# Settings (loaded from TOML config)
-# ============================
-
-
-@dataclass(frozen=True, slots=True)
-class LlmConfig:
-    """Chat model configuration.
-
-    Attributes:
-        model: Model name passed to ChatOpenAI.
-        temperature: Sampling temperature.
-        reasoning_effort: Reasoning effort string, passed via reasoning={"effort": ...}.
-        timeout_s: Client timeout in seconds.
-        max_retries: Max retries at the client level.
-
-    """
-
-    model: str
-    temperature: float
-    reasoning_effort: str
-    timeout_s: float
-    max_retries: int
-
-
-@dataclass(frozen=True, slots=True)
-class OrchestrationRuntimeConfig:
-    """Orchestration behavior configuration.
-
-    Attributes:
-        init_retry_base_s: Initial backoff (seconds) between init retries.
-        init_retry_max_s: Maximum backoff (seconds) between init retries.
-        router_timeout_s: Wall-clock timeout (seconds) for router decision step.
-        info_timeout_s: Wall-clock timeout (seconds) for the info agent step.
-        rooms_timeout_s: Wall-clock timeout (seconds) for the rooms agent step.
-
-    """
-
-    init_retry_base_s: float
-    init_retry_max_s: float
-    router_timeout_s: float
-    info_timeout_s: float
-    rooms_timeout_s: float
-
-
-@dataclass(frozen=True, slots=True)
-class PromptsConfig:
-    """Prompt file configuration.
-
-    Attributes:
-        folder: Directory (relative to this module) containing prompt files.
-        orchestration_prompt_filename: The orchestration prompt filename.
-
-    """
-
-    folder: str
-    orchestration_prompt_filename: str
-
-
-@dataclass(frozen=True, slots=True)
-class MessagesConfig:
-    """User-facing message configuration.
-
-    Attributes:
-        refusal: Message returned when a request is out-of-scope.
-        error: Message returned when routing/processing fails.
-        unavailable: Message returned when the system is not initialized.
-
-    """
-
-    refusal: str
-    error: str
-    unavailable: str
-
-
-@dataclass(frozen=True, slots=True)
-class OrchestrationConfig:
-    """Top-level orchestration configuration loaded from TOML.
-
-    Attributes:
-        llm: Chat model configuration.
-        orchestration: Operational runtime settings.
-        prompts: Prompt directory/filename settings.
-        messages: User-facing message strings.
-
-    """
-
-    llm: LlmConfig
-    orchestration: OrchestrationRuntimeConfig
-    prompts: PromptsConfig
-    messages: MessagesConfig
-
-
-def load_orchestration_config() -> OrchestrationConfig:
-    """Load orchestration configuration from a packaged TOML resource.
-
-    The configuration file is expected to live under the base package directory
-    (blue_horizon), e.g. blue_horizon/orchestration_config.toml.
-
-    Returns:
-        Parsed orchestration configuration.
-
-    Raises:
-        RuntimeError: If the resource is missing, unreadable, invalid TOML, or
-            missing required keys.
-
-    """
-    data = _load_toml_resource("orchestration_config.toml")
-
-    try:
-        llm = data["llm"]
-        orchestration = data["orchestration"]
-        prompts = data["prompts"]
-        messages = data["messages"]
-
-        return OrchestrationConfig(
-            llm=LlmConfig(
-                model=str(llm["model"]),
-                temperature=float(llm["temperature"]),
-                reasoning_effort=str(llm["reasoning_effort"]),
-                timeout_s=float(llm["timeout_s"]),
-                max_retries=int(llm["max_retries"]),
-            ),
-            orchestration=OrchestrationRuntimeConfig(
-                init_retry_base_s=float(orchestration["init_retry_base_s"]),
-                init_retry_max_s=float(orchestration["init_retry_max_s"]),
-                router_timeout_s=float(orchestration["router_timeout_s"]),
-                info_timeout_s=float(orchestration["info_timeout_s"]),
-                rooms_timeout_s=float(orchestration["rooms_timeout_s"]),
-            ),
-            prompts=PromptsConfig(
-                folder=str(prompts["folder"]),
-                orchestration_prompt_filename=str(
-                    prompts["orchestration_prompt_filename"],
-                ),
-            ),
-            messages=MessagesConfig(
-                refusal=str(messages["refusal"]),
-                error=str(messages["error"]),
-                unavailable=str(messages["unavailable"]),
-            ),
-        )
-
-    except KeyError as exc:
-        msg = f"Missing required config key: {exc}"
-        raise RuntimeError(msg) from exc
-    except (TypeError, ValueError) as exc:
-        msg = "Invalid config value type"
-        raise RuntimeError(msg) from exc
-
-
-# ============================
-# Packaged resource loading
-# ============================
 
 
 @lru_cache(maxsize=32)
@@ -260,55 +103,6 @@ def load_resource_text(relative_path: str) -> str:
     except OSError as exc:
         msg = f"Failed to read resource: {BASE_PACKAGE}/{relative_path}"
         raise RuntimeError(msg) from exc
-
-
-def _load_toml_resource(relative_path: str) -> dict[str, Any]:
-    """Load and parse a TOML resource from the base package.
-
-    Args:
-        relative_path: Resource path relative to the blue_horizon package root.
-
-    Returns:
-        Parsed TOML as a dictionary.
-
-    Raises:
-        RuntimeError: If the TOML cannot be read or parsed.
-
-    """
-    try:
-        return tomllib.loads(load_resource_text(relative_path))
-    except tomllib.TOMLDecodeError as exc:
-        msg = f"Invalid TOML in resource: {BASE_PACKAGE}/{relative_path}"
-        raise RuntimeError(msg) from exc
-
-
-@contextmanager
-def as_resource_file(relative_path: str) -> Iterator[Path]:
-    """Materialize a packaged resource to a filesystem path.
-
-    This is useful when downstream code requires a Path (e.g., config loaders).
-
-    Args:
-        relative_path: Resource path relative to the blue_horizon package root.
-
-    Yields:
-        A filesystem path that can be passed to APIs expecting Path.
-
-    Raises:
-        RuntimeError: If the resource cannot be located.
-
-    """
-    try:
-        traversable = importlib_resources.files(BASE_PACKAGE).joinpath(relative_path)
-    except ModuleNotFoundError as exc:
-        msg = f"Base package not found: {BASE_PACKAGE}"
-        raise RuntimeError(msg) from exc
-    except (AttributeError, TypeError) as exc:
-        msg = f"Failed to locate resource: {BASE_PACKAGE}/{relative_path}"
-        raise RuntimeError(msg) from exc
-
-    with importlib_resources.as_file(traversable) as path:
-        yield path
 
 
 # ============================
@@ -433,11 +227,11 @@ class OrchestrationResources:
     _system_prompt_resource: str
     _system_prompt: str | None
 
-    _info_config: Any
+    _info_config: InfoRagConfig
     _info_resources: InfoRagResources
     _info_agent: CompiledStateGraph | None
 
-    _rooms_config: Any
+    _rooms_config: RoomsSqlConfig
     _rooms_resources: RoomsSqlResources
     _rooms_agent: CompiledStateGraph | None
 
@@ -457,7 +251,8 @@ class OrchestrationResources:
             RuntimeError: If configuration or prompt resolution fails.
 
         """
-        self._config = load_orchestration_config()
+        app_config = load_app_config()
+        self._config = app_config.orchestration
 
         prompts_folder = self._config.prompts.folder.strip("/")
         if prompts_folder:
@@ -470,16 +265,14 @@ class OrchestrationResources:
             )
         self._system_prompt = None
 
-        with as_resource_file("info_config.toml") as cfg_path:
-            self._info_config = load_info_config(cfg_path)
+        self._info_config = app_config.info
         self._info_resources = InfoRagResources(
             redis_url=get_redis_url(),
             config=self._info_config,
         )
         self._info_agent = None
 
-        with as_resource_file("rooms_sql_config.toml") as cfg_path:
-            self._rooms_config = load_rooms_sql_config(cfg_path)
+        self._rooms_config = app_config.rooms_sql
         self._rooms_resources = RoomsSqlResources(
             pgsql_db_url=get_pgsql_db_url(),
             config=self._rooms_config,

@@ -27,7 +27,6 @@ import json
 import logging
 import math
 import os
-import tomllib
 from collections import OrderedDict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -55,6 +54,12 @@ from pydantic import BaseModel, Field
 from redis.asyncio import Redis as AsyncRedis
 from redisvl.schema import IndexSchema
 
+from blue_horizon.config import (
+    InfoEmbeddingsConfig,
+    InfoRagConfig,
+    load_app_config,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -74,188 +79,19 @@ class OperationalError(RuntimeError):
 # ============================
 
 
-@dataclass(frozen=True, slots=True)
-class RetrievalConfig:
-    """Configuration for retrieval behavior.
-
-    Attributes:
-        top_k: Number of results to retrieve per source.
-        vector_dims: Embedding dimensionality used by the Redis vector field.
-        retriever_cache_max: Max number of cached retrievers per process.
-
-    """
-
-    top_k: int
-    vector_dims: int
-    retriever_cache_max: int
-
-
-@dataclass(frozen=True, slots=True)
-class EmbeddingsConfig:
-    """Configuration for embedding generation.
-
-    Attributes:
-        model: Embedding model name.
-        batch_size: Number of inputs per embeddings request during batch operations.
-        timeout_s: Per-request timeout (seconds) for embedding calls.
-        max_retries: Maximum number of retries for embedding calls.
-
-    """
-
-    model: str
-    batch_size: int
-    timeout_s: float
-    max_retries: int
-
-
-@dataclass(frozen=True, slots=True)
-class LlmConfig:
-    """Configuration for the ChatOpenAI client used by the agent.
-
-    Attributes:
-        model: Chat model name.
-        temperature: Sampling temperature.
-        timeout_s: Per-request timeout (seconds) for LLM calls.
-        max_retries: Maximum number of retries for LLM calls.
-        reasoning_effort: Reasoning effort hint (passed to ChatOpenAI as
-            reasoning={"effort": ...}).
-
-    """
-
-    model: str
-    temperature: float
-    timeout_s: float
-    max_retries: int
-    reasoning_effort: str
-
-
-@dataclass(frozen=True, slots=True)
-class RedisConfig:
-    """Configuration for Redis connectivity.
-
-    Attributes:
-        connect_timeout_s: Connection timeout (seconds).
-        socket_timeout_s: Socket read/write timeout (seconds).
-        health_check_interval_s: Interval (seconds) after which an idle connection is
-            health-checked before reuse.
-
-    """
-
-    connect_timeout_s: float
-    socket_timeout_s: float
-    health_check_interval_s: int
-
-
-@dataclass(frozen=True, slots=True)
-class PromptsConfig:
-    """Configuration for prompt templates.
-
-    Attributes:
-        folder: Folder name (relative to this module) that contains all prompt
-            templates.
-        system_prompt_filename: File name of the system prompt template.
-
-    """
-
-    folder: str
-    system_prompt_filename: str
-
-
-@dataclass(frozen=True, slots=True)
-class InfoRagConfig:
-    """Top-level configuration loaded from TOML.
-
-    Attributes:
-        retrieval: Retrieval-related configuration.
-        embeddings: Embedding-related configuration.
-        llm: LLM model configuration.
-        redis: Redis connectivity configuration.
-        prompts: Prompt template configuration.
-
-    """
-
-    retrieval: RetrievalConfig
-    embeddings: EmbeddingsConfig
-    llm: LlmConfig
-    redis: RedisConfig
-    prompts: PromptsConfig
-
-
-# ============================
-# Configuration loading
-# ============================
-
-
-def load_info_config(config_path: Path) -> InfoRagConfig:
-    """Load configuration from a TOML file.
+def load_info_config(config_path: Path | str | None = None) -> InfoRagConfig:
+    """Load the info configuration section.
 
     Args:
-        config_path: Path to the TOML configuration file.
+        config_path: Optional path to override the packaged config. If unset,
+            ``app_config.toml`` from the package resources is used.
 
     Returns:
-        InfoRagConfig: Parsed configuration.
-
-    Raises:
-        RuntimeError: If the file is missing, unreadable, contains invalid TOML, or
-            required keys are missing.
+        InfoRagConfig: Parsed configuration for the information agent.
 
     """
-    path = config_path.expanduser().resolve()
-    if not path.exists() or not path.is_file():
-        msg = f"Config file not found: {path}"
-        raise RuntimeError(msg)
-
-    try:
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
-    except OSError as exc:
-        msg = f"Failed to read config file: {path}"
-        raise RuntimeError(msg) from exc
-    except tomllib.TOMLDecodeError as exc:
-        msg = f"Invalid TOML in config file: {path}"
-        raise RuntimeError(msg) from exc
-
-    try:
-        retrieval = data["retrieval"]
-        embeddings = data["embeddings"]
-        llm = data["llm"]
-        redis = data["redis"]
-        prompts = data["prompts"]
-
-        return InfoRagConfig(
-            retrieval=RetrievalConfig(
-                top_k=int(retrieval["top_k"]),
-                vector_dims=int(retrieval["vector_dims"]),
-                retriever_cache_max=max(1, int(retrieval["retriever_cache_max"])),
-            ),
-            embeddings=EmbeddingsConfig(
-                model=str(embeddings["model"]),
-                batch_size=int(embeddings["batch_size"]),
-                timeout_s=float(embeddings["timeout_s"]),
-                max_retries=int(embeddings["max_retries"]),
-            ),
-            llm=LlmConfig(
-                model=str(llm["model"]),
-                temperature=float(llm["temperature"]),
-                timeout_s=float(llm["timeout_s"]),
-                max_retries=int(llm["max_retries"]),
-                reasoning_effort=str(llm["reasoning_effort"]),
-            ),
-            redis=RedisConfig(
-                connect_timeout_s=float(redis["connect_timeout_s"]),
-                socket_timeout_s=float(redis["socket_timeout_s"]),
-                health_check_interval_s=int(redis["health_check_interval_s"]),
-            ),
-            prompts=PromptsConfig(
-                folder=str(prompts["folder"]),
-                system_prompt_filename=str(prompts["system_prompt_filename"]),
-            ),
-        )
-    except KeyError as exc:
-        msg = f"Missing required config key: {exc}"
-        raise RuntimeError(msg) from exc
-    except (TypeError, ValueError) as exc:
-        msg = "Invalid config value type"
-        raise RuntimeError(msg) from exc
+    app_config = load_app_config(path=config_path)
+    return app_config.info
 
 
 # ============================
@@ -871,7 +707,7 @@ class InfoRagResources:
         return out
 
     @staticmethod
-    def _init_llamaindex(cfg: EmbeddingsConfig) -> None:
+    def _init_llamaindex(cfg: InfoEmbeddingsConfig) -> None:
         """Configure LlamaIndex global embedding settings.
 
         Side Effects:

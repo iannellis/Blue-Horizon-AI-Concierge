@@ -24,7 +24,7 @@ import os
 import re
 from functools import lru_cache
 from pathlib import Path
-from string import Template as StringTemplate
+from string import Template
 from typing import Any, Final, LiteralString, cast
 
 import psycopg
@@ -37,6 +37,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from blue_horizon.agents.exceptions import OperationalError
+from blue_horizon.agents.prompt_utils import load_prompt_template
 from blue_horizon.config import RoomsSqlConfig, load_app_config
 
 logger = logging.getLogger(__name__)
@@ -114,71 +115,9 @@ def _user_facing_db_message() -> str:
 # ============================
 
 
-def resolve_prompts_dir(*, prompts_folder: str) -> Path:
-    """Resolve the directory containing prompt templates.
-
-    Args:
-        prompts_folder: Folder relative to this module containing prompts.
-
-    Returns:
-        Resolved path to the prompts directory.
-
-    Raises:
-        RuntimeError: If the directory does not exist.
-
-    """
-    prompts_dir = (Path(__file__).parent / prompts_folder).resolve()
-    if not prompts_dir.exists() or not prompts_dir.is_dir():
-        msg = f"Prompts folder not found: {prompts_dir}"
-        raise RuntimeError(msg)
-    return prompts_dir
-
-
-def resolve_prompt_path(*, prompts_dir: Path, filename: str) -> Path:
-    """Resolve a prompt template file within the prompts directory.
-
-    Args:
-        prompts_dir: Directory containing prompt templates.
-        filename: Prompt template filename.
-
-    Returns:
-        Resolved path to the prompt template.
-
-    Raises:
-        RuntimeError: If the template file does not exist.
-
-    """
-    candidate = (prompts_dir / filename).resolve()
-    if not candidate.exists() or not candidate.is_file():
-        msg = f"System prompt template not found: {candidate}"
-        raise RuntimeError(msg)
-    return candidate
-
-
-@lru_cache(maxsize=5)
-def load_prompt_template(path: Path) -> StringTemplate:
-    """Load and cache a prompt template.
-
-    Args:
-        path: Path to the template file.
-
-    Returns:
-        Parsed template object.
-
-    Raises:
-        RuntimeError: If the file cannot be read.
-
-    """
-    try:
-        return StringTemplate(path.read_text(encoding="utf-8"))
-    except OSError as exc:
-        msg = f"Failed to read prompt template at: {path}"
-        raise RuntimeError(msg) from exc
-
-
 def render_system_prompt(  # noqa: PLR0913
     *,
-    template_path: Path,
+    template: Template,
     top_k: int,
     dialect: str,
     enum_values: dict[str, list[str]],
@@ -186,22 +125,7 @@ def render_system_prompt(  # noqa: PLR0913
     additional_amenities: list[str],
     view_types: list[str],
 ) -> str:
-    """Render the system prompt template with runtime substitutions.
-
-    Args:
-        template_path: Path to the system prompt template file.
-        top_k: Prompt parameter used by the template.
-        dialect: SQL dialect label used by the template.
-        enum_values: Enum type name -> allowed values.
-        basic_amenities: Distinct basic amenity values.
-        additional_amenities: Distinct additional amenity values.
-        view_types: Distinct view type values.
-
-    Returns:
-        Rendered system prompt string.
-
-    """
-    template = load_prompt_template(template_path)
+    """Render the system prompt template with runtime substitutions."""
     return template.safe_substitute(
         top_k=top_k,
         dialect=dialect,
@@ -563,8 +487,7 @@ class RoomsSqlResources:
     """
 
     __slots__ = (
-        "_prompts_dir",
-        "_system_prompt_path",
+        "_system_prompt_resource",
         "config",
         "pgsql_db_url",
         "pool",
@@ -575,8 +498,7 @@ class RoomsSqlResources:
     pgsql_db_url: str
     pool: AsyncConnectionPool[Any] | None
     system_prompt: str | None
-    _prompts_dir: Path
-    _system_prompt_path: Path
+    _system_prompt_resource: str
 
     def __init__(self, *, config: RoomsSqlConfig, pgsql_db_url: str) -> None:
         """Construct rooms SQL resources.
@@ -600,13 +522,13 @@ class RoomsSqlResources:
         self.pool: AsyncConnectionPool[Any] | None = None
         self.system_prompt = None
 
-        prompts_dir = resolve_prompts_dir(prompts_folder=self.config.prompts.folder)
-        prompt_path = resolve_prompt_path(
-            prompts_dir=prompts_dir,
-            filename=self.config.prompts.system_prompt_filename,
-        )
-        self._prompts_dir = prompts_dir
-        self._system_prompt_path = prompt_path
+        prompts_folder = self.config.prompts.folder.strip("/")
+        if prompts_folder:
+            self._system_prompt_resource = (
+                f"{prompts_folder}/{self.config.prompts.system_prompt_filename}"
+            )
+        else:
+            self._system_prompt_resource = self.config.prompts.system_prompt_filename
 
     async def startup_check(self) -> None:
         """Initialize resources and validate readiness.
@@ -818,8 +740,9 @@ class RoomsSqlResources:
                 view_types,
             ) = await fetch_rooms_metadata(self.pgsql_db_url)
 
+            template = load_prompt_template(self._system_prompt_resource)
             self.system_prompt = render_system_prompt(
-                template_path=self._system_prompt_path,
+                template=template,
                 top_k=self.config.agent.top_k,
                 dialect=self.config.agent.dialect,
                 enum_values=enum_values,

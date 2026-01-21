@@ -25,10 +25,8 @@ Architecture
 """
 
 import asyncio
-import importlib.resources as importlib_resources
 import logging
-from functools import lru_cache
-from typing import Any, Final, Literal, cast
+from typing import Any, Literal, cast
 
 from langchain_core.messages import (
     AIMessage,
@@ -52,6 +50,7 @@ from blue_horizon.agents.information import (
     InfoRagResources,
     get_redis_url,
 )
+from blue_horizon.agents.prompt_utils import load_packaged_text
 from blue_horizon.agents.rooms_sql import (
     RoomsAgentFactory,
     RoomsSqlResources,
@@ -65,58 +64,6 @@ from blue_horizon.config import (
 )
 
 logger = logging.getLogger(__name__)
-
-BASE_PACKAGE: Final[str] = "blue_horizon"
-
-
-@lru_cache(maxsize=32)
-def load_resource_text(relative_path: str) -> str:
-    """Load UTF-8 text from a packaged resource under the base package.
-
-    Args:
-        relative_path: Resource path relative to the blue_horizon package root.
-
-    Returns:
-        Resource contents decoded as UTF-8.
-
-    Raises:
-        RuntimeError: If the resource cannot be located or read.
-
-    """
-    try:
-        traversable = importlib_resources.files(BASE_PACKAGE).joinpath(relative_path)
-        return traversable.read_text(encoding="utf-8")
-    except FileNotFoundError as exc:
-        msg = f"Resource not found: {BASE_PACKAGE}/{relative_path}"
-        raise RuntimeError(msg) from exc
-    except OSError as exc:
-        msg = f"Failed to read resource: {BASE_PACKAGE}/{relative_path}"
-        raise RuntimeError(msg) from exc
-
-
-# ============================
-# Prompt loading
-# ============================
-
-
-def load_prompt_text(relative_path: str) -> str:
-    """Load prompt text from a packaged resource.
-
-    Note:
-        This function does not apply an additional cache layer. Resource text is
-        already cached by load_resource_text().
-
-    Args:
-        relative_path: Resource path relative to the blue_horizon package root.
-
-    Returns:
-        Prompt text.
-
-    Raises:
-        RuntimeError: If the resource cannot be read.
-
-    """
-    return load_resource_text(relative_path)
 
 
 # ============================
@@ -296,7 +243,7 @@ class OrchestrationResources:
 
         """
         try:
-            self._system_prompt = load_prompt_text(self._system_prompt_resource)
+            self._system_prompt = load_packaged_text(self._system_prompt_resource)
 
             await self._info_resources.startup_check()
             self._info_agent = InfoAgentFactory(

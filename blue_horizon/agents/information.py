@@ -33,7 +33,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
-from string import Template
 from typing import Any
 
 from dotenv import load_dotenv
@@ -55,6 +54,7 @@ from redis.asyncio import Redis as AsyncRedis
 from redisvl.schema import IndexSchema
 
 from blue_horizon.agents.exceptions import OperationalError
+from blue_horizon.agents.prompt_utils import load_prompt_template
 from blue_horizon.config import (
     InfoEmbeddingsConfig,
     InfoRagConfig,
@@ -91,86 +91,9 @@ def load_info_config(config_path: Path | str | None = None) -> InfoRagConfig:
 # ============================
 
 
-def resolve_prompts_dir(*, prompts_folder: str) -> Path:
-    """Resolve the prompts directory.
-
-    The prompts directory is resolved relative to this module file.
-
-    Args:
-        prompts_folder: Folder name (relative to this module). Typically read from
-            ``InfoRagConfig.prompts.folder``.
-
-    Returns:
-        Path: Absolute path to the prompts directory.
-
-    Raises:
-        RuntimeError: If the directory does not exist.
-
-    """
-    prompts_dir = (Path(__file__).parent / prompts_folder).resolve()
-    if not prompts_dir.exists() or not prompts_dir.is_dir():
-        msg = f"Prompts folder not found: {prompts_dir}"
-        raise RuntimeError(msg)
-    return prompts_dir
-
-
-def resolve_system_prompt_path(*, filename: str, prompts_dir: Path) -> Path:
-    """Resolve a prompt template file within the prompts directory.
-
-    Args:
-        filename: Prompt file name only (no path components).
-        prompts_dir: Directory containing all prompt templates. Typically resolved via
-                ``resolve_prompts_dir(prompts_folder=config.prompts.folder)``.
-
-    Returns:
-        Path: Absolute path to the prompt template.
-
-    Raises:
-        RuntimeError: If the file does not exist.
-
-    """
-    candidate = (prompts_dir / filename).resolve()
-    if not candidate.exists() or not candidate.is_file():
-        msg = f"System prompt template not found: {candidate}"
-        raise RuntimeError(msg)
-    return candidate
-
-
-
-@lru_cache(maxsize=5)
-def _load_prompt_template(path: Path) -> Template:
-    """Load and cache a prompt template from disk.
-
-    Args:
-        path: Path to a prompt template file.
-
-    Returns:
-        Template: Cached string.Template instance.
-
-    Raises:
-        RuntimeError: If the file cannot be read.
-
-    """
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        msg = f"Failed to read prompt template at: {path}"
-        raise RuntimeError(msg) from exc
-    return Template(text)
-
-
-def build_system_prompt(*, top_k: int, prompt_path: Path) -> str:
-    """Render the system prompt with runtime substitutions.
-
-    Args:
-        top_k: Retrieval top-k used to render the template.
-        prompt_path: Path to the system prompt template.
-
-    Returns:
-        str: Rendered system prompt string.
-
-    """
-    template = _load_prompt_template(prompt_path)
+def build_system_prompt(*, top_k: int, prompt_resource: str) -> str:
+    """Render the system prompt with runtime substitutions."""
+    template = load_prompt_template(prompt_resource)
     return template.safe_substitute(top_k=top_k)
 
 
@@ -463,8 +386,8 @@ class InfoRagResources:
         "_config",
         "_embed_batch_size",
         "_faq_retriever",
-        "_prompts_dir",
         "_retriever_cache_max",
+        "_system_prompt_resource",
         "_top_k",
         "_vector_dims",
         "indexes",
@@ -484,7 +407,7 @@ class InfoRagResources:
         tuple[Source, tuple[tuple[str, str, str], ...]],
         VectorIndexRetriever,
     ]
-    _prompts_dir: Path
+    _system_prompt_resource: str
     system_prompt: str | None
 
     def __init__(
@@ -533,7 +456,13 @@ class InfoRagResources:
             VectorIndexRetriever,
         ] = OrderedDict()
 
-        self._prompts_dir = resolve_prompts_dir(prompts_folder=config.prompts.folder)
+        prompts_folder = config.prompts.folder.strip("/")
+        if prompts_folder:
+            self._system_prompt_resource = (
+                f"{prompts_folder}/{config.prompts.system_prompt_filename}"
+            )
+        else:
+            self._system_prompt_resource = config.prompts.system_prompt_filename
         self.system_prompt: str | None = None
 
     async def startup_check(self) -> None:
@@ -585,11 +514,10 @@ class InfoRagResources:
             RuntimeError: If prompt resolution or template loading fails.
 
         """
-        prompt_path = resolve_system_prompt_path(
-            filename=self._config.prompts.system_prompt_filename,
-            prompts_dir=self._prompts_dir,
+        return build_system_prompt(
+            top_k=self._top_k,
+            prompt_resource=self._system_prompt_resource,
         )
-        return build_system_prompt(top_k=self._top_k, prompt_path=prompt_path)
 
     async def _validate_vector_dims(self) -> None:
         """Validate that Redis vector index dimensions match the configured value.

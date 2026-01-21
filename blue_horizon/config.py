@@ -1,4 +1,7 @@
-"""Shared configuration parsing for Blue Horizon."""
+"""Shared configuration parsing for Blue Horizon.
+
+By defualt loads from app_config.toml in the root of the blue_horizon package.
+"""
 
 import importlib.resources as importlib_resources
 import tomllib

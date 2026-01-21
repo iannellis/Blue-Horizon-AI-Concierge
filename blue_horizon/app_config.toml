@@ -31,7 +31,7 @@ info_timeout_s = 60
 rooms_timeout_s = 60
 
 [orchestration.prompts]
-# Folder (relative to orchestration.py) containing prompt files
+# Folder (relative to blue_horizon package root) containing prompt files
 folder = "system_prompts"
 # Router system prompt filename within the prompts folder
 orchestration_prompt_filename = "orchestration_prompt.txt"
@@ -87,8 +87,8 @@ socket_timeout_s = 4.0
 health_check_interval_s = 30
 
 [info.prompts]
-# Folder relative to this Python file.
-folder = "../system_prompts"
+# Folder (relative to blue_horizon package root) containing prompt files
+folder = "system_prompts"
 # File name ONLY (no path). The code assumes all prompts live in one folder.
 system_prompt_filename = "information_prompt.txt"
 
@@ -106,8 +106,8 @@ timeout_s = 20.0
 max_retries = 2
 
 [rooms_sql.prompts]
-# Folder relative to this Python file.
-folder = "../system_prompts"
+# Folder (relative to blue_horizon package root) containing prompt files
+folder = "system_prompts"
 # Prompt template filename inside the folder.
 system_prompt_filename = "rooms_sql_prompt.txt"
 

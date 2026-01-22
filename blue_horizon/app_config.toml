@@ -34,7 +34,7 @@ rooms_timeout_s = 60
 # Folder (relative to blue_horizon package root) containing prompt files
 folder = "system_prompts"
 # Router system prompt filename within the prompts folder
-orchestration_prompt_filename = "orchestration_prompt.txt"
+orchestration_prompt_filename = "orchestration.txt"
 
 [orchestration.messages]
 # User-facing message when the router explicitly chooses "refuse"
@@ -90,7 +90,7 @@ health_check_interval_s = 30
 # Folder (relative to blue_horizon package root) containing prompt files
 folder = "system_prompts"
 # File name ONLY (no path). The code assumes all prompts live in one folder.
-system_prompt_filename = "information_prompt.txt"
+system_prompt_filename = "information.txt"
 
 # Non-secret configuration for the Rooms Agent.
 [rooms_sql.llm]
@@ -109,7 +109,7 @@ max_retries = 2
 # Folder (relative to blue_horizon package root) containing prompt files
 folder = "system_prompts"
 # Prompt template filename inside the folder.
-system_prompt_filename = "rooms_sql_prompt.txt"
+system_prompt_filename = "rooms_sql.txt"
 
 [rooms_sql.agent]
 # The dialect to tell the agent to use

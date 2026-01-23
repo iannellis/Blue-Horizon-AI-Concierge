@@ -13,7 +13,7 @@ import psycopg
 from dotenv import load_dotenv
 from psycopg.types.enum import EnumInfo, register_enum
 
-DATA_PATH = Path(__file__).parents[2] / "data/pandas"
+DATA_PATH = Path(__file__).parents[1] / "data/pandas"
 
 logging.basicConfig(
     level=logging.INFO,

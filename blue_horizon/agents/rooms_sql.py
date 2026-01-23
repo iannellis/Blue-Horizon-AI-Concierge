@@ -68,8 +68,7 @@ def load_rooms_sql_config(config_path: Path | str | None = None) -> RoomsSqlConf
     Returns:
         RoomsSqlConfig: Parsed configuration for the rooms agent.
 
-    """  # noqa: D202
-
+    """
     app_config = load_app_config(path=config_path)
     return app_config.rooms_sql
 

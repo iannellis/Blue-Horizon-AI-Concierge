@@ -248,6 +248,8 @@ def setup_rooms_schema(
 def register_room_type_enum(conn: psycopg.Connection) -> None:
     """Register the Python RoomType enum with the Postgres enum metadata.
 
+    This particular enum causes problems if not registered this way.
+
     Args:
         conn: Active database connection.
 

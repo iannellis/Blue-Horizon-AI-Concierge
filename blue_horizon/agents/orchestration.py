@@ -36,7 +36,7 @@ from langchain_core.messages import (
     SystemMessage,
     filter_messages,
 )
-from langchain_core.runnables import Runnable, RunnableLambda
+from langchain_core.runnables import Runnable, RunnableConfig, RunnableLambda
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, MessagesState, StateGraph
@@ -697,7 +697,15 @@ class OrchestrationManager:
         except Exception:  # noqa: BLE001
             logger.warning("Failed to close orchestration resources", exc_info=True)
 
-    async def ainvoke(self, *, thread_id: str, user_text: str) -> dict[str, Any]:
+    async def ainvoke(
+        self,
+        *,
+        thread_id: str,
+        user_text: str,
+        callbacks: list[Any] | None = None,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Invoke the orchestration agent with MemorySaver-backed history.
 
         Behavior:
@@ -710,6 +718,11 @@ class OrchestrationManager:
         Args:
             thread_id: Conversation identifier. Same id => shared history.
             user_text: Latest user message.
+            callbacks: LangChain/LangGraph callbacks (e.g., LangSmith tracing hooks) to
+                attach to the run.
+            tags: Optional LangSmith tags associated with the run.
+            metadata: Optional additional metadata to persist with the run (also used by
+                LangSmith tracing).
 
         Returns:
             Final state patch from the orchestration agent.
@@ -721,11 +734,19 @@ class OrchestrationManager:
 
         state: ConversationState = {"messages": [HumanMessage(content=user_text)]}
 
+        config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+        if callbacks is not None:
+            config["callbacks"] = callbacks
+        if tags is not None:
+            config["tags"] = tags
+        if metadata is not None:
+            config["metadata"] = metadata
+
         return cast(
             "dict[str, Any]",
             await self._agent.ainvoke(
                 state,
-                config={"configurable": {"thread_id": thread_id}},
+                config=config,
             ),
         )
 

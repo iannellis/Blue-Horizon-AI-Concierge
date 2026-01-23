@@ -22,6 +22,7 @@ import asyncio
 import logging
 import os
 import re
+from contextvars import ContextVar, Token
 from functools import lru_cache
 from pathlib import Path
 from string import Template
@@ -42,7 +43,32 @@ from blue_horizon.config import RoomsSqlConfig, load_app_config
 
 logger = logging.getLogger(__name__)
 
+# Schemas for evaluating the agent
+EVAL_SCHEMA: ContextVar[str | None] = ContextVar("EVAL_SCHEMA", default=None)
 
+def set_eval_schema(schema: str | None) -> Token[str | None]:
+    """Assign a schema to the evaluation ContextVar.
+
+    Args:
+        schema: Schema name to apply, or ``None`` to unset.
+
+    Returns:
+        Token used to reset the ContextVar to its prior state.
+
+    """
+    return EVAL_SCHEMA.set(schema)
+
+def reset_eval_schema(token: Token[str | None]) -> None:
+    """Restore the evaluation schema ContextVar to a previous value.
+
+    Args:
+        token: Token returned from :func:`set_eval_schema` representing the
+            previous value.
+
+    """
+    EVAL_SCHEMA.reset(token)
+
+# Enums used in SQL
 ENUM_TYPES: Final[tuple[str, ...]] = (
     "availability_status_type",
     "room_bed_type",
@@ -584,8 +610,10 @@ class RoomsSqlResources:
 
         Returns:
             Dict with keys:
+              - status: str ("ok" or "error")
               - rows: list[dict[str, Any]]
               - truncated: bool
+              - rowcount: int
               - error: str (only present on failure)
 
         Raises:
@@ -603,8 +631,17 @@ class RoomsSqlResources:
             )
         except ValueError as exc:
             msg = str(exc)
-            logger.info("run_sql rejected by guardrails: %s", msg)
-            return {"truncated": False, "rows": [], "error": msg}
+            logger.info(
+                "run_sql rejected by guardrails: %s",
+                msg,
+            )
+            return {
+                "status": "error",
+                "rowcount": 0,
+                "rows": [],
+                "truncated": False,
+                "error": msg,
+            }
 
         is_write = _is_write_sql(query)
         attempts = self.config.db.retry.max_transient_retries + 1
@@ -615,13 +652,26 @@ class RoomsSqlResources:
                     self.pool.connection(timeout=self.config.db.pool.timeout_s) as conn,
                     conn.cursor(row_factory=dict_row) as cur,
                 ):
+                    schema = EVAL_SCHEMA.get()
+                    if schema:
+                        await cur.execute(
+                            sql.SQL("SET search_path TO {}").format(
+                                sql.Identifier(schema),
+                            ),
+                        )
+
                     # NOTE: psycopg's type stubs expect a LiteralString for `execute()`.
                     # This cast is only to satisfy static type checkers. Runtime safety
                     # is provided by `validate_sql(...)` above.
                     await cur.execute(cast("LiteralString", query))
 
                     if cur.description is None:
-                        return {"truncated": False, "rows": []}
+                        return {
+                            "status": "ok",
+                            "rows": [],
+                            "truncated": False,
+                            "rowcount": cur.rowcount,
+                        }
 
                     rows_raw = await cur.fetchall()
                     rows = [dict(r) for r in rows_raw]
@@ -629,7 +679,12 @@ class RoomsSqlResources:
                         rows,
                         max_rows=self.config.db.guardrails.max_rows,
                     )
-                    return {"truncated": truncated, "rows": rows}
+                    return {
+                        "status": "ok",
+                        "rows": rows,
+                        "truncated": truncated,
+                        "rowcount": len(rows),
+                    }
 
             except (
                 psycopg.OperationalError,
@@ -666,21 +721,31 @@ class RoomsSqlResources:
                     exc_info=True,
                 )
                 return {
-                    "truncated": False,
+                    "status": "error",
+                    "rowcount": 0,
                     "rows": [],
+                    "truncated": False,
                     "error": _user_facing_db_message(),
                 }
 
             except Exception:
                 logger.exception("run_sql unexpected failure")
                 return {
-                    "truncated": False,
+                    "status": "error",
+                    "rowcount": 0,
                     "rows": [],
+                    "truncated": False,
                     "error": _user_facing_db_message(),
                 }
 
         logger.warning("run_sql failed after retries")
-        return {"truncated": False, "rows": [], "error": _user_facing_db_message()}
+        return {
+            "status": "error",
+            "rowcount": 0,
+            "rows": [],
+            "truncated": False,
+            "error": _user_facing_db_message(),
+        }
 
     async def _open_pool(self) -> None:
         """Open the async connection pool.
@@ -817,8 +882,10 @@ class RoomsAgentFactory:
 
             Returns:
                 Dict with keys:
+                  - status: str ("ok" or "error")
                   - rows: list[dict[str, Any]]
                   - truncated: bool
+                  - rowcount: int
                   - error: str (only present on failure)
 
             """

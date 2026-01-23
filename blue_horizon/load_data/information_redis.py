@@ -387,7 +387,6 @@ services_schema = IndexSchema.from_dict(
     },
 )
 
-# Load the data into Pandas
 df_services = load_dataframe(
     "Services",
     DATA_PATH / "services.pkl",

@@ -24,7 +24,15 @@ logger = logging.getLogger(__name__)
 
 
 def ensure_pickle_path(path: Path) -> None:
-    """Raise a FileNotFoundError with logging if the pickle is missing."""
+    """Verify that a pickled data file exists before it is read.
+
+    Args:
+        path: File path that must exist before attempting to unpickle.
+
+    Raises:
+        FileNotFoundError: If the target file is missing.
+
+    """
     if not path.exists():
         msg = f"Missing expected pickle at {path}"
         logger.error(msg)

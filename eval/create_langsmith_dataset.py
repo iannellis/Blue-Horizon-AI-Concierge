@@ -43,30 +43,10 @@ class TurnInputModel(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    user: str
+    user: str = Field(..., min_length=1)
     expected_route: Literal["rooms", "info", "none"]
     expect_injection: bool
     injection_grade_rubric: str | None = None
-
-    @field_validator("user")
-    @classmethod
-    def _validate_user(cls, value: str) -> str:
-        """Validate that the user message is non-empty.
-
-        Args:
-            value: Raw user message.
-
-        Returns:
-            The validated user message.
-
-        Raises:
-            ValueError: If the user message is empty or whitespace.
-
-        """
-        if not value.strip():
-            msg = "user must be a non-empty string."
-            raise ValueError(msg)
-        return value
 
     @field_validator("injection_grade_rubric")
     @classmethod
@@ -119,49 +99,9 @@ class CaseInputModel(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    case_id: str
-    turns: list[TurnInputModel]
+    case_id: str = Field(..., min_length=1)
+    turns: list[TurnInputModel] = Field(..., min_length=1)
     tags: list[str] = Field(default_factory=list)
-
-    @field_validator("case_id")
-    @classmethod
-    def _validate_case_id(cls, value: str) -> str:
-        """Validate that case_id is non-empty.
-
-        Args:
-            value: Raw case_id string.
-
-        Returns:
-            The validated case_id.
-
-        Raises:
-            ValueError: If the case_id is empty or whitespace.
-
-        """
-        if not value.strip():
-            msg = "case_id must be a non-empty string."
-            raise ValueError(msg)
-        return value
-
-    @field_validator("turns")
-    @classmethod
-    def _validate_turns(cls, value: list[TurnInputModel]) -> list[TurnInputModel]:
-        """Validate that the case has at least one turn.
-
-        Args:
-            value: Parsed list of turns.
-
-        Returns:
-            The validated list of turns.
-
-        Raises:
-            ValueError: If the turns list is empty.
-
-        """
-        if not value:
-            msg = "turns must be a non-empty list."
-            raise ValueError(msg)
-        return value
 
 
 def _format_validation_error(exc: ValidationError) -> str:

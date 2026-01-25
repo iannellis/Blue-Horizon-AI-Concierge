@@ -21,6 +21,8 @@ Versions:
 - llama-index-vector-stores-redis (>=0.6.1,<0.7.0)
 """
 
+from __future__ import annotations
+
 import asyncio
 import heapq
 import json
@@ -32,14 +34,12 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import lru_cache
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain.tools import tool
 from langchain_openai import ChatOpenAI
-from langgraph.graph.state import CompiledStateGraph
 from llama_index.core import Settings, StorageContext, VectorStoreIndex
 from llama_index.core.retrievers import BaseRetriever, VectorIndexRetriever
 from llama_index.core.vector_stores.types import (
@@ -60,6 +60,11 @@ from blue_horizon.config import (
     InfoRagConfig,
     load_app_config,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from langgraph.graph.state import CompiledStateGraph
 
 logger = logging.getLogger(__name__)
 

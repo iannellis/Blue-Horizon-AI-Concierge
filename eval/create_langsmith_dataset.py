@@ -1,10 +1,11 @@
 """Create or append a LangSmith dataset from JSONL cases."""
 
+from __future__ import annotations
+
 import argparse
 import json
-from collections.abc import Iterable
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from langsmith import Client
 from pydantic import (
@@ -15,6 +16,9 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 def _raise(message: str) -> None:
@@ -71,7 +75,7 @@ class TurnInputModel(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_injection_rubric(self) -> "TurnInputModel":
+    def _validate_injection_rubric(self) -> TurnInputModel:
         """Require rubric when injection is expected.
 
         Returns:

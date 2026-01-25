@@ -18,21 +18,20 @@ FastAPI integration (suggested):
 
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
 import re
 from contextvars import ContextVar, Token
 from functools import lru_cache
-from pathlib import Path
-from string import Template
-from typing import Any, Final, LiteralString, cast
+from typing import TYPE_CHECKING, Any, Final, LiteralString, cast
 
 import psycopg
 from langchain.agents import create_agent
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
-from langgraph.graph.state import CompiledStateGraph
 from psycopg import sql
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
@@ -40,6 +39,12 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 from blue_horizon.agents.exceptions import OperationalError
 from blue_horizon.agents.prompt_utils import load_prompt_template
 from blue_horizon.config import RoomsSqlConfig, load_app_config
+
+if TYPE_CHECKING:
+    from pathlib import Path
+    from string import Template
+
+    from langgraph.graph.state import CompiledStateGraph
 
 logger = logging.getLogger(__name__)
 

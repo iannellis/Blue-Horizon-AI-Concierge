@@ -1,17 +1,21 @@
 """Utilities to rebuild the PostgreSQL rooms and availability tables from pickled data."""  # noqa: E501
 
+from __future__ import annotations
+
 import logging
 import os
 import sys
-from collections.abc import Iterable, Sequence
 from enum import Enum
 from pathlib import Path
-from typing import LiteralString, cast
+from typing import TYPE_CHECKING, LiteralString, cast
 
 import pandas as pd
 import psycopg
 from dotenv import load_dotenv
 from psycopg.types.enum import EnumInfo, register_enum
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 DATA_PATH = Path(__file__).parents[1] / "data/pandas"
 

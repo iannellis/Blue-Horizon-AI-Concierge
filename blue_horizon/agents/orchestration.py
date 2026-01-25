@@ -24,9 +24,11 @@ Architecture
 
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from langchain_core.messages import (
     AIMessage,
@@ -41,7 +43,6 @@ from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
-from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, Field
 
 from blue_horizon.agents.exceptions import OperationalError
@@ -62,6 +63,9 @@ from blue_horizon.config import (
     RoomsSqlConfig,
     load_app_config,
 )
+
+if TYPE_CHECKING:
+    from langgraph.graph.state import CompiledStateGraph
 
 logger = logging.getLogger(__name__)
 

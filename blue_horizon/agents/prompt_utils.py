@@ -1,7 +1,5 @@
 """Utility helpers for loading prompt templates from package resources."""
 
-from __future__ import annotations
-
 import importlib.resources as importlib_resources
 from functools import lru_cache
 from string import Template

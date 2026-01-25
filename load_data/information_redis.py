@@ -6,11 +6,13 @@ validated before indices are created.
 
 """
 
+from __future__ import annotations
+
 import logging
 import os
 import sys
-from collections.abc import Hashable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -19,6 +21,9 @@ from llama_index.core.schema import TextNode
 from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.vector_stores.redis import RedisVectorStore
 from redisvl.schema import IndexSchema
+
+if TYPE_CHECKING:
+    from collections.abc import Hashable
 
 load_dotenv()
 

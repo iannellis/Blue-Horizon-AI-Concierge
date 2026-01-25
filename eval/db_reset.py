@@ -1,14 +1,15 @@
 """Schema-per-case helpers for evaluation DB resets."""
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import logging
 import uuid
 from enum import Enum
 from pathlib import Path
-from typing import Any, LiteralString, cast
+from typing import TYPE_CHECKING, Any, LiteralString, cast
 
-import pandas as pd
 from psycopg import sql
 from psycopg_pool import AsyncConnectionPool
 
@@ -21,6 +22,9 @@ from load_data.rooms_pgsql import (
     prepare_room_availability_dataframe,
     prepare_rooms_dataframe,
 )
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 logger = logging.getLogger(__name__)
 

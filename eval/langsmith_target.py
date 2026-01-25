@@ -6,14 +6,15 @@ OrchestrationManager, lazily provisioning an isolated Postgres schema only when
 the router sends a turn to the "rooms" path.
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
 import re
 from collections.abc import Mapping
-from contextvars import Token
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from langchain_core.callbacks import AsyncCallbackHandler
@@ -24,7 +25,11 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from blue_horizon.agents.orchestration import OrchestrationManager
 from blue_horizon.agents.rooms_sql import reset_eval_schema, set_eval_schema
 from eval.db_reset import create_case_schema, drop_case_schema
+from eval.schema_slots import acquire_schema_slot, release_schema_slot
 from load_data.rooms_pgsql import DATA_PATH, get_pgsql_conn_string
+
+if TYPE_CHECKING:
+    from contextvars import Token
 
 
 class RunSqlOutput(BaseModel):
@@ -104,6 +109,26 @@ def _get_rooms_data_path() -> Path:
     if override:
         return Path(override)
     return DATA_PATH
+
+
+def _get_schema_slot_config() -> tuple[int, int, float, float]:
+    """Load configuration for distributed schema slot limiting.
+
+    Returns:
+        Tuple of (max_slots, stale_after_s, wait_timeout_s, poll_interval_s).
+
+    """
+    max_slots = int(os.getenv("EVAL_MAX_ACTIVE_SCHEMAS", "0"))
+    stale_after_s = int(os.getenv("EVAL_SCHEMA_SLOT_STALE_AFTER_S", "1800"))
+    wait_timeout_s = float(os.getenv("EVAL_SCHEMA_SLOT_WAIT_TIMEOUT_S", "300"))
+    poll_interval_s = float(os.getenv("EVAL_SCHEMA_SLOT_POLL_INTERVAL_S", "1"))
+
+    max_slots = max(0, max_slots)
+    stale_after_s = max(0, stale_after_s)
+    wait_timeout_s = max(0.1, wait_timeout_s)
+    poll_interval_s = max(0.1, poll_interval_s)
+
+    return max_slots, stale_after_s, wait_timeout_s, poll_interval_s
 
 
 def _extract_assistant_text(messages: list[BaseMessage]) -> str:
@@ -199,6 +224,7 @@ class SchemaManager:
         schema: Schema name once created, otherwise ``None``.
         schema_created: Whether the schema has been created for this case.
         schema_token: ContextVar token for resetting the eval schema.
+        slot_id: Acquired schema slot identifier, if slot limiting is enabled.
 
     """
 
@@ -208,6 +234,7 @@ class SchemaManager:
     schema: str | None
     schema_created: bool
     schema_token: Token[str | None] | None
+    slot_id: int | None
     _lock: asyncio.Lock
 
     def __init__(self, *, case_id: str, run_id: str, data_path: Path) -> None:
@@ -225,6 +252,7 @@ class SchemaManager:
         self.schema = None
         self.schema_created = False
         self.schema_token = None
+        self.slot_id = None
         self._lock = asyncio.Lock()
 
     async def ensure_schema(self) -> None:
@@ -237,11 +265,31 @@ class SchemaManager:
 
             schema = self._build_schema_name()
             pool = await ensure_reset_pool()
-            await create_case_schema(
-                pool=pool,
-                schema=schema,
-                data_path=self.data_path,
+            max_slots, stale_after_s, wait_timeout_s, poll_interval_s = (
+                _get_schema_slot_config()
             )
+            if max_slots > 0:
+                self.slot_id = await acquire_schema_slot(
+                    pool=pool,
+                    run_id=self.run_id,
+                    case_id=self.case_id,
+                    max_slots=max_slots,
+                    stale_after_s=stale_after_s,
+                    wait_timeout_s=wait_timeout_s,
+                    poll_interval_s=poll_interval_s,
+                )
+
+            try:
+                await create_case_schema(
+                    pool=pool,
+                    schema=schema,
+                    data_path=self.data_path,
+                )
+            except Exception:
+                if self.slot_id is not None:
+                    await self._release_slot(pool=pool)
+                raise
+
             self.schema = schema
             self.schema_token = set_eval_schema(schema)
             self.schema_created = True
@@ -258,7 +306,25 @@ class SchemaManager:
         if not self.schema_created or self.schema is None:
             return
         pool = await ensure_reset_pool()
-        await drop_case_schema(pool=pool, schema=self.schema)
+        try:
+            await drop_case_schema(pool=pool, schema=self.schema)
+        finally:
+            if self.slot_id is not None:
+                await self._release_slot(pool=pool)
+
+    async def release_slot(self) -> None:
+        """Release the schema slot if one is held."""
+        if self.slot_id is None:
+            return
+        pool = await ensure_reset_pool()
+        await self._release_slot(pool=pool)
+
+    async def _release_slot(self, *, pool: AsyncConnectionPool[Any]) -> None:
+        """Release the schema slot using the provided pool."""
+        if self.slot_id is None:
+            return
+        await release_schema_slot(pool=pool, slot_id=self.slot_id)
+        self.slot_id = None
 
     def _build_schema_name(self) -> str:
         """Construct a safe, unique schema name for the case.

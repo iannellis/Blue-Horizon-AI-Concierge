@@ -8,7 +8,7 @@ import logging
 import uuid
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, LiteralString, cast
+from typing import TYPE_CHECKING, Any
 
 from psycopg import sql
 from psycopg_pool import AsyncConnectionPool
@@ -119,66 +119,30 @@ async def create_case_schema(   # noqa: PLR0915
     # Which causes a problem when re-uploading to a schema with the same name
     run_token = uuid.uuid4().hex
 
-    rooms_insert_sql = cast(
-        "LiteralString",
-        f"""
-        /* reset-run: {run_token} */
-        INSERT INTO rooms (
-            room_id,
-            room_number,
-            floor,
-            type,
-            square_feet,
-            basic_amenities,
-            additional_amenities,
-            max_occupancy,
-            bed_type,
-            view_type,
-            accessibility,
-            status,
-            last_renovation,
-            base_rate,
-            max_rate
-        ) VALUES (
-            %s,
-            %s,
-            %s,
-            %s::room_type,
-            %s,
-            %s,
-            %s,
-            %s,
-            %s::room_bed_type,
-            %s,
-            %s,
-            %s::room_status_type,
-            %s,
-            %s,
-            %s
-        );
-        """,  # noqa: S608
+    rooms_insert_sql = (
+        sql.SQL("/* reset-run: {} */ ").format(sql.Literal(run_token))
+        + sql.SQL(
+            "INSERT INTO rooms ("
+            "room_id, room_number, floor, type, square_feet, "
+            "basic_amenities, additional_amenities, max_occupancy, "
+            "bed_type, view_type, accessibility, status, last_renovation, "
+            "base_rate, max_rate"
+            ") VALUES ("
+            "%s, %s, %s, %s::room_type, %s, %s, %s, %s, %s::room_bed_type, "
+            "%s, %s, %s::room_status_type, %s, %s, %s"
+            ");",
+        )
     )
 
-    avail_insert_sql = cast(
-        "LiteralString",
-        f"""
-        /* reset-run: {run_token} */
-        INSERT INTO room_availability (
-            room_id,
-            room_number,
-            date,
-            status,
-            price,
-            max_occupancy
-        ) VALUES (
-            %s,
-            %s,
-            %s,
-            %s::availability_status_type,
-            %s,
-            %s
-        );
-        """,  # noqa: S608
+    avail_insert_sql = (
+        sql.SQL("/* reset-run: {} */ ").format(sql.Literal(run_token))
+        + sql.SQL(
+            "INSERT INTO room_availability ("
+            "room_id, room_number, date, status, price, max_occupancy"
+            ") VALUES ("
+            "%s, %s, %s, %s::availability_status_type, %s, %s"
+            ");",
+        )
     )
 
     try:
@@ -204,30 +168,28 @@ async def create_case_schema(   # noqa: PLR0915
             await conn.execute("DROP TYPE IF EXISTS room_status_type CASCADE;")
 
             await conn.execute(
-                cast(
-                    "LiteralString",
-                    f"CREATE TYPE room_type AS ENUM {room_type_def};",
-                ),
+                sql.SQL("CREATE TYPE {} AS ENUM ").format(
+                    sql.Identifier("room_type"),
+                )
+                + room_type_def,
             )
             await conn.execute(
-                cast(
-                    "LiteralString",
-                    f"CREATE TYPE room_bed_type AS ENUM {room_bed_type_def};",
-                ),
+                sql.SQL("CREATE TYPE {} AS ENUM ").format(
+                    sql.Identifier("room_bed_type"),
+                )
+                + room_bed_type_def,
             )
             await conn.execute(
-                cast(
-                    "LiteralString",
-                    f"CREATE TYPE room_status_type AS ENUM {room_status_def};",
-                ),
+                sql.SQL("CREATE TYPE {} AS ENUM ").format(
+                    sql.Identifier("room_status_type"),
+                )
+                + room_status_def,
             )
             await conn.execute(
-                cast(
-                    "LiteralString",  (
-                        "CREATE TYPE availability_status_type AS ENUM "
-                        f"{availability_status_def};"
-                    ),
-                ),
+                sql.SQL("CREATE TYPE {} AS ENUM ").format(
+                    sql.Identifier("availability_status_type"),
+                )
+                + availability_status_def,
             )
 
             await conn.execute(

@@ -7,11 +7,12 @@ import os
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, LiteralString, cast
+from typing import TYPE_CHECKING
 
 import pandas as pd
 import psycopg
 from dotenv import load_dotenv
+from psycopg.sql import SQL, Composed, Identifier, Literal
 from psycopg.types.enum import EnumInfo, register_enum
 
 if TYPE_CHECKING:
@@ -127,7 +128,7 @@ def get_pgsql_conn_string() -> str:
     return conn_string
 
 
-def build_enum_definition(values: Iterable[str]) -> str:
+def build_enum_definition(values: Iterable[str]) -> Composed:
     """Generate an ordered SQL enum definition string.
 
     Args:
@@ -142,8 +143,9 @@ def build_enum_definition(values: Iterable[str]) -> str:
         error_msg = "Enum definitions cannot be empty"
         logger.error(error_msg)
         raise ValueError(error_msg)
-    quoted_values = "', '".join(unique_values)
-    return f"('{quoted_values}')"
+
+    values_sql = SQL(", ").join(Literal(value) for value in unique_values)
+    return SQL("({values})").format(values=values_sql)
 
 
 def prepare_rooms_dataframe(
@@ -200,9 +202,9 @@ def prepare_room_availability_dataframe(
 
 def setup_rooms_schema(
     conn: psycopg.Connection,
-    room_type_def: str,
-    bed_type_def: str,
-    status_def: str,
+    room_type_def: Composed,
+    bed_type_def: Composed,
+    status_def: Composed,
 ) -> None:
     """Reset rooms-related enums and recreate the `rooms` table.
 
@@ -219,12 +221,19 @@ def setup_rooms_schema(
         cur.execute("DROP TYPE IF EXISTS room_bed_type CASCADE;")
         cur.execute("DROP TYPE IF EXISTS room_status_type CASCADE;")
 
-        query_str = f"CREATE TYPE room_type AS ENUM {room_type_def};"
-        cur.execute(cast("LiteralString", query_str))
-        query_str = f"CREATE TYPE room_bed_type AS ENUM {bed_type_def};"
-        cur.execute(cast("LiteralString", query_str))
-        query_str = f"CREATE TYPE room_status_type AS ENUM {status_def};"
-        cur.execute(cast("LiteralString", query_str))
+        cur.execute(
+            SQL("CREATE TYPE room_type AS ENUM {values};").format(values=room_type_def),
+        )
+        cur.execute(
+            SQL("CREATE TYPE room_bed_type AS ENUM {values};").format(
+                values=bed_type_def,
+            ),
+        )
+        cur.execute(
+            SQL("CREATE TYPE room_status_type AS ENUM {values};").format(
+                values=status_def,
+            ),
+        )
 
         cur.execute(
             """
@@ -273,20 +282,24 @@ def insert_rooms_data(conn: psycopg.Connection, df_rooms: pd.DataFrame) -> None:
         df_rooms: DataFrame keyed to `ROOMS_COLUMNS`.
 
     """
-    columns_sql = ", ".join(ROOMS_COLUMNS)
-    placeholders = ", ".join(["%s"] * len(ROOMS_COLUMNS))
-    insert_sql = f"INSERT INTO rooms ({columns_sql}) VALUES ({placeholders});"  # noqa: S608
+    columns_sql = SQL(", ").join(Identifier(column) for column in ROOMS_COLUMNS)
+    placeholders = SQL(", ").join(SQL("%s") for _ in ROOMS_COLUMNS)
+    insert_sql = SQL(
+        "INSERT INTO rooms ({columns}) VALUES ({values});",
+    ).format(columns=columns_sql, values=placeholders)
 
     if df_rooms.empty:
         logger.warning("No rooms records to insert; skipping.")
         return
 
     with conn.cursor() as cur:
-        cur.executemany(cast("LiteralString", insert_sql), df_rooms.to_numpy().tolist())
+        cur.executemany(insert_sql, df_rooms.to_numpy().tolist())
         logger.info("Inserted rooms data.")
 
 
-def setup_room_availability_schema(conn: psycopg.Connection, status_def: str) -> None:
+def setup_room_availability_schema(
+    conn: psycopg.Connection, status_def: Composed,
+) -> None:
     """Reset availability enums and recreate the `room_availability` table.
 
     Args:
@@ -295,10 +308,13 @@ def setup_room_availability_schema(conn: psycopg.Connection, status_def: str) ->
 
     """
     with conn.cursor() as cur:
-        cur.execute("DROP TABLE IF EXISTS room_availability;")
-        cur.execute("DROP TYPE IF EXISTS availability_status_type CASCADE;")
-        query_str = f"CREATE TYPE availability_status_type AS ENUM {status_def};"
-        cur.execute(cast("LiteralString", query_str))
+        cur.execute(SQL("DROP TABLE IF EXISTS room_availability;"))
+        cur.execute(SQL("DROP TYPE IF EXISTS availability_status_type CASCADE;"))
+        cur.execute(
+            SQL("CREATE TYPE availability_status_type AS ENUM {values};").format(
+                values=status_def,
+            ),
+        )
 
         cur.execute(
             """
@@ -342,21 +358,18 @@ def insert_room_availability_data(
         df_availability: DataFrame keyed to `ROOM_AVAIL_COLUMNS`.
 
     """
-    columns_sql = ", ".join(ROOM_AVAIL_COLUMNS)
-    placeholders = ", ".join(["%s"] * len(ROOM_AVAIL_COLUMNS))
-    insert_sql = (
-        f"INSERT INTO room_availability ({columns_sql}) VALUES ({placeholders});"  # noqa: S608
-    )
+    columns_sql = SQL(", ").join(Identifier(column) for column in ROOM_AVAIL_COLUMNS)
+    placeholders = SQL(", ").join(SQL("%s") for _ in ROOM_AVAIL_COLUMNS)
+    insert_sql = SQL(
+        "INSERT INTO room_availability ({columns}) VALUES ({values});",
+    ).format(columns=columns_sql, values=placeholders)
 
     if df_availability.empty:
         logger.warning("No room availability records to insert; skipping.")
         return
 
     with conn.cursor() as cur:
-        cur.executemany(
-            cast("LiteralString", insert_sql),
-            df_availability.to_numpy().tolist(),
-        )
+        cur.executemany(insert_sql, df_availability.to_numpy().tolist())
         logger.info("Inserted room_availability data.")
 
 

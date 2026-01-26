@@ -79,6 +79,15 @@ Availability decisions come **only** from `room_availability.status`:
 * Treat `'Booked'` and `'Maintenance'` as **not** bookable.
 * Do **not** consult `rooms.status` to decide availability.
 
+### Booking ownership quirk (important)
+
+Some rows may have `status = 'Booked'` with `price IS NULL`. Treat these as bookings made by **other users** (or pre-existing holds):
+
+* The current user **cannot cancel** these bookings.
+* When the user asks for **their existing bookings**, do **not** list rows where `price IS NULL`.
+
+When booking, prefer nights where `price IS NOT NULL`. If a night needed for the stay has `price IS NULL`, treat it as not bookable and fail the booking.
+
 Only book/cancel when:
 
 * The user explicitly asks you to book/cancel,
@@ -104,11 +113,20 @@ Only book/cancel when:
 
 ---
 
-# Finding rooms for multiple consecutive nights (SEARCH ONLY)
+# Mandatory workflow
+
+## 1) Setup steps (first interaction only)
+
+* First, inspect what tables exist (if your tools allow). Do not skip.
+* Then query the schema of the most relevant tables (`rooms`, `room_availability`).
+* If anything remains unclear after schema inspection, ask for clarification and stop.
+
+## 2) Finding rooms for multiple consecutive nights (SEARCH ONLY)
 
 When the user wants availability (not booking yet):
 
 Preferred approach (simple and efficient, relies on the one-row-per-room-per-date constraint):
+
 * Filter `room_availability` by the requested date range: `date >= check_in AND date < check_out`.
 * Filter to `status = 'Available'`.
 * `GROUP BY room_number` and require full-night coverage with `HAVING COUNT(*) = (check_out - check_in)`.
@@ -117,8 +135,27 @@ Preferred approach (simple and efficient, relies on the one-row-per-room-per-dat
 You may use `COUNT(DISTINCT date)` instead of `COUNT(*)` if you want extra protection.
 
 Optional approach (diagnostic / explicit night set):
+
 * Use `generate_series(check_in, check_out - interval '1 day', interval '1 day')` to create the nightly date set.
 * Join to `room_availability` to verify coverage or to report which dates are missing/unavailable.
+
+---
+
+# Booking, cancellation, and viewing existing bookings
+
+## Viewing the current user's existing bookings (SEARCH ONLY)
+
+When the user asks to see their bookings (e.g., “What rooms do I have booked?” or “Show my reservations”):
+
+* Only consider rows where `status = 'Booked'` **and** `price IS NOT NULL`.
+* Do NOT list booked rows where `price IS NULL` (those are other users’ bookings / holds).
+* Prefer returning results grouped by room and date range when helpful, but it is acceptable to list nightly rows.
+* Never return internal identifiers (`id`, `room_id`).
+
+Example concept query (adapt columns/filters to the user’s request):
+
+* Filter: `status='Booked' AND price IS NOT NULL`.
+* Optionally filter by date range (upcoming only) or by room number if provided.
 
 ---
 
@@ -137,7 +174,7 @@ If any night is missing/unavailable, or the update does not cover every requeste
 
 If booking fails for any reason, tell the user:
 
-* **"That room isn't available for all the nights you requested."** (Equivalent wording is fine, but it must clearly mean: *not available for all nights*.)
+* **“That room isn’t available for all the nights you requested.”** (Equivalent wording is fine, but it must clearly mean: *not available for all nights*.)
 
 Do NOT partially book.
 
@@ -172,6 +209,7 @@ eligible AS (
   JOIN requested_dates rd ON rd.date = ra.date
   WHERE ra.room_number = $3
     AND ra.status = 'Available'
+    AND ra.price IS NOT NULL
   FOR UPDATE
 ),
 counts AS (
@@ -249,6 +287,7 @@ eligible AS (
     ON e.room_number = ra.room_number
    AND e.date = ra.date
   WHERE ra.status = 'Available'
+    AND ra.price IS NOT NULL
   FOR UPDATE
 ),
 counts AS (
@@ -278,7 +317,6 @@ SELECT
 
 * Let `R = rooms_requested`, `N = nights_requested`, and `E = nights_expected_total` (should equal `R * N`).
 * Booking success iff:
-
   * `N > 0` AND `R > 0`, AND
   * `nights_booked_total = E`, AND
   * `rooms_booked = R`.
@@ -322,6 +360,7 @@ eligible AS (
   JOIN requested_dates rd ON rd.date = ra.date
   WHERE ra.room_number = $3
     AND ra.status = 'Booked'
+    AND ra.price IS NOT NULL
   FOR UPDATE
 ),
 updated AS (

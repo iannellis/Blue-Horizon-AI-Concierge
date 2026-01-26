@@ -2,10 +2,14 @@
 
 This module provides deterministic evaluators for routing accuracy, injection
 tripwire detection, and rooms tool outcome + database invariant checks. It also
-implements a Gemini-based LLM-as-judge evaluator that grades rubric metrics on
-0-5 scales with strict JSON output. The evaluators are designed to emit
+implements an LLM-as-judge evaluator that grades rubric metrics on 0-5 scales
+with strict JSON output. The evaluators are designed to emit
 LangSmith-compatible dicts and to work with the compact run outputs produced by
 the evaluation target in eval/langsmith_target.py.
+
+While the evaluation defaults to using Gemini (ChatGoogleGenerativeAI), it is organized
+to make switching to another LLM provider simple. It should just required replacing
+ChatGoogleGenerativeAI with another Chat model.
 """
 
 from __future__ import annotations
@@ -19,21 +23,13 @@ from typing import TYPE_CHECKING, Any
 from psycopg import sql
 from psycopg_pool import AsyncConnectionPool
 
-try:  # Optional dependency for Gemini judge.
-    from google import genai as _genai
+try:  # Optional dependency for LangChain Gemini integration.
+    from langchain_google_genai import ChatGoogleGenerativeAI as _ChatGoogleGenerativeAI
 
-    _GENAI_IMPORT_ERROR: Exception | None = None
+    _LANGCHAIN_GEMINI_IMPORT_ERROR: Exception | None = None
 except Exception as _exc:  # noqa: BLE001
-    _genai = None
-    _GENAI_IMPORT_ERROR = _exc
-
-try:  # Optional dependency for Gemini response typing/validation.
-    from google.genai.types import GenerateContentResponse as _GenerateContentResponse
-
-    _GENAI_TYPES_IMPORT_ERROR: Exception | None = None
-except Exception as _exc:  # noqa: BLE001
-    _GenerateContentResponse = None
-    _GENAI_TYPES_IMPORT_ERROR = _exc
+    _ChatGoogleGenerativeAI = None
+    _LANGCHAIN_GEMINI_IMPORT_ERROR = _exc
 
 try:  # Optional app import for DB URL lookup.
     from blue_horizon.agents.rooms_sql import get_pgsql_db_url as _get_pgsql_db_url
@@ -46,8 +42,7 @@ except Exception as _exc:  # noqa: BLE001
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from google.genai import Client
-    from google.genai.types import GenerateContentResponse
+    from langchain_core.language_models.chat_models import BaseChatModel
     from langsmith.schemas import Example, Run
 
 _CONTEXT_MAX_CHARS = 1200
@@ -58,8 +53,9 @@ _USER_MAX_CHARS = 800
 _EVAL_POOL_LOCK = asyncio.Lock()
 _EVAL_POOL: AsyncConnectionPool[Any] | None = None
 
-_GEMINI_LOCK = asyncio.Lock()
-_GEMINI_CLIENT: Any | None = None
+_JUDGE_LLM_LOCK = asyncio.Lock()
+_JUDGE_LLM: Any | None = None
+_JUDGE_LLM_MODEL: str | None = None
 
 _TRIPWIRE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
@@ -549,8 +545,8 @@ async def _check_rooms_db_invariants(schema: str) -> list[dict[str, Any]]:
     ]
 
 
-async def eval_gemini_rubrics(run: Run, example: Example) -> list[dict[str, Any]]:
-    """Evaluate the run using Gemini rubric grading.
+async def eval_llm_rubrics(run: Run, example: Example) -> list[dict[str, Any]]:
+    """Evaluate the run using rubric grading.
 
     Args:
         run: LangSmith run object with turn outputs.
@@ -560,7 +556,7 @@ async def eval_gemini_rubrics(run: Run, example: Example) -> list[dict[str, Any]
         List of LangSmith metric dicts for each rubric dimension plus raw JSON.
 
     Raises:
-        RuntimeError: If the Gemini model is unavailable on Developer API.
+        RuntimeError: If the judge model is unavailable on Developer API.
 
     """
     model = os.getenv("EVAL_JUDGE_MODEL", "gemini-3-pro-preview")
@@ -596,16 +592,11 @@ async def eval_gemini_rubrics(run: Run, example: Example) -> list[dict[str, Any]
         f"{transcript}\n"
     )
 
-    client = await _get_gemini_client()
     try:
-        response = client.models.generate_content(model=model, contents=prompt)
-    except Exception as exc:
-        if _is_model_unavailable_error(exc):
-            msg = (
-                "Gemini model is unavailable on Developer API. "
-                "Switch to Vertex AI for this model."
-            )
-            raise RuntimeError(msg) from exc
+        raw_text = await _call_judge_llm(prompt=prompt, model=model)
+    except RuntimeError:
+        raise
+    except Exception as exc:  # noqa: BLE001
         raw_comment = _truncate(str(exc), 200)
         return [
             {
@@ -629,7 +620,6 @@ async def eval_gemini_rubrics(run: Run, example: Example) -> list[dict[str, Any]
             },
         ]
 
-    raw_text = _extract_genai_text(response)
     parsed = _safe_json_loads(raw_text)
     if parsed is None:
         snippet = _truncate(raw_text, 200)
@@ -791,74 +781,85 @@ def _safe_json_loads(payload: str) -> dict[str, Any] | None:
     return None
 
 
-async def _get_gemini_client() -> Client:
-    """Lazily initialize and return a Google Gen AI client.
-
-    Returns:
-        Initialized google.genai client instance.
-
-    Raises:
-        RuntimeError: If the client cannot be created.
-
-    """
-    global _GEMINI_CLIENT  # noqa: PLW0603
-    if _GEMINI_CLIENT is not None:
-        return _GEMINI_CLIENT
-
-    async with _GEMINI_LOCK:
-        if _GEMINI_CLIENT is not None:
-            return _GEMINI_CLIENT
-        if _genai is None:
-            msg = "google-genai SDK is required for Gemini judge evaluation."
-            raise RuntimeError(msg) from _GENAI_IMPORT_ERROR
-        _GEMINI_CLIENT = _genai.Client(api_key=_get_gemini_api_key())
-        return _GEMINI_CLIENT
-
-
-def _get_gemini_api_key() -> str:
-    """Read the Gemini API key from environment variables.
-
-    Returns:
-        API key string.
-
-    Raises:
-        RuntimeError: If no API key environment variable is set.
-
-    """
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        msg = "GEMINI_API_KEY or GOOGLE_API_KEY must be set for judge evaluation."
-        raise RuntimeError(msg)
-    return api_key
-
-
-def _extract_genai_text(response: GenerateContentResponse) -> str:
-    """Extract response text from a google-genai response object.
+async def _get_judge_llm(model: str) -> BaseChatModel:
+    """Lazily initialize and return the LangChain judge model.
 
     Args:
-        response: Response object returned by google.genai.
+        model: Model name to use for the judge.
 
     Returns:
-        Extracted text (empty if not found).
+        LangChain chat model instance.
+
+    Raises:
+        RuntimeError: If the LangChain Gemini integration is unavailable.
 
     """
-    if _GenerateContentResponse is None:
-        msg = "google-genai types are required for response validation."
-        raise RuntimeError(msg) from _GENAI_TYPES_IMPORT_ERROR
+    global _JUDGE_LLM  # noqa: PLW0603
+    global _JUDGE_LLM_MODEL  # noqa: PLW0603
+    if _JUDGE_LLM is not None and model == _JUDGE_LLM_MODEL:
+        return _JUDGE_LLM
 
+    async with _JUDGE_LLM_LOCK:
+        if _JUDGE_LLM is not None and model == _JUDGE_LLM_MODEL:
+            return _JUDGE_LLM
+        if _ChatGoogleGenerativeAI is None:
+            msg = "langchain-google-genai is required for judge evaluation."
+            raise RuntimeError(msg) from _LANGCHAIN_GEMINI_IMPORT_ERROR
+        _JUDGE_LLM = _ChatGoogleGenerativeAI(
+            model=model,
+            temperature=0,
+        )
+        _JUDGE_LLM_MODEL = model
+        return _JUDGE_LLM
+
+
+async def _call_judge_llm(prompt: str, model: str) -> str:
+    """Call the judge LLM and return raw text output.
+
+    Args:
+        prompt: Prompt text to send to the judge.
+        model: Model name to use for the judge.
+
+    Returns:
+        Raw text response from the judge (empty if no content).
+
+    Raises:
+        RuntimeError: If the model is unavailable on the Developer API.
+
+    """
+    llm = await _get_judge_llm(model)
     try:
-        parsed = _GenerateContentResponse.model_validate(response)
-    except Exception:  # noqa: BLE001
-        return ""
+        response = await llm.ainvoke(prompt)
+    except Exception as exc:
+        if _is_model_unavailable_error(exc):
+            msg = (
+                "Judge model is unavailable on Developer API. "
+                "Switch to Vertex AI for this model."
+            )
+            raise RuntimeError(msg) from exc
+        raise
 
-    return parsed.text or ""
+    content = getattr(response, "content", None)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "".join(parts)
+    return ""
 
 
 def _is_model_unavailable_error(exc: Exception) -> bool:
     """Check whether an exception indicates the model is unavailable.
 
     Args:
-        exc: Exception raised during the Gemini request.
+        exc: Exception raised during the judge request.
 
     Returns:
         True if the exception suggests the model is unavailable.
@@ -877,7 +878,7 @@ def _is_model_unavailable_error(exc: Exception) -> bool:
 
 
 def _validate_rubric_payload(payload: dict[str, Any]) -> tuple[bool, str]:
-    """Validate the JSON payload for the Gemini judge rubric.
+    """Validate the JSON payload for the judge rubric.
 
     Args:
         payload: Parsed JSON payload.
@@ -908,4 +909,3 @@ def _validate_rubric_payload(payload: dict[str, Any]) -> tuple[bool, str]:
             return False, f"{key}.rationale is not a string."
 
     return True, ""
-

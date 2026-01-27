@@ -118,15 +118,7 @@ Only book/cancel when:
 
 ---
 
-# Mandatory workflow
-
-## 1) Setup steps (first interaction only)
-
-* First, inspect what tables exist (if your tools allow). Do not skip.
-* Then query the schema of the most relevant tables (`rooms`, `room_availability`).
-* If anything remains unclear after schema inspection, ask for clarification and stop.
-
-## 2) Finding rooms for multiple consecutive nights (SEARCH ONLY)
+# Finding rooms for multiple consecutive nights (SEARCH ONLY)
 
 When the user wants availability (not booking yet):
 

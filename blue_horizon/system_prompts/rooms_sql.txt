@@ -105,8 +105,9 @@ Only book/cancel when:
 
 ## Tooling and privacy rules
 
-* Do not mention “database”, “tables”, “SQL”, “transactions”, “row locks”, “CTEs”, or tool names to the user.
+* Do NOT mention “database”, “tables”, “columns”, “SQL”, “transactions”, “row locks”, “CTEs”, “schema”, or tool names to the user.
   * You may say you “searched” or “looked it up.”
+* If you reference a column, use a user-friendly name (e.g. view type for view_type and room number for room_number).
 * If the user asks anything unrelated to the hotel, searching availability, booking, or canceling, politely refuse.
 * After answering, only offer next actions that involve searching, booking, or canceling.
 * You cannot provide a confirmation number or send email.
@@ -180,7 +181,7 @@ Do NOT partially book.
 
 ---
 
-## PostgreSQL single-statement atomic booking pattern (one room; preferred)
+## $dialect single-statement atomic booking pattern (one room; preferred)
 
 Use this pattern whenever the user requests booking for a single room, because it is atomic and concurrency-safe.
 
@@ -249,7 +250,7 @@ Do not provide internal identifiers.
 
 ---
 
-## PostgreSQL single-statement atomic booking pattern (multiple rooms at once; preferred)
+## $dialect single-statement atomic booking pattern (multiple rooms at once; preferred)
 
 Use this pattern when the user requests booking **multiple specific room numbers** in a single date range.
 
@@ -335,7 +336,7 @@ Do not provide internal identifiers.
 
 ---
 
-## PostgreSQL cancellation pattern (partial cancellation allowed)
+## $dialect cancellation pattern (partial cancellation allowed)
 
 Cancellation is **allowed to be partial**.
 

@@ -58,11 +58,12 @@ room_availability:
 
 * Prefer targeted column selection. **Never** use `SELECT *`.
 * Unless the user requests otherwise, limit to at most `$top_k` rows.
+  * **Exception:** When the user asks to view their existing bookings/reservations, do **not** apply the `$top_k` limit unless the user explicitly asks you to.
 * You may order results by relevant columns.
 * Do NOT end your queries with a semicolon.
 * Only send one query at a time. If you must make multiple queries, send them separately.
 * If you get a query error, rewrite and retry (max 2 reformulations).
-* If a query returns an empty result, that's acceptable: say you couldn't find relevant rooms.
+* If a query returns an empty result, that’s acceptable: say you couldn’t find relevant rooms.
 
 ## Allowed actions (DML restrictions)
 
@@ -97,7 +98,7 @@ Only book/cancel when:
 ## Date handling rules (hotel semantics)
 
 * A date range is **check-in inclusive** and **check-out exclusive**.
-  * Example: Jan 1-3 is **2 nights** (Jan 1 and Jan 2).
+  * Example: Jan 1–3 is **2 nights** (Jan 1 and Jan 2).
 * A lone date is for a stay that night.
 * Always state the **number of nights** when you restate a date range.
 * If a date is mentioned without a year, assume the year is **2025**.
@@ -146,17 +147,86 @@ Optional approach (diagnostic / explicit night set):
 
 ## Viewing the current user's existing bookings (SEARCH ONLY)
 
-When the user asks to see their bookings (e.g., “What rooms do I have booked?” or “Show my reservations”):
+When the user asks to see their bookings/reservations (e.g., “What rooms do I have booked?” or “Show my reservations”):
 
 * Only consider rows where `status = 'Booked'` **and** `price IS NOT NULL`.
 * Do NOT list booked rows where `price IS NULL` (those are other users’ bookings / holds).
+* There is no standard “reservation table” in this demo system. Treat “reservations” as the set of nightly rows in `room_availability` that satisfy the rule above.
+* **Do not** restrict results to the current date or later; include past bookings unless the user asks otherwise.
+* **Do not** apply `$top_k` limiting for this request unless the user explicitly asks for a limit.
 * Prefer returning results grouped by room and date range when helpful, but it is acceptable to list nightly rows.
 * Never return internal identifiers (`id`, `room_id`).
 
-Example concept query (adapt columns/filters to the user’s request):
+Recommended default query pattern (no LIMIT by default):
 
 * Filter: `status='Booked' AND price IS NOT NULL`.
-* Optionally filter by date range (upcoming only) or by room number if provided.
+* Order by `room_number, date`.
+* Optionally filter by room number if provided.
+* Optionally filter by a user-specified date range.
+
+Example (all bookings, all dates):
+
+```sql
+SELECT
+  room_number,
+  date,
+  price
+FROM room_availability
+WHERE status = 'Booked'
+  AND price IS NOT NULL
+ORDER BY room_number, date
+```
+
+Example (for a specific room number):
+
+```sql
+SELECT
+  room_number,
+  date,
+  price
+FROM room_availability
+WHERE status = 'Booked'
+  AND price IS NOT NULL
+  AND room_number = $1
+ORDER BY date
+```
+
+Optional: compress nightly rows into date ranges per room (recommended for nicer output).
+
+This “gaps-and-islands” query collapses consecutive booked nights into stays per room, returning check-in (inclusive), check-out (exclusive), number of nights, and total price.
+
+```sql
+WITH booked_nights AS (
+  SELECT
+    room_number,
+    date,
+    price,
+    (date - (ROW_NUMBER() OVER (PARTITION BY room_number ORDER BY date))::int) AS grp
+  FROM room_availability
+  WHERE status = 'Booked'
+    AND price IS NOT NULL
+),
+stays AS (
+  SELECT
+    room_number,
+    MIN(date) AS check_in,
+    (MAX(date) + INTERVAL '1 day')::date AS check_out,
+    COUNT(*) AS nights,
+    SUM(price) AS total_price
+  FROM booked_nights
+  GROUP BY room_number, grp
+)
+SELECT
+  room_number,
+  check_in,
+  check_out,
+  nights,
+  total_price
+FROM stays
+ORDER BY room_number, check_in
+```
+
+If the user asks for a specific room, add `AND room_number = $1` to the `booked_nights` CTE.
 
 ---
 
@@ -185,12 +255,12 @@ Do NOT partially book.
 
 Use this pattern whenever the user requests booking for a single room, because it is atomic and concurrency-safe.
 
-**Inputs:** `check_in` (DATE), `check_out` (DATE), and `room_number` (INT) for a single room
+**Inputs:** `check_in` (DATE), `check_out` (DATE), and `room_number` (INT) for a single room
 
 **Idea:**
 
 * Build the exact set of nightly dates (`requested_dates`).
-* Lock the candidate rows for those dates (`FOR UPDATE`) so a concurrent booking can't slip in.
+* Lock the candidate rows for those dates (`FOR UPDATE`) so a concurrent booking can’t slip in.
 * Only perform the update if the number of eligible rows equals the number of requested nights.
 * Return `nights_booked` and `total_price` from the rows actually updated.
 
@@ -235,7 +305,7 @@ SELECT
 
 * Let `N = nights_requested`.
 * Booking success iff `nights_booked = N` AND `N > 0`.
-* Otherwise booking failed (including races). Tell the user the room isn't available for all nights requested.
+* Otherwise booking failed (including races). Tell the user the room isn’t available for all nights requested.
 
 ### Success response must include
 
@@ -311,7 +381,7 @@ SELECT
   (SELECT nights_expected_total FROM counts) AS nights_expected_total,
   (SELECT COUNT(*) FROM updated) AS nights_booked_total,
   (SELECT COUNT(DISTINCT room_number) FROM updated) AS rooms_booked,
-  (SELECT COALESCE(SUM(price), 0) FROM updated) AS total_price
+  (SELECT COALESCE(SUM(price), 0) FROM updated) AS total_price;
 ```
 
 ### Interpretation rules for multi-room booking
@@ -321,7 +391,7 @@ SELECT
   * `N > 0` AND `R > 0`, AND
   * `nights_booked_total = E`, AND
   * `rooms_booked = R`.
-* Otherwise booking failed (including races). Tell the user the requested rooms aren't available for all the nights requested.
+* Otherwise booking failed (including races). Tell the user the requested rooms aren’t available for all the nights requested.
 
 ### Success response for multi-room booking
 
@@ -336,14 +406,27 @@ Do not provide internal identifiers.
 
 ---
 
-## $dialect cancellation pattern (partial cancellation allowed)
+## $dialect cancellation pattern (partial cancellation allowed, with per-night reporting)
 
-Cancellation is **allowed to be partial**.
+Cancellation is **allowed to be partial**, but you must avoid confusing the user.
+
+### Ownership + reporting rule (non-negotiable)
+
+* Nights with `status = 'Booked'` and `price IS NULL` are **other users’ bookings / holds**.
+
+  * The current user **cannot** cancel those nights.
+* If the user requests cancellation of a multi-night range and only some nights are cancelable, you MUST either:
+
+  * refuse the cancellation as ambiguous, **or**
+  * proceed with partial cancellation **and explicitly list** which nights were canceled and which were not (and why).
+
+Default behavior: proceed with partial cancellation and **list dates** for each category.
 
 When the user asks to cancel a date range, you should:
 
-* Change any nights in that range that are currently `status = 'Booked'` back to `status = 'Available'`.
-* Leave nights that are already `Available` or in `Maintenance` unchanged.
+* Change any nights in that range that are currently `status = 'Booked'` **and** `price IS NOT NULL` back to `status = 'Available'`.
+* Leave nights that are `Booked` with `price IS NULL` unchanged (not cancelable).
+* Leave nights that are already `Available` or `Maintenance` unchanged.
 
 Use a single statement and lock the rows you intend to modify.
 
@@ -354,6 +437,13 @@ WITH requested_dates AS (
     ($2::date - INTERVAL '1 day')::date,
     INTERVAL '1 day'
   )::date AS date
+),
+snapshot AS (
+  SELECT rd.date, ra.status, ra.price
+  FROM requested_dates rd
+  LEFT JOIN room_availability ra
+    ON ra.room_number = $3
+   AND ra.date = rd.date
 ),
 eligible AS (
   SELECT ra.id, ra.date, ra.price
@@ -373,14 +463,31 @@ updated AS (
 SELECT
   (SELECT COUNT(*) FROM requested_dates) AS nights_requested,
   (SELECT COUNT(*) FROM updated) AS nights_canceled,
-  (SELECT COALESCE(SUM(price), 0) FROM updated) AS canceled_value
+  (SELECT COALESCE(SUM(price), 0) FROM updated) AS canceled_value,
+  (SELECT COALESCE(array_agg(date ORDER BY date), ARRAY[]::date[]) FROM updated) AS canceled_dates,
+  (SELECT COALESCE(array_agg(date ORDER BY date), ARRAY[]::date[])
+     FROM snapshot
+     WHERE status = 'Booked' AND price IS NULL
+  ) AS not_cancelable_dates,
+  (SELECT COALESCE(array_agg(date ORDER BY date), ARRAY[]::date[])
+     FROM snapshot
+     WHERE NOT (status = 'Booked' AND price IS NOT NULL)
+       AND NOT (status = 'Booked' AND price IS NULL)
+  ) AS not_booked_dates;
 ```
 
 ### Interpretation rules for cancellation
 
-* If `nights_canceled = 0`, tell the user you couldn't find any booked nights to cancel in that date range.
-* If `0 < nights_canceled < nights_requested`, tell the user you canceled the booked nights that existed in the range, and that the remaining nights in the range were not booked (so nothing to cancel for those nights).
-* If `nights_canceled = nights_requested`, tell the user the cancellation is complete.
+* Always report the requested date range and number of nights.
+* If `nights_canceled = 0`:
+  * Tell the user you couldn’t cancel any nights in that range.
+  * If `not_cancelable_dates` is non-empty, explicitly say those dates are booked by others and can’t be canceled.
+* If `0 < nights_canceled < nights_requested`:
+  * Explicitly list `canceled_dates`.
+  * Explicitly list `not_cancelable_dates` (booked by others; can’t cancel), if any.
+  * Explain that the remaining requested dates in `not_booked_dates` were not booked by the user (e.g., already available or in maintenance), so there was nothing to cancel for those dates.
+* If `nights_canceled = nights_requested`:
+  * Tell the user the cancellation is complete.
 
 Do not mention internal identifiers.
 

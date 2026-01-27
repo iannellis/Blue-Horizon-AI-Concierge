@@ -22,8 +22,12 @@ from typing import TYPE_CHECKING, Any, Protocol, TypeGuard, runtime_checkable
 
 from psycopg import sql
 from psycopg_pool import AsyncConnectionPool
-from ragas.embeddings.base import embedding_factory
-from ragas.llms.base import llm_factory
+from ragas.embeddings.base import (
+    BaseRagasEmbedding,
+    BaseRagasEmbeddings,
+    embedding_factory,
+)
+from ragas.llms.base import InstructorBaseRagasLLM, llm_factory
 from ragas.metrics.collections import (
     AnswerRelevancy,
     ContextPrecision,
@@ -74,8 +78,6 @@ _JUDGE_LLM: Any | None = None
 _JUDGE_LLM_MODEL: str | None = None
 
 _RAGAS_LOCK = asyncio.Lock()
-_RAGAS_LLM: Any | None = None
-_RAGAS_EMBEDDINGS: Any | None = None
 _RAGAS_METRICS: tuple[
     Faithfulness,
     AnswerRelevancy,
@@ -1402,8 +1404,6 @@ async def _get_ragas_metrics(
         context_precision, context_recall).
 
     """
-    global _RAGAS_LLM  # noqa: PLW0603
-    global _RAGAS_EMBEDDINGS  # noqa: PLW0603
     global _RAGAS_METRICS  # noqa: PLW0603
     if _RAGAS_METRICS is not None:
         return _RAGAS_METRICS
@@ -1412,13 +1412,13 @@ async def _get_ragas_metrics(
         if _RAGAS_METRICS is not None:
             return _RAGAS_METRICS
         _ensure_google_api_key_for_ragas()
-        _RAGAS_LLM = _build_ragas_llm()
-        _RAGAS_EMBEDDINGS = _build_ragas_embeddings()
+        ragas_llm = _build_ragas_llm()
+        ragas_embeddings = _ensure_base_embedding(_build_ragas_embeddings())
         _RAGAS_METRICS = (
-            Faithfulness(llm=_RAGAS_LLM),
-            AnswerRelevancy(llm=_RAGAS_LLM, embeddings=_RAGAS_EMBEDDINGS),
-            ContextPrecision(llm=_RAGAS_LLM),
-            ContextRecall(llm=_RAGAS_LLM),
+            Faithfulness(llm=ragas_llm),
+            AnswerRelevancy(llm=ragas_llm, embeddings=ragas_embeddings),
+            ContextPrecision(llm=ragas_llm),
+            ContextRecall(llm=ragas_llm),
         )
         return _RAGAS_METRICS
 
@@ -1437,7 +1437,7 @@ def _ensure_google_api_key_for_ragas() -> None:
         os.environ["GOOGLE_API_KEY"] = gemini_key
 
 
-def _build_ragas_llm() -> object:
+def _build_ragas_llm() -> InstructorBaseRagasLLM:
     """Build the Ragas LLM configured for Gemini.
 
     Returns:
@@ -1465,7 +1465,7 @@ def _get_google_genai_client() -> object:
     return _genai.Client()
 
 
-def _build_ragas_embeddings() -> object:
+def _build_ragas_embeddings() -> BaseRagasEmbeddings | BaseRagasEmbedding:
     """Build the Ragas embeddings configured for Gemini.
 
     Returns:
@@ -1478,6 +1478,27 @@ def _build_ragas_embeddings() -> object:
         model="gemini-embedding-001",
         client=client,
     )
+
+
+def _ensure_base_embedding(
+    embeddings: BaseRagasEmbeddings | BaseRagasEmbedding,
+) -> BaseRagasEmbedding:
+    """Ensure the Ragas embeddings object matches BaseRagasEmbedding.
+
+    Args:
+        embeddings: Embeddings instance returned by the factory.
+
+    Returns:
+        Embeddings instance narrowed to BaseRagasEmbedding.
+
+    Raises:
+        RuntimeError: If the embeddings type is incompatible with metrics.
+
+    """
+    if isinstance(embeddings, BaseRagasEmbedding):
+        return embeddings
+    msg = "Ragas embeddings must be BaseRagasEmbedding for AnswerRelevancy."
+    raise RuntimeError(msg)
 
 
 def _rag_is_eligible_turn(turn_output: dict[str, object]) -> bool:

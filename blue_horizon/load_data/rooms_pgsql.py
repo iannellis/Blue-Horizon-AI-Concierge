@@ -18,7 +18,7 @@ from psycopg.types.enum import EnumInfo, register_enum
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
-DATA_PATH = Path(__file__).parents[1] / "data/pandas"
+DATA_PATH = Path(__file__).parents[2] / "data/pandas"
 
 logging.basicConfig(
     level=logging.INFO,

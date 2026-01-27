@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from psycopg import sql
 from psycopg_pool import AsyncConnectionPool
 
-from load_data.rooms_pgsql import (
+from blue_horizon.load_data.rooms_pgsql import (
     DATA_PATH,
     ROOM_AVAIL_COLUMNS,
     ROOMS_COLUMNS,

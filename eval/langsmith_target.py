@@ -24,9 +24,9 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from blue_horizon.agents.orchestration import OrchestrationManager
 from blue_horizon.agents.rooms_sql import reset_eval_schema, set_eval_schema
+from blue_horizon.load_data.rooms_pgsql import DATA_PATH, get_pgsql_conn_string
 from eval.db_reset import create_case_schema, drop_case_schema
 from eval.schema_slots import acquire_schema_slot, release_schema_slot
-from load_data.rooms_pgsql import DATA_PATH, get_pgsql_conn_string
 
 if TYPE_CHECKING:
     from contextvars import Token

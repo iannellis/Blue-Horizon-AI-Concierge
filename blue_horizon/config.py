@@ -202,12 +202,10 @@ class RoomsAgentConfig:
     """Agent prompt settings for SQL generation.
 
     Attributes:
-        dialect: SQL dialect label referenced within the prompt.
         top_k: Prompt parameter used to describe search breadth.
 
     """
 
-    dialect: str
     top_k: int
 
 
@@ -558,7 +556,6 @@ def parse_rooms_sql_config(data: Mapping[str, Any]) -> RoomsSqlConfig:
             max_retries=_get_required_value(llm, "max_retries", section + ".llm", int),
         ),
         agent=RoomsAgentConfig(
-            dialect=_get_required_value(agent, "dialect", section + ".agent", str),
             top_k=_get_required_value(agent, "top_k", section + ".agent", int),
         ),
         prompts=RoomsPromptsConfig(

@@ -112,8 +112,6 @@ folder = "system_prompts"
 system_prompt_filename = "rooms_sql.txt"
 
 [rooms_sql.agent]
-# The dialect to tell the agent to use
-dialect = "PostgreSQL"
 # The default number of rooms to return to the user
 top_k = 4
 

@@ -149,7 +149,6 @@ def render_system_prompt(  # noqa: PLR0913
     *,
     template: Template,
     top_k: int,
-    dialect: str,
     enum_values: dict[str, list[str]],
     basic_amenities: list[str],
     additional_amenities: list[str],
@@ -158,7 +157,6 @@ def render_system_prompt(  # noqa: PLR0913
     """Render the system prompt template with runtime substitutions."""
     return template.safe_substitute(
         top_k=top_k,
-        dialect=dialect,
         room_type=enum_values.get("room_type", []),
         basic_amenities=basic_amenities,
         additional_amenities=additional_amenities,
@@ -813,7 +811,6 @@ class RoomsSqlResources:
             self.system_prompt = render_system_prompt(
                 template=template,
                 top_k=self.config.agent.top_k,
-                dialect=self.config.agent.dialect,
                 enum_values=enum_values,
                 basic_amenities=basic_amenities,
                 additional_amenities=additional_amenities,

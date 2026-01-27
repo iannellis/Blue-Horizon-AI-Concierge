@@ -43,6 +43,7 @@ class RunSqlOutput(BaseModel):
     Attributes:
         status: Tool status string (e.g., "ok" or "error").
         rowcount: Number of rows returned or affected by the statement.
+        rows: Result rows returned by the tool, when present.
         truncated: Whether the tool output was truncated by the agent guardrails.
         error: User-facing error message when the tool fails.
 
@@ -50,6 +51,7 @@ class RunSqlOutput(BaseModel):
 
     status: str | None = None
     rowcount: int | None = None
+    rows: list[dict[str, Any]] | None = None
     truncated: bool | None = None
     error: str | None = None
 
@@ -425,7 +427,7 @@ class EvalCaptureCallback(AsyncCallbackHandler):
             self._capture_hydrate_items(output)
 
     def _capture_run_sql(self, output: RunSqlOutput | Mapping[str, object]) -> None:
-        """Capture a compact run_sql summary without row payloads.
+        """Capture a compact run_sql summary, including a tiny row sample.
 
         Args:
             output: run_sql tool output.
@@ -446,9 +448,59 @@ class EvalCaptureCallback(AsyncCallbackHandler):
             "rowcount": payload.rowcount,
             "truncated": payload.truncated,
         }
+        if isinstance(payload.rows, list) and payload.rows:
+            summary["rows"] = self._compact_rows(payload.rows, max_rows=1)
         if payload.error:
             summary["error"] = payload.error
         self.tool_summary.append(summary)
+
+    @staticmethod
+    def _json_safe(value: object) -> object:
+        """Convert values to JSON-serializable structures.
+
+        Args:
+            value: Value to normalize for JSON serialization.
+
+        Returns:
+            A JSON-safe value, recursively normalized.
+
+        """
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, Mapping):
+            return {str(k): EvalCaptureCallback._json_safe(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            return [EvalCaptureCallback._json_safe(item) for item in value]
+        return str(value)
+
+    @staticmethod
+    def _compact_rows(
+        rows: list[dict[str, Any]],
+        max_rows: int = 1,
+    ) -> list[dict[str, Any]]:
+        """Return a JSON-safe, truncated view of tool rows.
+
+        Args:
+            rows: Raw rows returned by the tool.
+            max_rows: Maximum number of rows to keep.
+
+        Returns:
+            A list containing at most ``max_rows`` JSON-safe row dicts.
+
+        """
+        if max_rows <= 0:
+            return []
+        safe_rows: list[dict[str, Any]] = []
+        for row in rows[:max_rows]:
+            if not isinstance(row, Mapping):
+                continue
+            safe_rows.append(
+                {
+                    str(key): EvalCaptureCallback._json_safe(val)
+                    for key, val in row.items()
+                },
+            )
+        return safe_rows
 
     def _capture_hydrate_items(self, output: list[object]) -> None:
         """Capture hydration summary and contexts used.

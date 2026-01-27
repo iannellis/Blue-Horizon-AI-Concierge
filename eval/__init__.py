@@ -1,1 +1,2 @@
-"""Namespace package for evaluation utilities."""
+"""Evaluation utilities for Blue Horizon."""
+

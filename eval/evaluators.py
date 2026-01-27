@@ -18,7 +18,7 @@ import asyncio
 import json
 import os
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeGuard
 
 from psycopg import sql
 from psycopg_pool import AsyncConnectionPool
@@ -79,62 +79,6 @@ _TRIPWIRE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         ),
     ),
 )
-
-
-def _truncate(text: str, n: int) -> str:
-    """Truncate a string to a maximum length.
-
-    Args:
-        text: Input string.
-        n: Maximum length to keep.
-
-    Returns:
-        Truncated string with "..." appended when trimming occurs.
-
-    """
-    if n <= 0:
-        return ""
-    if len(text) <= n:
-        return text
-    if n <= 3:  # noqa: PLR2004
-        return text[:n]
-    return f"{text[: n - 3]}..."
-
-
-def _iter_turn_outputs(run: Run) -> list[dict[str, Any]]:
-    """Extract the turn_outputs list from a LangSmith run.
-
-    Args:
-        run: LangSmith run object.
-
-    Returns:
-        List of turn output dicts (empty if missing or invalid).
-
-    """
-    outputs = run.outputs or {}
-    turn_outputs = outputs.get("turn_outputs") or []
-    if isinstance(turn_outputs, list):
-        return [t for t in turn_outputs if isinstance(t, dict)]
-    return []
-
-
-def _get_example_turns(example: Example) -> list[dict[str, Any]]:
-    """Extract the turns list from a LangSmith example input.
-
-    Args:
-        example: LangSmith example object.
-
-    Returns:
-        List of example turn dicts (empty if missing or invalid).
-
-    """
-    inputs = example.inputs or {}
-    turns = inputs.get("turns") or []
-    if isinstance(turns, list):
-        return [t for t in turns if isinstance(t, dict)]
-    return []
-
-
 def eval_routing_accuracy(run: Run, example: Example) -> list[dict[str, Any]]:
     """Evaluate per-turn routing accuracy.
 
@@ -198,6 +142,40 @@ def eval_routing_accuracy(run: Run, example: Example) -> list[dict[str, Any]]:
             "value": confusions,
         },
     ]
+
+
+def _iter_turn_outputs(run: Run) -> list[dict[str, Any]]:
+    """Extract the turn_outputs list from a LangSmith run.
+
+    Args:
+        run: LangSmith run object.
+
+    Returns:
+        List of turn output dicts (empty if missing or invalid).
+
+    """
+    outputs = run.outputs or {}
+    turn_outputs = outputs.get("turn_outputs") or []
+    if isinstance(turn_outputs, list):
+        return [t for t in turn_outputs if isinstance(t, dict)]
+    return []
+
+
+def _get_example_turns(example: Example) -> list[dict[str, Any]]:
+    """Extract the turns list from a LangSmith example input.
+
+    Args:
+        example: LangSmith example object.
+
+    Returns:
+        List of example turn dicts (empty if missing or invalid).
+
+    """
+    inputs = example.inputs or {}
+    turns = inputs.get("turns") or []
+    if isinstance(turns, list):
+        return [t for t in turns if isinstance(t, dict)]
+    return []
 
 
 def eval_injection_tripwires(run: Run, example: Example) -> list[dict[str, Any]]:
@@ -271,6 +249,26 @@ def _extract_snippet(text: str, start: int, end: int, max_len: int = 120) -> str
     return _truncate(text[left:right], max_len)
 
 
+def _truncate(text: str, n: int) -> str:
+    """Truncate a string to a maximum length.
+
+    Args:
+        text: Input string.
+        n: Maximum length to keep.
+
+    Returns:
+        Truncated string with "..." appended when trimming occurs.
+
+    """
+    if n <= 0:
+        return ""
+    if len(text) <= n:
+        return text
+    if n <= 3:  # noqa: PLR2004
+        return text[:n]
+    return f"{text[: n - 3]}..."
+
+
 async def eval_rooms_outcome_and_invariants(
     run: Run,
     example: Example,
@@ -297,81 +295,361 @@ async def eval_rooms_outcome_and_invariants(
             },
         ]
 
-    tool_error_score, tool_error_comment, rowcount_score, rowcount_comment = (
-        _score_rooms_tool_outcomes(run)
-    )
+    outcome_metrics = _score_rooms_tool_outcomes(run)
     invariants_results = await _check_rooms_db_invariants(schema=str(schema))
 
     return [
-        {
-            "key": "rooms_tool_errors",
-            "score": tool_error_score,
-            "comment": tool_error_comment,
-        },
-        {
-            "key": "rooms_rowcount_sanity",
-            "score": rowcount_score,
-            "comment": rowcount_comment,
-        },
+        *outcome_metrics,
         *invariants_results,
     ]
 
 
 def _score_rooms_tool_outcomes(
     run: Run,
-) -> tuple[float, str, float, str]:
-    """Score rooms tool outcomes and rowcount sanity checks.
+) -> list[dict[str, Any]]:
+    """Score rooms tool outcomes using atomic booking/modify summaries.
 
     Args:
         run: LangSmith run object containing tool summaries.
 
     Returns:
-        Tuple of (tool_error_score, tool_error_comment, rowcount_score,
-        rowcount_comment).
+        List of LangSmith metrics for tool errors, atomic success, and a soft
+        rowcount presence check.
 
     """
     turn_outputs = _iter_turn_outputs(run)
     rooms_turns = [t for t in turn_outputs if t.get("route_pred") == "rooms"]
 
-    tool_errors = 0
-    write_checks = 0
-    zero_rowcount_writes = 0
+    counts = _init_rooms_outcome_counts()
+    atomic_fail_details: list[dict[str, Any]] = []
 
-    for turn in rooms_turns:
+    for turn_idx, turn in enumerate(rooms_turns):
         tool_summary = turn.get("tool_summary") or []
         if not isinstance(tool_summary, list):
             continue
-        for entry in tool_summary:
-            if not isinstance(entry, dict):
-                continue
-            if entry.get("tool") != "run_sql":
-                continue
-            if _has_tool_error(entry):
-                tool_errors += 1
+        _accumulate_rooms_turn(
+            turn_idx=turn_idx,
+            tool_summary=tool_summary,
+            counts=counts,
+            atomic_fail_details=atomic_fail_details,
+        )
 
-            query = _extract_query_from_summary(entry)
-            if query and _is_write_like_sql(query):
-                write_checks += 1
-                rowcount = entry.get("rowcount")
-                if isinstance(rowcount, int) and rowcount == 0:
-                    zero_rowcount_writes += 1
+    tool_error_score, tool_error_comment = _format_tool_error_metric(counts)
+    atomic_rate, atomic_comment = _format_atomic_metric(counts)
+    rowcount_score, rowcount_comment = _format_rowcount_metric(counts)
 
-    tool_error_score = 1.0 if tool_errors == 0 else 0.0
-    tool_error_comment = (
-        "No tool errors detected."
-        if tool_errors == 0
-        else f"{tool_errors} run_sql errors detected."
+    metrics: list[dict[str, Any]] = [
+        {
+            "key": "rooms_tool_errors",
+            "score": tool_error_score,
+            "comment": tool_error_comment,
+        },
+        {
+            "key": "rooms_atomic_success_rate",
+            "score": atomic_rate,
+            "comment": atomic_comment,
+        },
+        {
+            "key": "rooms_rowcount_sanity",
+            "score": rowcount_score,
+            "comment": rowcount_comment,
+        },
+    ]
+    if atomic_fail_details:
+        metrics.append({"key": "rooms_atomic_failures", "value": atomic_fail_details})
+    return metrics
+
+
+def _init_rooms_outcome_counts() -> dict[str, int]:
+    """Initialize counters used for rooms tool outcome scoring.
+
+    Returns:
+        Dict of integer counters keyed by metric name.
+
+    """
+    return {
+        "tool_errors": 0,
+        "rowcount_present": 0,
+        "run_sql_calls": 0,
+        "atomic_successes": 0,
+        "atomic_failures": 0,
+    }
+
+
+def _accumulate_rooms_turn(
+    *,
+    turn_idx: int,
+    tool_summary: list[object],
+    counts: dict[str, int],
+    atomic_fail_details: list[dict[str, Any]],
+) -> None:
+    """Accumulate outcome counts for a single rooms turn.
+
+    Args:
+        turn_idx: Index of the rooms turn within the run.
+        tool_summary: Tool summary entries for the turn.
+        counts: Mutable counter dict updated in place.
+        atomic_fail_details: Failure details list updated in place.
+
+    """
+    for entry in tool_summary:
+        if not _is_run_sql_entry(entry):
+            continue
+        counts["run_sql_calls"] += 1
+        if _has_tool_error(entry):
+            counts["tool_errors"] += 1
+        if entry.get("rowcount") is not None:
+            counts["rowcount_present"] += 1
+        _accumulate_atomic_outcome(
+            turn_idx=turn_idx,
+            entry=entry,
+            counts=counts,
+            atomic_fail_details=atomic_fail_details,
+        )
+
+
+def _is_run_sql_entry(entry: object) -> TypeGuard[dict[str, Any]]:
+    """Check whether a tool summary entry represents a run_sql call.
+
+    Args:
+        entry: Tool summary entry.
+
+    Returns:
+        True when the entry is a dict for the run_sql tool.
+
+    """
+    return isinstance(entry, dict) and entry.get("tool") == "run_sql"
+
+
+def _has_tool_error(summary: dict[str, Any]) -> bool:
+    """Detect whether a tool summary indicates an error.
+
+    Args:
+        summary: Tool summary dict for a run_sql call.
+
+    Returns:
+        True if the summary indicates error status or includes an error message.
+
+    """
+    status = summary.get("status")
+    if isinstance(status, str) and status.lower() == "error":
+        return True
+    return bool(summary.get("error"))
+
+
+def _accumulate_atomic_outcome(
+    *,
+    turn_idx: int,
+    entry: dict[str, Any],
+    counts: dict[str, int],
+    atomic_fail_details: list[dict[str, Any]],
+) -> None:
+    """Accumulate atomic outcome counts for a single run_sql entry.
+
+    Args:
+        turn_idx: Index of the rooms turn within the run.
+        entry: Tool summary dict for a run_sql call.
+        counts: Mutable counter dict updated in place.
+        atomic_fail_details: Failure details list updated in place.
+
+    """
+    rows = _extract_rows(entry)
+    first_row = _extract_first_row(rows)
+    op = _detect_atomic_op(first_row)
+    if op is None or first_row is None:
+        return
+    success, detail = _score_atomic_outcome(op=op, row=first_row)
+    if success:
+        counts["atomic_successes"] += 1
+        return
+    counts["atomic_failures"] += 1
+    atomic_fail_details.append({"turn": turn_idx, "op": op, **detail})
+
+
+def _format_tool_error_metric(counts: dict[str, int]) -> tuple[float, str]:
+    """Format the tool error metric from accumulated counts.
+
+    Args:
+        counts: Counter dict accumulated across rooms turns.
+
+    Returns:
+        Tuple of (score, comment) for rooms_tool_errors.
+
+    """
+    tool_errors = counts["tool_errors"]
+    if tool_errors == 0:
+        return 1.0, "No tool errors detected."
+    return 0.0, f"{tool_errors} run_sql errors detected."
+
+
+def _format_atomic_metric(counts: dict[str, int]) -> tuple[float, str]:
+    """Format the atomic success metric from accumulated counts.
+
+    Args:
+        counts: Counter dict accumulated across rooms turns.
+
+    Returns:
+        Tuple of (score, comment) for rooms_atomic_success_rate.
+
+    """
+    atomic_successes = counts["atomic_successes"]
+    atomic_failures = counts["atomic_failures"]
+    atomic_total = atomic_successes + atomic_failures
+    if atomic_total == 0:
+        return 1.0, "No atomic BOOK/MODIFY outcomes detected."
+    return (
+        atomic_successes / atomic_total,
+        f"Atomic successes {atomic_successes}/{atomic_total}.",
     )
 
-    if write_checks == 0:
-        rowcount_score = 1.0
-        rowcount_comment = "No write-like SQL found for rowcount sanity checks."
-    else:
-        rowcount_score = (write_checks - zero_rowcount_writes) / write_checks
-        rowcount_comment = (f"{zero_rowcount_writes}/{write_checks} "
-                            "write-like SQL calls returned 0 rows.")
 
-    return tool_error_score, tool_error_comment, rowcount_score, rowcount_comment
+def _format_rowcount_metric(counts: dict[str, int]) -> tuple[float, str]:
+    """Format the rowcount presence metric from accumulated counts.
+
+    Args:
+        counts: Counter dict accumulated across rooms turns.
+
+    Returns:
+        Tuple of (score, comment) for rooms_rowcount_sanity.
+
+    """
+    run_sql_calls = counts["run_sql_calls"]
+    rowcount_present = counts["rowcount_present"]
+    if run_sql_calls == 0:
+        return 1.0, "No run_sql calls observed."
+    score = rowcount_present / run_sql_calls
+    comment = f"Rowcount present on {rowcount_present}/{run_sql_calls} run_sql calls."
+    return score, comment
+
+
+def _extract_rows(entry: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extract rows from a run_sql tool summary entry.
+
+    Args:
+        entry: Tool summary dict for a run_sql call.
+
+    Returns:
+        List of row dicts, or an empty list when unavailable.
+
+    """
+    rows = entry.get("rows")
+    if isinstance(rows, list):
+        return [r for r in rows if isinstance(r, dict)]
+    result = entry.get("result")
+    if isinstance(result, dict):
+        nested_rows = result.get("rows")
+        if isinstance(nested_rows, list):
+            return [r for r in nested_rows if isinstance(r, dict)]
+    return []
+
+
+def _extract_first_row(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Extract the first row from a rows list.
+
+    Args:
+        rows: List of row dicts.
+
+    Returns:
+        First row dict, or None when empty.
+
+    """
+    if not rows:
+        return None
+    return rows[0]
+
+
+def _as_int(value: object) -> int | None:
+    """Coerce a value to int when possible.
+
+    Args:
+        value: Raw value from a tool summary row.
+
+    Returns:
+        Integer value when coercible, otherwise None.
+
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _detect_atomic_op(row: dict[str, Any] | None) -> str | None:
+    """Detect BOOK/MODIFY atomic outcomes based on row fields.
+
+    Args:
+        row: First row dict returned by run_sql.
+
+    Returns:
+        Operation string ("book" or "modify") when detected, else None.
+
+    """
+    if not row:
+        return None
+    keys = set(row.keys())
+    if {"nights_requested", "nights_booked"}.issubset(keys):
+        return "book"
+    if {
+        "nights_to_release",
+        "nights_released",
+        "nights_to_acquire",
+        "nights_acquired",
+    }.issubset(keys):
+        return "modify"
+    return None
+
+
+def _score_atomic_outcome(op: str, row: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+    """Score an atomic BOOK or MODIFY outcome row.
+
+    Args:
+        op: Operation name detected from the row.
+        row: Row dict containing outcome counts.
+
+    Returns:
+        Tuple of (success, details) where details are safe for logging.
+
+    """
+    if op == "book":
+        nights_requested = _as_int(row.get("nights_requested"))
+        nights_booked = _as_int(row.get("nights_booked"))
+        success = (
+            nights_requested is not None
+            and nights_booked is not None
+            and nights_requested > 0
+            and nights_booked == nights_requested
+        )
+        return success, {
+            "nights_requested": nights_requested,
+            "nights_booked": nights_booked,
+        }
+
+    nights_to_release = _as_int(row.get("nights_to_release"))
+    nights_released = _as_int(row.get("nights_released"))
+    nights_to_acquire = _as_int(row.get("nights_to_acquire"))
+    nights_acquired = _as_int(row.get("nights_acquired"))
+    success = (
+        nights_to_release is not None
+        and nights_released is not None
+        and nights_to_acquire is not None
+        and nights_acquired is not None
+        and nights_released == nights_to_release
+        and nights_acquired == nights_to_acquire
+    )
+    return success, {
+        "nights_to_release": nights_to_release,
+        "nights_released": nights_released,
+        "nights_to_acquire": nights_to_acquire,
+        "nights_acquired": nights_acquired,
+    }
 
 
 def _is_write_like_sql(query: str) -> bool:
@@ -406,22 +684,6 @@ def _extract_query_from_summary(summary: dict[str, Any]) -> str | None:
         if isinstance(value, str) and value.strip():
             return value
     return None
-
-
-def _has_tool_error(summary: dict[str, Any]) -> bool:
-    """Detect whether a tool summary indicates an error.
-
-    Args:
-        summary: Tool summary dict for a run_sql call.
-
-    Returns:
-        True if the summary indicates error status or includes an error message.
-
-    """
-    status = summary.get("status")
-    if isinstance(status, str) and status.lower() == "error":
-        return True
-    return bool(summary.get("error"))
 
 
 async def _get_eval_db_url() -> str:
@@ -582,6 +844,9 @@ async def eval_llm_rubrics(run: Run, example: Example) -> list[dict[str, Any]]:
         "  5: all factual claims supported by contexts_used and/or SQL outcomes\n"
         "  3: minor unsupported phrasing\n"
         "  0: major hallucinations or contradictions with tool outcomes\n\n"
+        "For bookings and modifications, check tool outcomes carefully: "
+        "nights_booked should match nights_requested, and nights_released/"
+        "nights_acquired should match their requested counts when present.\n\n"
         "Required JSON schema:\n"
         "{\n"
         '  "consumer_quality": {"score": 0-5, "rationale": "<=50 words>"},\n'

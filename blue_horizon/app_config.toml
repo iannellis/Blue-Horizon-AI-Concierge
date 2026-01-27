@@ -95,7 +95,7 @@ system_prompt_filename = "information.txt"
 # Non-secret configuration for the Rooms Agent.
 [rooms_sql.llm]
 # Chat model name. Keep this cheap if you're serving lots of traffic.
-model = "gpt-5-mini"
+model = "gpt-5.2"
 # 0.0 is best for deterministic SQL generation.
 temperature = 0.0
 # OpenAI reasoning effort hint (if supported by your model).

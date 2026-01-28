@@ -51,10 +51,10 @@ python -m eval.create_langsmith_dataset --dataset-name "BlueHorizonEval_v1" --ca
 
 ## Run an experiment
 
-Set the required environment variables and run the experiment script:
+Update `eval/eval_config.toml` with dataset and run settings, then set the
+required environment variables and run the experiment script:
 
 ```bash
-set EVAL_DATASET_NAME=BlueHorizonEval_v1
 set LANGCHAIN_TRACING_V2=true
 set LANGCHAIN_API_KEY=your_langsmith_key
 set LANGCHAIN_PROJECT=hotel-agent-evals
@@ -62,13 +62,17 @@ python -m eval.run_experiment
 ```
 
 Optional environment variables:
-- `EVAL_EXPERIMENT_NAME` (default: `hotel-agent-eval`)
-- `EVAL_MAX_CONCURRENCY` (default: `10`)
-- `EVAL_OUTPUT_DIR` (default: `eval/outputs`)
 - `LANGSMITH_TEST_CACHE` (enables caching for example runs)
+
+Non-secret evaluation settings now live in `eval/eval_config.toml`:
+- Dataset name, experiment name, output directory, and concurrency
+- Orchestration timeouts and schema slot limits
+- Judge model name and Ragas scoring limits
+- Stress-test defaults (users, targets, horizons, and output paths)
 
 ## Environment variables
 
 - `LANGSMITH_API_KEY` (required)
 - `LANGSMITH_ENDPOINT` (optional, defaults to LangSmith hosted endpoint)
 - `LANGSMITH_PROJECT` (optional)
+- `EVAL_DB_URL` (optional; required only for DB-backed evaluators/stress tests)

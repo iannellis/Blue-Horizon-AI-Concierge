@@ -5,15 +5,14 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-import os
 from collections.abc import Iterable, Mapping, MutableMapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from langsmith.evaluation import aevaluate
 
+from eval.config import MetadataConfig, load_eval_config
 from eval.evaluators import (
     eval_injection_tripwires,
     eval_llm_rubrics,
@@ -22,6 +21,8 @@ from eval.evaluators import (
 )
 from eval.langsmith_target import run_example
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
 @dataclass(frozen=True)
 class RunArtifacts:
@@ -95,14 +96,15 @@ class ResultLike(SupportsAttrs, Protocol):
 
 async def main() -> None:
     """Run the LangSmith experiment and persist local artifacts."""
-    dataset_name = _require_env("EVAL_DATASET_NAME")
-    experiment_name = os.getenv("EVAL_EXPERIMENT_NAME", "hotel-agent-eval")
-    max_concurrency = _get_env_int("EVAL_MAX_CONCURRENCY", "10")
-    output_root = Path(os.getenv("EVAL_OUTPUT_DIR", "eval/outputs"))
+    cfg = load_eval_config()
+    dataset_name = cfg.experiment.dataset_name
+    experiment_name = cfg.experiment.experiment_name
+    max_concurrency = cfg.experiment.max_concurrency
+    output_root = cfg.experiment.output_dir
     artifacts = _build_output_paths(output_root)
 
     # Setting LANGSMITH_TEST_CACHE enables caching of example runs to reduce cost/time.
-    metadata = _build_metadata()
+    metadata = _build_metadata(cfg.metadata)
 
     evaluators = [
         eval_routing_accuracy,
@@ -138,40 +140,6 @@ async def main() -> None:
         handle.write(json.dumps(summary, ensure_ascii=True, indent=2))
 
 
-def _require_env(name: str) -> str:
-    """Return a required environment variable value or raise a clear error.
-
-    Args:
-        name: Environment variable name to load.
-
-    Returns:
-        The environment variable value.
-
-    Raises:
-        RuntimeError: If the environment variable is missing.
-
-    """
-    try:
-        return os.environ[name]
-    except KeyError as exc:
-        message = f"Missing required environment variable: {name}"
-        raise RuntimeError(message) from exc
-
-
-def _get_env_int(name: str, default: str) -> int:
-    """Parse an integer environment variable with a string default.
-
-    Args:
-        name: Environment variable name to load.
-        default: Default value to use if the variable is unset.
-
-    Returns:
-        The parsed integer value.
-
-    """
-    return int(os.getenv(name, default))
-
-
 def _build_output_paths(base_dir: Path) -> RunArtifacts:
     """Create a timestamped output directory and artifact paths.
 
@@ -193,18 +161,21 @@ def _build_output_paths(base_dir: Path) -> RunArtifacts:
     )
 
 
-def _build_metadata() -> dict[str, object]:
+def _build_metadata(metadata_cfg: MetadataConfig) -> dict[str, object]:
     """Build a metadata dictionary for the LangSmith experiment.
+
+    Args:
+        metadata_cfg: Metadata configuration for optional labels.
 
     Returns:
         Metadata payload for LangSmith experiment tracking.
 
     """
     metadata: dict[str, object] = {
-        "git_sha": os.getenv("GIT_SHA") or os.getenv("GITHUB_SHA"),
-        "router_model": os.getenv("ROUTER_MODEL"),
-        "judge_model": os.getenv("JUDGE_MODEL"),
-        "schema_version": os.getenv("DB_SCHEMA_VERSION"),
+        "git_sha": metadata_cfg.git_sha,
+        "router_model": metadata_cfg.router_model,
+        "judge_model": metadata_cfg.judge_model,
+        "schema_version": metadata_cfg.schema_version,
     }
     return {key: value for key, value in metadata.items() if value}
 

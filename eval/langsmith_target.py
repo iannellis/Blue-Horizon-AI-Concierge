@@ -10,10 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import re
 from collections.abc import Mapping
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
@@ -24,12 +22,14 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from blue_horizon.agents.orchestration import OrchestrationManager
 from blue_horizon.agents.rooms_sql import reset_eval_schema, set_eval_schema
-from blue_horizon.load_data.rooms_pgsql import DATA_PATH, get_pgsql_conn_string
+from blue_horizon.load_data.rooms_pgsql import get_pgsql_conn_string
+from eval.config import load_eval_config
 from eval.db_reset import create_case_schema, drop_case_schema
 from eval.schema_slots import acquire_schema_slot, release_schema_slot
 
 if TYPE_CHECKING:
     from contextvars import Token
+    from pathlib import Path
 
 
 class RunSqlOutput(BaseModel):
@@ -107,10 +107,8 @@ def _get_rooms_data_path() -> Path:
         Path to the pickled rooms datasets.
 
     """
-    override = os.getenv("EVAL_ROOMS_DATA_PATH") or os.getenv("ROOMS_DATA_PATH")
-    if override:
-        return Path(override)
-    return DATA_PATH
+    cfg = load_eval_config()
+    return cfg.rooms.data_path
 
 
 def _get_schema_slot_config() -> tuple[int, int, float, float]:
@@ -120,17 +118,13 @@ def _get_schema_slot_config() -> tuple[int, int, float, float]:
         Tuple of (max_slots, stale_after_s, wait_timeout_s, poll_interval_s).
 
     """
-    max_slots = int(os.getenv("EVAL_MAX_ACTIVE_SCHEMAS", "0"))
-    stale_after_s = int(os.getenv("EVAL_SCHEMA_SLOT_STALE_AFTER_S", "1800"))
-    wait_timeout_s = float(os.getenv("EVAL_SCHEMA_SLOT_WAIT_TIMEOUT_S", "300"))
-    poll_interval_s = float(os.getenv("EVAL_SCHEMA_SLOT_POLL_INTERVAL_S", "1"))
-
-    max_slots = max(0, max_slots)
-    stale_after_s = max(0, stale_after_s)
-    wait_timeout_s = max(0.1, wait_timeout_s)
-    poll_interval_s = max(0.1, poll_interval_s)
-
-    return max_slots, stale_after_s, wait_timeout_s, poll_interval_s
+    cfg = load_eval_config().schema_slots
+    return (
+        cfg.max_active_schemas,
+        cfg.stale_after_s,
+        cfg.wait_timeout_s,
+        cfg.poll_interval_s,
+    )
 
 
 def _extract_assistant_text(messages: list[BaseMessage]) -> str:
@@ -170,7 +164,7 @@ async def ensure_orchestration_ready() -> OrchestrationManager:
             return _ORCHESTRATION
         await _ORCHESTRATION.start()
 
-        timeout_s = float(os.getenv("EVAL_ORCHESTRATION_READY_TIMEOUT_S", "60"))
+        timeout_s = load_eval_config().orchestration.ready_timeout_s
         start = asyncio.get_running_loop().time()
         while not _ORCHESTRATION.is_ready:
             if asyncio.get_running_loop().time() - start >= timeout_s:
@@ -199,10 +193,9 @@ async def ensure_reset_pool() -> AsyncConnectionPool[Any]:
         if _RESET_POOL is not None:
             return _RESET_POOL
 
-        max_size = int(os.getenv("EVAL_RESET_POOL_MAX_SIZE", "4"))
-        min_size = int(os.getenv("EVAL_RESET_POOL_MIN_SIZE", "1"))
-        max_size = max(1, max_size)
-        min_size = max(1, min(min_size, max_size))
+        cfg = load_eval_config().reset_pool
+        max_size = cfg.max_size
+        min_size = cfg.min_size
 
         pool = AsyncConnectionPool(
             conninfo=get_pgsql_conn_string(),

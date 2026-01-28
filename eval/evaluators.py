@@ -35,6 +35,8 @@ from ragas.metrics.collections import (
     Faithfulness,
 )
 
+from eval.config import load_eval_config
+
 try:  # Optional dependency for LangChain Gemini integration.
     from langchain_google_genai import ChatGoogleGenerativeAI as _ChatGoogleGenerativeAI
 
@@ -849,7 +851,7 @@ async def eval_llm_rubrics(run: Run, example: Example) -> list[dict[str, Any]]:
         RuntimeError: If the judge model is unavailable on Developer API.
 
     """
-    model = os.getenv("EVAL_JUDGE_MODEL", "gemini-3-pro-preview")
+    model = load_eval_config().judge.model
     example_turns = _get_example_turns(example)
     run_turns = _iter_turn_outputs(run)
     transcript = _format_transcript(example_turns, run_turns)
@@ -1218,12 +1220,13 @@ async def eval_rag_metrics_info_turns(
         List of LangSmith feedback dicts with per-turn Ragas scores and means.
 
     """
-    max_turns = _rag_get_env_int("EVAL_RAGAS_TURNS_MAX", 6)
-    max_contexts = _rag_get_env_int("EVAL_RAGAS_CONTEXTS_MAX", 6)
-    max_context_chars = _rag_get_env_int("EVAL_RAGAS_CONTEXT_CHARS", 800)
-    max_query_chars = _rag_get_env_int("EVAL_RAGAS_QUERY_CHARS", 600)
-    max_response_chars = _rag_get_env_int("EVAL_RAGAS_RESPONSE_CHARS", 1200)
-    max_reference_chars = _rag_get_env_int("EVAL_RAGAS_REFERENCE_CHARS", 800)
+    cfg = load_eval_config().ragas
+    max_turns = cfg.turns_max
+    max_contexts = cfg.contexts_max
+    max_context_chars = cfg.context_chars
+    max_query_chars = cfg.query_chars
+    max_response_chars = cfg.response_chars
+    max_reference_chars = cfg.reference_chars
 
     turn_outputs, example_turns, reference_answers = _rag_extract_turn_inputs(
         run,
@@ -1343,27 +1346,6 @@ async def eval_rag_metrics_info_turns(
             "value": per_turn,
         },
     ]
-
-
-def _rag_get_env_int(name: str, default: int) -> int:
-    """Get a bounded integer from environment variables.
-
-    Args:
-        name: Environment variable name to read.
-        default: Default value if the env var is missing or invalid.
-
-    Returns:
-        Parsed integer value, bounded to at least 0.
-
-    """
-    raw = os.getenv(name)
-    if raw is None:
-        return max(0, default)
-    try:
-        value = int(raw)
-    except ValueError:
-        return max(0, default)
-    return max(0, value)
 
 
 def _rag_extract_turn_inputs(

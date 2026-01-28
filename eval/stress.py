@@ -22,7 +22,6 @@ from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
 from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
@@ -33,6 +32,7 @@ from blue_horizon.agents.rooms_sql import (
     reset_eval_schema,
     set_eval_schema,
 )
+from eval.config import load_eval_config
 from eval.db_reset import create_case_schema, drop_case_schema
 from eval.langsmith_target import OrchestrationManager
 
@@ -40,6 +40,7 @@ HOT_TARGET_PROBABILITY = 0.8
 
 if TYPE_CHECKING:
     from contextvars import Token
+    from pathlib import Path
 else:
     Token = object  # type: ignore[assignment]
 
@@ -141,7 +142,7 @@ async def run_stress() -> None:
 
 
 def _load_config() -> StressConfig:
-    """Load stress configuration from environment variables.
+    """Load stress configuration from eval_config.toml.
 
     Returns:
         A fully populated ``StressConfig`` instance.
@@ -150,18 +151,19 @@ def _load_config() -> StressConfig:
         RuntimeError: If a database URL cannot be determined.
 
     """
-    schema = os.getenv("EVAL_STRESS_SCHEMA") or _default_schema_name()
-    users = _env_int("EVAL_STRESS_USERS", 50)
-    ops_per_user = _env_int("EVAL_STRESS_OPS_PER_USER", 20)
-    max_concurrency = _env_int("EVAL_STRESS_MAX_CONCURRENCY", users)
-    baseline_data_path = os.getenv("EVAL_BASELINE_DATA_PATH", "data/")
-    output_dir = Path(os.getenv("EVAL_OUTPUT_DIR", "eval/outputs"))
-    stay_nights = _env_int("EVAL_STAY_NIGHTS", 2)
-    num_targets = _env_int("EVAL_TARGETS", 10)
-    hot_target_count = _env_int("EVAL_HOT_TARGETS", 5)
-    start_date = _env_date("EVAL_TARGET_START_DATE", "2025-02-01")
-    horizon_days = _env_int("EVAL_TARGET_HORIZON_DAYS", 60)
-    pool_max = _env_int("EVAL_DB_POOL_MAX", 10)
+    cfg = load_eval_config().stress
+    schema = cfg.schema or _default_schema_name()
+    users = cfg.users
+    ops_per_user = cfg.ops_per_user
+    max_concurrency = cfg.max_concurrency
+    baseline_data_path = str(cfg.baseline_data_path)
+    output_dir = cfg.output_dir
+    stay_nights = cfg.stay_nights
+    num_targets = cfg.num_targets
+    hot_target_count = cfg.hot_target_count
+    start_date = cfg.start_date
+    horizon_days = cfg.horizon_days
+    pool_max = cfg.pool_max
 
     db_url = os.getenv("EVAL_DB_URL") or get_pgsql_db_url()
     if not db_url:
@@ -208,48 +210,6 @@ def _rand_suffix(n: int = 6) -> str:
     """
     alphabet = string.ascii_lowercase + string.digits
     return "".join(random.choice(alphabet) for _ in range(n))  # noqa: S311
-
-
-def _env_int(name: str, default: int) -> int:
-    """Read an integer environment variable with a safe fallback.
-
-    Args:
-        name: The environment variable name to read.
-        default: The integer to return if the variable is unset or invalid.
-
-    Returns:
-        The parsed integer value, or ``default`` on missing/invalid input.
-
-    """
-    val = os.getenv(name)
-    if not val:
-        return default
-    try:
-        return int(val)
-    except ValueError:
-        return default
-
-
-def _env_date(name: str, default: str) -> date:
-    """Read an ISO date from the environment with validation.
-
-    Args:
-        name: The environment variable name to read.
-        default: The default ISO-8601 date string (``YYYY-MM-DD``).
-
-    Returns:
-        The parsed ``date`` value.
-
-    Raises:
-        ValueError: If the environment value is not a valid ISO date.
-
-    """
-    raw = os.getenv(name, default)
-    try:
-        return date.fromisoformat(raw)
-    except ValueError as exc:
-        msg = f"Invalid {name} date '{raw}', expected YYYY-MM-DD"
-        raise ValueError(msg) from exc
 
 
 async def _start_orchestration() -> OrchestrationManager:

@@ -1,0 +1,87 @@
+[experiment]
+# LangSmith dataset name to evaluate (required).
+dataset_name = "BlueHorizonEval_v1"
+# Friendly experiment name prefix for LangSmith runs.
+experiment_name = "hotel-agent-eval"
+# Maximum concurrent example evaluations.
+max_concurrency = 10
+# Base output directory for local evaluation artifacts.
+output_dir = "eval/outputs"
+
+[metadata]
+# Git commit SHA to attach to LangSmith metadata (optional).
+git_sha = ""
+# Router model identifier to attach to LangSmith metadata (optional).
+router_model = ""
+# Judge model identifier to attach to LangSmith metadata (optional).
+judge_model = ""
+# Database schema version label to attach to LangSmith metadata (optional).
+schema_version = ""
+
+[rooms]
+# Filesystem path to the pickled rooms datasets used by eval resets.
+data_path = "data/pandas"
+
+[orchestration]
+# Time in seconds to wait for OrchestrationManager readiness.
+ready_timeout_s = 60.0
+
+[schema_slots]
+# Maximum active schemas (0 disables slot limiting).
+max_active_schemas = 0
+# Time in seconds before schema slots are considered stale.
+stale_after_s = 1800
+# Time in seconds to wait for a schema slot before failing.
+wait_timeout_s = 300.0
+# Poll interval in seconds while waiting for schema slots.
+poll_interval_s = 1.0
+
+[reset_pool]
+# Maximum number of connections in the schema reset pool.
+max_size = 4
+# Minimum number of connections in the schema reset pool.
+min_size = 1
+
+[judge]
+# Judge model name used for rubric grading.
+model = "gemini-3-pro-preview"
+
+[ragas]
+# Maximum number of turns to score with Ragas.
+turns_max = 6
+# Maximum number of retrieved contexts per turn.
+contexts_max = 6
+# Maximum characters per retrieved context.
+context_chars = 800
+# Maximum characters for the user query.
+query_chars = 600
+# Maximum characters for the assistant response.
+response_chars = 1200
+# Maximum characters for reference answers.
+reference_chars = 800
+
+[stress]
+# Optional schema name override for stress runs (empty uses timestamp default).
+schema = ""
+# Number of concurrent simulated users.
+users = 50
+# Number of operations per user.
+ops_per_user = 20
+# Maximum number of users allowed to run concurrently.
+max_concurrency = 50
+# Baseline data directory for stress schema resets.
+baseline_data_path = "data/pandas"
+# Base output directory for stress artifacts.
+output_dir = "eval/outputs"
+# Nights per booking when generating targets.
+stay_nights = 2
+# Number of available targets to precompute.
+num_targets = 10
+# Size of the hot contention target subset.
+hot_target_count = 5
+# Search start date for availability targets (YYYY-MM-DD).
+start_date = "2025-02-01"
+# Search horizon in days from the start date.
+horizon_days = 60
+# Maximum size of the stress-test database pool.
+pool_max = 10

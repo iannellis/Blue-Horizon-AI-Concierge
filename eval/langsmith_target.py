@@ -44,6 +44,7 @@ class RunSqlOutput(BaseModel):
         status: Tool status string (e.g., "ok" or "error").
         rowcount: Number of rows returned or affected by the statement.
         rows: Result rows returned by the tool, when present.
+        rows: Result rows returned by the tool, when present.
         truncated: Whether the tool output was truncated by the agent guardrails.
         error: User-facing error message when the tool fails.
 
@@ -51,9 +52,9 @@ class RunSqlOutput(BaseModel):
 
     status: str | None = None
     rowcount: int | None = None
-    rows: list[dict[str, Any]] | None = None
     truncated: bool | None = None
     error: str | None = None
+    rows: list[dict[str, Any]] | None = None
 
 
 class HydratedItemOutput(BaseModel):
@@ -125,6 +126,211 @@ def _get_schema_slot_config() -> tuple[int, int, float, float]:
         cfg.wait_timeout_s,
         cfg.poll_interval_s,
     )
+
+
+def _coerce_float(value: object) -> float | None:
+    """Coerce a value to float when possible.
+
+    Args:
+        value: Raw value to coerce.
+
+    Returns:
+        Float value when coercible, otherwise None.
+
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _coerce_int(value: object) -> int | None:
+    """Coerce a value to int when possible.
+
+    Args:
+        value: Raw value to coerce.
+
+    Returns:
+        Integer value when coercible, otherwise None.
+
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(float(value.strip()))
+        except ValueError:
+            return None
+    return None
+
+
+def _canonicalize_filter_key(key: str) -> str:
+    """Normalize filter keys for strict comparisons.
+
+    Args:
+        key: Raw filter key.
+
+    Returns:
+        Canonicalized key string.
+
+    """
+    normalized = key.strip().lower().replace(" ", "_").replace("-", "_")
+    normalized = re.sub(r"_+", "_", normalized)
+    if normalized == "duration_mintues":
+        return "duration_minutes"
+    return normalized
+
+
+def _coerce_strict_bool(value: object) -> bool | None:
+    """Coerce a value to bool using strict, string-only rules.
+
+    Args:
+        value: Raw value to coerce.
+
+    Returns:
+        Boolean value when coercible, otherwise None.
+
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "yes", "y", "1"}:
+            return True
+        if normalized in {"false", "no", "n", "0"}:
+            return False
+    return None
+
+
+def _coerce_strict_filter_value(
+    canonical_key: str,
+    value: object,
+) -> object | None:
+    """Coerce filter values based on a strict canonical key.
+
+    Args:
+        canonical_key: Canonical filter key.
+        value: Raw filter value.
+
+    Returns:
+        Coerced value when parseable, otherwise None.
+
+    """
+    if canonical_key == "booking_required":
+        return _coerce_strict_bool(value)
+    if canonical_key.endswith("_price"):
+        return _coerce_float(value)
+    return _coerce_int(value)
+
+
+def _swap_range_if_needed(
+    norm: dict[str, object],
+    min_key: str,
+    max_key: str,
+) -> None:
+    """Swap min/max values if they are reversed.
+
+    Args:
+        norm: Normalized filters dict updated in place.
+        min_key: Minimum value key.
+        max_key: Maximum value key.
+
+    """
+    min_val = norm.get(min_key)
+    max_val = norm.get(max_key)
+    if (
+        isinstance(min_val, (int, float))
+        and not isinstance(min_val, bool)
+        and isinstance(max_val, (int, float))
+        and not isinstance(max_val, bool)
+        and float(min_val) > float(max_val)
+    ):
+        norm[min_key], norm[max_key] = norm[max_key], norm[min_key]
+
+
+def _normalize_info_filters_strict(
+    filters: Mapping[str, object] | None,
+) -> tuple[dict[str, object] | None, list[str]]:
+    """Normalize amenity/service filters using strict canonical keys.
+
+    Args:
+        filters: Raw filters dict passed to an info tool, if any.
+
+    Returns:
+        Tuple of (normalized filters or None, unknown key list).
+
+    """
+    # Evaluators rely on these canonical keys to compare expected filters.
+    if not filters:
+        return None, []
+    if not isinstance(filters, dict):
+        return None, ["<non_dict_filters>"]
+
+    canonical_keys = {
+        "booking_required",
+        "min_price",
+        "max_price",
+        "min_notice_hours",
+        "max_notice_hours",
+        "min_duration_minutes",
+        "max_duration_minutes",
+    }
+
+    norm: dict[str, object] = {}
+    unknown_keys: list[str] = []
+
+    for key, value in filters.items():
+        canonical = _canonicalize_filter_key(str(key))
+        if canonical not in canonical_keys:
+            unknown_keys.append(str(key))
+            continue
+
+        coerced = _coerce_strict_filter_value(canonical, value)
+        if coerced is None:
+            unknown_keys.append(f"{key}:<bad_value>")
+            continue
+        norm[canonical] = coerced
+
+    _swap_range_if_needed(norm, "min_price", "max_price")
+    _swap_range_if_needed(norm, "min_notice_hours", "max_notice_hours")
+    _swap_range_if_needed(norm, "min_duration_minutes", "max_duration_minutes")
+
+    return (norm or None), unknown_keys
+
+
+def _extract_filters_from_tool_inputs(inputs: object) -> dict[str, object] | None:
+    """Extract a filters dict from tool inputs payloads.
+
+    Args:
+        inputs: Tool inputs payload, often a mapping.
+
+    Returns:
+        Filters dict if present, otherwise None.
+
+    """
+    if not isinstance(inputs, Mapping):
+        return None
+    raw_filters = inputs.get("filters")
+    if isinstance(raw_filters, Mapping):
+        return dict(raw_filters)
+
+    excluded_keys = {"query", "k", "top_k"}
+    extracted = {
+        str(key): value
+        for key, value in inputs.items()
+        if str(key) not in excluded_keys
+    }
+    return extracted or None
 
 
 def _extract_assistant_text(messages: list[BaseMessage]) -> str:
@@ -352,6 +558,7 @@ class EvalCaptureCallback(AsyncCallbackHandler):
     route_pred: str | None
     tool_summary: list[dict[str, Any]]
     contexts_used: list[str]
+    _pending_info_tools: dict[UUID, dict[str, Any]]
 
     def __init__(self, *, schema_manager: SchemaManager) -> None:
         """Initialize the callback handler.
@@ -365,6 +572,7 @@ class EvalCaptureCallback(AsyncCallbackHandler):
         self.route_pred = None
         self.tool_summary = []
         self.contexts_used = []
+        self._pending_info_tools = {}
 
     async def on_chain_end(
         self,
@@ -393,6 +601,58 @@ class EvalCaptureCallback(AsyncCallbackHandler):
                 if route_val == "rooms" and not self.schema_manager.schema_created:
                     await self.schema_manager.ensure_schema()
 
+    async def on_tool_start(  # noqa: PLR0913
+        self,
+        serialized: dict[str, Any],
+        input_str: str,
+        *,
+        run_id: UUID,
+        parent_run_id: UUID | None = None,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        inputs: dict[str, Any] | None = None,
+        **kwargs: Any,  # noqa: ANN401
+    ) -> None:
+        """Capture filters passed into amenity/service query tools.
+
+        Args:
+            serialized: Serialized tool metadata.
+            input_str: Raw input string passed to the tool.
+            run_id: LangChain run ID for the tool.
+            parent_run_id: Optional parent run ID.
+            tags: Optional tags associated with the tool.
+            metadata: Optional metadata associated with the tool.
+            inputs: Parsed tool input payload when available.
+            **kwargs: Additional keyword arguments.
+
+        """
+        _ = input_str, parent_run_id, tags, metadata, kwargs
+        tool_name = None
+        if isinstance(serialized, Mapping):
+            raw_name = serialized.get("name")
+            if isinstance(raw_name, str):
+                tool_name = raw_name
+        if tool_name not in {"query_amenities", "query_services"}:
+            return
+
+        raw_filters = _extract_filters_from_tool_inputs(inputs)
+        normalized_filters, unknown_keys = _normalize_info_filters_strict(raw_filters)
+        entry: dict[str, Any] = {
+            "tool": tool_name,
+            "filters": raw_filters,
+            "filters_norm": normalized_filters,
+        }
+        if unknown_keys:
+            entry["filters_unknown_keys"] = unknown_keys
+        if isinstance(inputs, Mapping):
+            raw_k = inputs.get("k")
+            if raw_k is None:
+                raw_k = inputs.get("top_k")
+            k_value = _coerce_int(raw_k)
+            if k_value is not None:
+                entry["k"] = k_value
+        self._pending_info_tools[run_id] = entry
+
     async def on_tool_end(
         self,
         output: Any,  # noqa: ANN401
@@ -418,6 +678,38 @@ class EvalCaptureCallback(AsyncCallbackHandler):
             self._capture_run_sql(output)
         elif tool_name == "hydrate_items":
             self._capture_hydrate_items(output)
+        elif tool_name in {"query_amenities", "query_services"}:
+            entry = self._pending_info_tools.pop(run_id, None)
+            if entry is None:
+                return
+            entry["status"] = "ok"
+            self.tool_summary.append(entry)
+
+    async def on_tool_error(
+        self,
+        error: BaseException,
+        *,
+        run_id: UUID,
+        parent_run_id: UUID | None = None,
+        tags: list[str] | None = None,
+        **kwargs: Any,  # noqa: ANN401
+    ) -> None:
+        """Record failures for amenity/service query tools when possible.
+
+        Args:
+            error: Error raised by the tool.
+            run_id: LangChain run ID for the tool.
+            parent_run_id: Optional parent run ID.
+            tags: Optional tags associated with the tool.
+            **kwargs: Additional keyword arguments.
+
+        """
+        _ = error, parent_run_id, tags, kwargs
+        entry = self._pending_info_tools.pop(run_id, None)
+        if entry is None:
+            return
+        entry["status"] = "error"
+        self.tool_summary.append(entry)
 
     def _capture_run_sql(self, output: RunSqlOutput | Mapping[str, object]) -> None:
         """Capture a compact run_sql summary, including a tiny row sample.

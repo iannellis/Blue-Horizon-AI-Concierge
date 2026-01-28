@@ -1,12 +1,18 @@
 [experiment]
 # LangSmith dataset name to evaluate (required).
 dataset_name = "BlueHorizonEval_v1"
-# Friendly experiment name prefix for LangSmith runs.
-experiment_name = "hotel-agent-eval"
+# Prefix used when generating experiment names.
+experiment_prefix = "hotel-agent-eval"
+# Optional run notes appended to experiment names.
+run_notes = ""
 # Maximum concurrent example evaluations.
 max_concurrency = 10
 # Base output directory for local evaluation artifacts.
 output_dir = "eval/outputs"
+# Whether to upload results to LangSmith.
+upload_results = true
+# Optional limit on dataset examples (empty runs full dataset).
+limit = ""
 
 [metadata]
 # Git commit SHA to attach to LangSmith metadata (optional).

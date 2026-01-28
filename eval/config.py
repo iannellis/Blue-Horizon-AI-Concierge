@@ -25,16 +25,22 @@ class ExperimentConfig:
 
     Attributes:
         dataset_name: LangSmith dataset name to evaluate.
-        experiment_name: Friendly experiment name prefix.
+        experiment_prefix: Prefix used when generating experiment names.
+        run_notes: Optional run notes appended to experiment names.
         max_concurrency: Maximum concurrent evaluations.
         output_dir: Base directory for local artifacts.
+        upload_results: Whether to upload results to LangSmith.
+        limit: Optional limit on the number of dataset examples to run.
 
     """
 
     dataset_name: str
-    experiment_name: str
+    experiment_prefix: str
+    run_notes: str | None
     max_concurrency: int
     output_dir: Path
+    upload_results: bool
+    limit: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -392,11 +398,28 @@ def parse_experiment_config(data: Mapping[str, Any]) -> ExperimentConfig:
         section,
         lambda value: _resolve_path(value, base_dir=_BASE_DIR),
     )
+    upload_results = _get_required_value(
+        data,
+        "upload_results",
+        section,
+        _parse_bool,
+    )
+    limit = _get_optional_value(data, "limit", section, _parse_optional_int)
     return ExperimentConfig(
         dataset_name=_get_required_value(data, "dataset_name", section, str),
-        experiment_name=_get_required_value(data, "experiment_name", section, str),
+        experiment_prefix=_get_required_value(
+            data,
+            "experiment_prefix",
+            section,
+            str,
+        ),
+        run_notes=_normalize_optional_str(
+            _get_optional_value(data, "run_notes", section, str),
+        ),
         max_concurrency=max_concurrency,
         output_dir=output_dir,
+        upload_results=upload_results,
+        limit=limit,
     )
 
 
@@ -461,31 +484,62 @@ def _resolve_path(value: object, *, base_dir: Path) -> Path:
     return path.resolve()
 
 
-def parse_metadata_config(data: Mapping[str, Any]) -> MetadataConfig:
-    """Parse optional metadata configuration.
+def _parse_bool(value: object) -> bool:
+    """Parse a boolean from configuration values.
 
     Args:
-        data: Config table containing metadata values.
+        value: Raw config value representing a boolean.
 
     Returns:
-        Parsed MetadataConfig.
+        Parsed boolean value.
+
+    Raises:
+        ValueError: If the value cannot be parsed as a boolean.
 
     """
-    section = "metadata"
-    return MetadataConfig(
-        git_sha=_normalize_optional_str(
-            _get_optional_value(data, "git_sha", section, str),
-        ),
-        router_model=_normalize_optional_str(
-            _get_optional_value(data, "router_model", section, str),
-        ),
-        judge_model=_normalize_optional_str(
-            _get_optional_value(data, "judge_model", section, str),
-        ),
-        schema_version=_normalize_optional_str(
-            _get_optional_value(data, "schema_version", section, str),
-        ),
-    )
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    msg = f"Invalid boolean value: {value!r}"
+    raise ValueError(msg)
+
+
+def _parse_optional_int(value: object) -> int | None:
+    """Parse an optional integer from configuration values.
+
+    Args:
+        value: Raw config value representing an optional integer.
+
+    Returns:
+        Parsed integer value, or None when empty.
+
+    Raises:
+        ValueError: If the value cannot be parsed as an integer.
+
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        msg = f"Invalid integer value: {value!r}"
+        raise TypeError(msg)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            return int(stripped)
+        except ValueError as exc:
+            msg = f"Invalid integer value: {value!r}"
+            raise ValueError(msg) from exc
+    msg = f"Invalid integer value: {value!r}"
+    raise TypeError(msg)
 
 
 def _get_optional_value[T](
@@ -533,6 +587,33 @@ def _normalize_optional_str(value: str | None) -> str | None:
         return None
     trimmed = value.strip()
     return trimmed or None
+
+
+def parse_metadata_config(data: Mapping[str, Any]) -> MetadataConfig:
+    """Parse optional metadata configuration.
+
+    Args:
+        data: Config table containing metadata values.
+
+    Returns:
+        Parsed MetadataConfig.
+
+    """
+    section = "metadata"
+    return MetadataConfig(
+        git_sha=_normalize_optional_str(
+            _get_optional_value(data, "git_sha", section, str),
+        ),
+        router_model=_normalize_optional_str(
+            _get_optional_value(data, "router_model", section, str),
+        ),
+        judge_model=_normalize_optional_str(
+            _get_optional_value(data, "judge_model", section, str),
+        ),
+        schema_version=_normalize_optional_str(
+            _get_optional_value(data, "schema_version", section, str),
+        ),
+    )
 
 
 def parse_rooms_config(data: Mapping[str, Any]) -> RoomsDataConfig:

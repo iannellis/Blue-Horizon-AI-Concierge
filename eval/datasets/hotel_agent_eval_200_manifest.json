@@ -1,0 +1,19 @@
+{
+  "total_cases": 200,
+  "info_only_cases": 70,
+  "rooms_only_cases": 70,
+  "mixed_cases": 60,
+  "cases_with_negative_rooms_turn": 84,
+  "injection_cases": 40,
+  "race_pattern_cases": 30,
+  "multi_turn_cases_3plus": 120,
+  "multi_source_info_cases": 35,
+  "multi_source_mixed_cases": 28,
+  "all_three_sources_cases": 20,
+  "invalid_date_cases": 10,
+  "missing_year_cases": 10,
+  "total_turns": 519,
+  "short_turns_leq_8_words": 302,
+  "long_turns_geq_20_words": 104,
+  "typo_or_slang_turns": 54
+}

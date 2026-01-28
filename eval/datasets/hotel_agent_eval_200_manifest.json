@@ -14,6 +14,6 @@
   "missing_year_cases": 10,
   "total_turns": 519,
   "short_turns_leq_8_words": 302,
-  "long_turns_geq_20_words": 104,
-  "typo_or_slang_turns": 54
+  "long_turns_geq_20_words": 106,
+  "typo_or_slang_turns": 53
 }

@@ -9,6 +9,7 @@ the router sends a turn to the "rooms" path.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from collections.abc import Mapping
@@ -333,6 +334,90 @@ def _extract_filters_from_tool_inputs(inputs: object) -> dict[str, object] | Non
     return extracted or None
 
 
+def _safe_str(obj: object) -> str:
+    """Safely convert an object to a string.
+
+    Args:
+        obj: Object to convert.
+
+    Returns:
+        String representation of the object.
+
+    """
+    if isinstance(obj, str):
+        return obj
+    try:
+        return json.dumps(obj, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return repr(obj)
+
+
+def _redact_secrets(text: str) -> str:
+    """Redact obvious secret-like substrings from a text blob.
+
+    Args:
+        text: Input text to sanitize.
+
+    Returns:
+        Redacted text safe for logging.
+
+    """
+    redacted = re.sub(r"sk-[A-Za-z0-9]{10,}", "[REDACTED]", text)
+    redacted = re.sub(r"Bearer\\s+\\S+", "Bearer [REDACTED]", redacted)
+    redacted = re.sub(
+        r"(\\w+://)([^:@\\s]+):([^@\\s]+)@",
+        r"\\1[REDACTED]:[REDACTED]@",
+        redacted,
+    )
+    secret_keys = (
+        "OPENAI_API_KEY",
+        "GOOGLE_API_KEY",
+        "LANGSMITH_API_KEY",
+    )
+    for key in secret_keys:
+        if key in redacted:
+            redacted = redacted.replace(key, "[REDACTED]")
+    return redacted
+
+
+def _preview(obj: object, max_len: int = 200) -> str:
+    """Create a short, redacted preview of a value.
+
+    Args:
+        obj: Value to preview.
+        max_len: Maximum preview length.
+
+    Returns:
+        Sanitized preview string.
+
+    """
+    if max_len <= 0:
+        return ""
+    text = _safe_str(obj)
+    text = _redact_secrets(text)
+    text = " ".join(text.split())
+    if len(text) <= max_len:
+        return text
+    return f"{text[: max_len - 1]}…"
+
+
+def _input_keys(obj: object, max_keys: int = 20) -> list[str]:
+    """Extract a capped list of input keys from a mapping.
+
+    Args:
+        obj: Tool input payload.
+        max_keys: Maximum number of keys to return.
+
+    Returns:
+        Sorted list of keys when available, otherwise an empty list.
+
+    """
+    if not isinstance(obj, Mapping):
+        return []
+    keys = sorted(str(k) for k in obj)
+    return keys[:max_keys]
+
+
 def _extract_assistant_text(messages: list[BaseMessage]) -> str:
     """Extract the last assistant message content from a list of messages.
 
@@ -558,7 +643,7 @@ class EvalCaptureCallback(AsyncCallbackHandler):
     route_pred: str | None
     tool_summary: list[dict[str, Any]]
     contexts_used: list[str]
-    _pending_info_tools: dict[UUID, dict[str, Any]]
+    _pending_tool_entries: dict[UUID, dict[str, Any]]
 
     def __init__(self, *, schema_manager: SchemaManager) -> None:
         """Initialize the callback handler.
@@ -572,7 +657,7 @@ class EvalCaptureCallback(AsyncCallbackHandler):
         self.route_pred = None
         self.tool_summary = []
         self.contexts_used = []
-        self._pending_info_tools = {}
+        self._pending_tool_entries = {}
 
     async def on_chain_end(
         self,
@@ -632,18 +717,24 @@ class EvalCaptureCallback(AsyncCallbackHandler):
             raw_name = serialized.get("name")
             if isinstance(raw_name, str):
                 tool_name = raw_name
-        if tool_name not in {"query_amenities", "query_services"}:
+        if tool_name is None:
             return
 
-        raw_filters = _extract_filters_from_tool_inputs(inputs)
-        normalized_filters, unknown_keys = _normalize_info_filters_strict(raw_filters)
         entry: dict[str, Any] = {
             "tool": tool_name,
-            "filters": raw_filters,
-            "filters_norm": normalized_filters,
+            "input_keys": _input_keys(inputs),
+            "input_preview": _preview(inputs),
+            "status": "started",
         }
-        if unknown_keys:
-            entry["filters_unknown_keys"] = unknown_keys
+        if tool_name in {"query_amenities", "query_services"}:
+            raw_filters = _extract_filters_from_tool_inputs(inputs)
+            normalized_filters, unknown_keys = _normalize_info_filters_strict(
+                raw_filters,
+            )
+            entry["filters"] = raw_filters
+            entry["filters_norm"] = normalized_filters
+            if unknown_keys:
+                entry["filters_unknown_keys"] = unknown_keys
         if isinstance(inputs, Mapping):
             raw_k = inputs.get("k")
             if raw_k is None:
@@ -651,7 +742,7 @@ class EvalCaptureCallback(AsyncCallbackHandler):
             k_value = _coerce_int(raw_k)
             if k_value is not None:
                 entry["k"] = k_value
-        self._pending_info_tools[run_id] = entry
+        self._pending_tool_entries[run_id] = entry
 
     async def on_tool_end(
         self,
@@ -674,14 +765,28 @@ class EvalCaptureCallback(AsyncCallbackHandler):
         """
         _ = run_id, parent_run_id, tags, kwargs
         tool_name = _get_tool_name(kwargs)
+        entry = self._pending_tool_entries.pop(run_id, None)
         if tool_name == "run_sql":
-            self._capture_run_sql(output)
-        elif tool_name == "hydrate_items":
-            self._capture_hydrate_items(output)
-        elif tool_name in {"query_amenities", "query_services"}:
-            entry = self._pending_info_tools.pop(run_id, None)
-            if entry is None:
-                return
+            self._capture_run_sql(output, entry)
+            return
+        if tool_name == "hydrate_items":
+            self._capture_hydrate_items(output, entry)
+            return
+        if tool_name in {"query_amenities", "query_services", "query_faq"}:
+            summary = entry or {"tool": tool_name}
+            summary["status"] = "ok"
+            if isinstance(output, list):
+                summary["output_preview"] = _preview({"num_items": len(output)})
+            self.tool_summary.append(summary)
+            return
+        if tool_name == "reranker":
+            summary = entry or {"tool": tool_name}
+            summary["status"] = "ok"
+            if isinstance(output, list):
+                summary["output_preview"] = _preview({"reranked_k": len(output)})
+            self.tool_summary.append(summary)
+            return
+        if entry is not None:
             entry["status"] = "ok"
             self.tool_summary.append(entry)
 
@@ -705,17 +810,23 @@ class EvalCaptureCallback(AsyncCallbackHandler):
 
         """
         _ = error, parent_run_id, tags, kwargs
-        entry = self._pending_info_tools.pop(run_id, None)
+        entry = self._pending_tool_entries.pop(run_id, None)
         if entry is None:
             return
         entry["status"] = "error"
+        entry["error_preview"] = _preview(error)
         self.tool_summary.append(entry)
 
-    def _capture_run_sql(self, output: RunSqlOutput | Mapping[str, object]) -> None:
+    def _capture_run_sql(
+        self,
+        output: RunSqlOutput | Mapping[str, object],
+        base_entry: dict[str, Any] | None = None,
+    ) -> None:
         """Capture a compact run_sql summary, including a tiny row sample.
 
         Args:
             output: run_sql tool output.
+            base_entry: Optional base entry with input previews.
 
         """
         if isinstance(output, RunSqlOutput):
@@ -727,16 +838,22 @@ class EvalCaptureCallback(AsyncCallbackHandler):
                 return
         else:
             return
-        summary = {
-            "tool": "run_sql",
-            "status": payload.status,
-            "rowcount": payload.rowcount,
-            "truncated": payload.truncated,
-        }
+        summary = dict(base_entry or {})
+        summary["tool"] = "run_sql"
+        summary["status"] = payload.status or summary.get("status") or "ok"
+        summary["rowcount"] = payload.rowcount
+        summary["truncated"] = payload.truncated
         if isinstance(payload.rows, list) and payload.rows:
             summary["rows"] = self._compact_rows(payload.rows, max_rows=1)
         if payload.error:
             summary["error"] = payload.error
+        summary["output_preview"] = _preview(
+            {
+                "status": payload.status,
+                "rowcount": payload.rowcount,
+                "truncated": payload.truncated,
+            },
+        )
         self.tool_summary.append(summary)
 
     @staticmethod
@@ -787,19 +904,24 @@ class EvalCaptureCallback(AsyncCallbackHandler):
             )
         return safe_rows
 
-    def _capture_hydrate_items(self, output: list[object]) -> None:
+    def _capture_hydrate_items(
+        self,
+        output: list[object],
+        base_entry: dict[str, Any] | None = None,
+    ) -> None:
         """Capture hydration summary and contexts used.
 
         Args:
             output: hydrate_items tool output.
+            base_entry: Optional base entry with input previews.
 
         """
         if not isinstance(output, list):
             return
-        summary = {
-            "tool": "hydrate_items",
-            "count": len(output),
-        }
+        summary = dict(base_entry or {})
+        summary["tool"] = "hydrate_items"
+        summary["status"] = summary.get("status") or "ok"
+        summary["count"] = len(output)
         parsed_items: list[HydratedItemOutput] = []
         for item in output:
             if isinstance(item, HydratedItemOutput):
@@ -819,6 +941,7 @@ class EvalCaptureCallback(AsyncCallbackHandler):
         ]
         if sources:
             summary["sources"] = sources
+        summary["output_preview"] = _preview({"num_items": len(parsed_items)})
         self.tool_summary.append(summary)
 
         for item in parsed_items:
@@ -915,6 +1038,24 @@ async def run_example(example: dict[str, Any]) -> dict[str, Any]:
                     "contexts_used": callback.contexts_used,
                 },
             )
+            if (
+                callback.contexts_used
+                and not any(
+                    entry.get("tool") == "hydrate_items"
+                    for entry in callback.tool_summary
+                    if isinstance(entry, dict)
+                )
+            ):
+                callback.tool_summary.append(
+                    {
+                        "tool": "hydrate_items",
+                        "status": "ok",
+                        "input_keys": ["num_items"],
+                        "input_preview": _preview(
+                            {"num_items": len(callback.contexts_used)},
+                        ),
+                    },
+                )
 
     finally:
         if schema_manager.schema_created:

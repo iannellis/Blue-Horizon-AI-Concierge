@@ -46,7 +46,7 @@ def get_data_path() -> Path:
 
     """
     app_config = load_app_config()
-    repo_root = Path(__file__).parents[1]
+    repo_root = Path(__file__).parents[2]
     return (repo_root / app_config.load_data.information_redis.data_path).resolve()
 
 

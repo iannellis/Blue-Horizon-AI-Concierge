@@ -143,10 +143,10 @@ retry_writes_on_transient_errors = false
 # Local data ingestion settings for one-off loaders.
 [load_data.information_redis]
 # Folder containing the Redis ingestion pickle files.
-# Relative to the blue_horizon package.
-data_path = "../data/pandas"
+# Specified from the same level as the blue_horizon package.
+data_path = "data/pandas"
 
 [load_data.rooms_pgsql]
 # Folder containing the PostgreSQL ingestion pickle files.
-# Relative to the blue_horizon package.
-data_path = "../data/pandas"
+# Specified from the same level as the blue_horizon package.
+data_path = "data/pandas"

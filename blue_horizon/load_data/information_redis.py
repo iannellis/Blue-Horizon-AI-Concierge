@@ -50,9 +50,6 @@ def get_data_path() -> Path:
     return (repo_root / app_config.load_data.information_redis.data_path).resolve()
 
 
-DATA_PATH = get_data_path()
-
-
 def require_env_var(name: str) -> str:
     """Return a required environment variable or exit.
 
@@ -261,7 +258,7 @@ faq_schema = IndexSchema.from_dict(
 
 df_faq = load_dataframe(
     "FAQ",
-    DATA_PATH / "faq_knowledge_base.pkl",
+    get_data_path() / "faq_knowledge_base.pkl",
     FAQ_REQUIRED_COLUMNS,
 )
 
@@ -329,7 +326,7 @@ amenities_schema = IndexSchema.from_dict(
 
 df_amenities = load_dataframe(
     "Amenities",
-    DATA_PATH / "amenities.pkl",
+    get_data_path() / "amenities.pkl",
     AMENITIES_REQUIRED_COLUMNS,
 )
 
@@ -408,7 +405,7 @@ services_schema = IndexSchema.from_dict(
 
 df_services = load_dataframe(
     "Services",
-    DATA_PATH / "services.pkl",
+    get_data_path() / "services.pkl",
     SERVICES_REQUIRED_COLUMNS,
 )
 

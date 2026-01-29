@@ -21,7 +21,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
 
-
 def get_data_path() -> Path:
     """Return the configured rooms data path.
 
@@ -33,8 +32,6 @@ def get_data_path() -> Path:
     repo_root = Path(__file__).parents[1]
     return (repo_root / app_config.load_data.rooms_pgsql.data_path).resolve()
 
-
-DATA_PATH = get_data_path()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -398,11 +395,11 @@ def reload_sql_tables() -> None:
     try:
         conn_string = get_pgsql_conn_string()
         df_rooms, room_type_values, bed_type_values, room_status_values = (
-            prepare_rooms_dataframe(DATA_PATH)
+            prepare_rooms_dataframe(get_data_path())
         )
         df_availability, availability_status_values = (
             prepare_room_availability_dataframe(
-                DATA_PATH,
+                get_data_path(),
             )
         )
 

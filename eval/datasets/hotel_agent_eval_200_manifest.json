@@ -1,19 +1,139 @@
 {
-  "total_cases": 200,
-  "info_only_cases": 70,
-  "rooms_only_cases": 70,
-  "mixed_cases": 60,
-  "cases_with_negative_rooms_turn": 84,
-  "injection_cases": 40,
-  "race_pattern_cases": 30,
-  "multi_turn_cases_3plus": 120,
-  "multi_source_info_cases": 35,
-  "multi_source_mixed_cases": 28,
-  "all_three_sources_cases": 20,
-  "invalid_date_cases": 10,
-  "missing_year_cases": 10,
-  "total_turns": 519,
-  "short_turns_leq_8_words": 302,
-  "long_turns_geq_20_words": 106,
-  "typo_or_slang_turns": 53
+  "dataset_file": "eval/datasets/hotel_agent_eval_200.jsonl",
+  "num_cases": 200,
+  "distribution": {
+    "info_only": 70,
+    "rooms_only": 70,
+    "mixed": 60
+  },
+  "turn_counts": {
+    "total_turns": 524,
+    "info_turns": 216,
+    "rooms_turns": 278,
+    "refuse_turns": 30,
+    "labeled_filter_turns": 40
+  },
+  "refuse_coverage": {
+    "cases_with_refuse_turns": 30,
+    "turns_with_refuse": 30
+  },
+  "expected_filters_coverage": {
+    "cases_with_any_expected_filters": 30,
+    "turns_with_expected_filters": 40
+  },
+  "expected_filters_key_usage": {
+    "booking_required": 13,
+    "min_price": 0,
+    "max_price": 38,
+    "min_notice_hours": 0,
+    "max_notice_hours": 31,
+    "min_duration_minutes": 30,
+    "max_duration_minutes": 40
+  },
+  "sanity_checks": {
+    "turns_expected_route_invalid": 0,
+    "turns_expected_filters_missing_keys": 0,
+    "turns_expected_filters_has_extra_keys": 0,
+    "turns_expected_filters_bad_types": 0
+  },
+  "samples": {
+    "case_ids_with_refuse_turns": [
+      "case_0002",
+      "case_0003",
+      "case_0005",
+      "case_0006",
+      "case_0007",
+      "case_0008",
+      "case_0009",
+      "case_0010",
+      "case_0011",
+      "case_0012",
+      "case_0013",
+      "case_0014",
+      "case_0017",
+      "case_0018",
+      "case_0019"
+    ],
+    "case_ids_with_expected_filters": [
+      "case_0002",
+      "case_0005",
+      "case_0008",
+      "case_0010",
+      "case_0013",
+      "case_0015",
+      "case_0018",
+      "case_0021",
+      "case_0023",
+      "case_0025",
+      "case_0037",
+      "case_0045",
+      "case_0068",
+      "case_0151",
+      "case_0153"
+    ],
+    "case_ids_with_notice_constraints": [
+      "case_0002",
+      "case_0005",
+      "case_0008",
+      "case_0010",
+      "case_0013",
+      "case_0015",
+      "case_0018",
+      "case_0021",
+      "case_0025",
+      "case_0037",
+      "case_0045",
+      "case_0068",
+      "case_0151",
+      "case_0153",
+      "case_0156"
+    ],
+    "case_ids_with_duration_constraints": [
+      "case_0002",
+      "case_0005",
+      "case_0008",
+      "case_0010",
+      "case_0013",
+      "case_0015",
+      "case_0018",
+      "case_0021",
+      "case_0023",
+      "case_0025",
+      "case_0037",
+      "case_0045",
+      "case_0068",
+      "case_0151",
+      "case_0153"
+    ],
+    "case_ids_with_price_constraints": [
+      "case_0002",
+      "case_0005",
+      "case_0008",
+      "case_0010",
+      "case_0013",
+      "case_0015",
+      "case_0018",
+      "case_0021",
+      "case_0023",
+      "case_0025",
+      "case_0037",
+      "case_0045",
+      "case_0068",
+      "case_0151",
+      "case_0156"
+    ],
+    "case_ids_with_booking_required_constraints": [
+      "case_0005",
+      "case_0008",
+      "case_0013",
+      "case_0018",
+      "case_0021",
+      "case_0023",
+      "case_0025",
+      "case_0045",
+      "case_0151",
+      "case_0156",
+      "case_0167"
+    ]
+  }
 }

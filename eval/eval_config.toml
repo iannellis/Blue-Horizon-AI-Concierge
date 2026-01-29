@@ -24,8 +24,23 @@ judge_model = ""
 # Database schema version label to attach to LangSmith metadata (optional).
 schema_version = ""
 
+[evaluator_limits]
+# Maximum characters per context snippet in evaluator outputs.
+context_max_chars = 1200
+# Maximum number of context snippets included in evaluator outputs.
+context_max_items = 6
+# Maximum characters from assistant messages in evaluator outputs.
+assistant_max_chars = 1200
+# Maximum characters from user messages in evaluator outputs.
+user_max_chars = 800
+# Max stored failures included in evaluator outputs for info expected filters.
+info_filter_failures_max = 25
+# Max stored failures included in evaluator outputs for required tool usage.
+required_tool_failures_max = 25
+
 [rooms]
 # Filesystem path to the pickled rooms datasets used by eval resets.
+# Relative to level of "eval" directory.
 data_path = "data/pandas"
 
 [orchestration]

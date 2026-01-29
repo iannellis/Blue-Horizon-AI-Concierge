@@ -67,12 +67,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
     from langsmith.schemas import Example, Run
 
-_CONTEXT_MAX_CHARS = 1200
-_CONTEXT_MAX_ITEMS = 6
-_ASSISTANT_MAX_CHARS = 1200
-_USER_MAX_CHARS = 800
-_INFO_FILTER_FAILURES_MAX = 25
-_REQUIRED_TOOL_FAILURES_MAX = 25
+_EVALUATOR_LIMITS = load_eval_config().evaluator_limits
 _INFO_REQUIRED_TOOLS = (
     "query_faq",
     "query_amenities",
@@ -353,7 +348,7 @@ def eval_info_expected_filters(run: Run, example: Example) -> list[dict[str, Any
         passed_checks += pass_count
         divergence_checks += divergence_count
         divergence_failures += divergence_failed
-        if failure and len(failures) < _INFO_FILTER_FAILURES_MAX:
+        if failure and len(failures) < _EVALUATOR_LIMITS.info_filter_failures_max:
             failures.append(failure)
 
     if labeled_turns == 0:
@@ -919,7 +914,7 @@ def _append_required_tool_failure(
     failures = failure_context.get("failures")
     if not isinstance(failures, list):
         return
-    if len(failures) >= _REQUIRED_TOOL_FAILURES_MAX:
+    if len(failures) >= _EVALUATOR_LIMITS.required_tool_failures_max:
         return
 
     idx = failure_context.get("idx")
@@ -1680,14 +1675,21 @@ def _format_transcript(
                 tool_summary = list(output.get("tool_summary") or [])
                 contexts_used = list(output.get("contexts_used") or [])
 
-        context_items = [_truncate(str(c), _CONTEXT_MAX_CHARS) for c in contexts_used]
-        context_items = context_items[:_CONTEXT_MAX_ITEMS]
+        context_items = [
+            _truncate(str(c), _EVALUATOR_LIMITS.context_max_chars)
+            for c in contexts_used
+        ]
+        context_items = context_items[:_EVALUATOR_LIMITS.context_max_items]
 
+        assistant_line = (
+            "Assistant: "
+            f"{_truncate(assistant_text, _EVALUATOR_LIMITS.assistant_max_chars)}"
+        )
         lines.extend(
             [
                 f"Turn {idx + 1}:",
-                f"User: {_truncate(user_text, _USER_MAX_CHARS)}",
-                f"Assistant: {_truncate(assistant_text, _ASSISTANT_MAX_CHARS)}",
+                f"User: {_truncate(user_text, _EVALUATOR_LIMITS.user_max_chars)}",
+                assistant_line,
                 f"Route: {route_pred}",
                 f"ToolSummary: {json.dumps(tool_summary, ensure_ascii=True)}",
                 f"ContextsUsed: {json.dumps(context_items, ensure_ascii=True)}",

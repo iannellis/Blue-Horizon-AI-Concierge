@@ -62,6 +62,28 @@ class MetadataConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class EvaluatorLimitsConfig:
+    """Limits for evaluator summaries and expected filter checks.
+
+    Attributes:
+        context_max_chars: Maximum characters per context snippet.
+        context_max_items: Maximum number of context snippets to include.
+        assistant_max_chars: Maximum characters from assistant text.
+        user_max_chars: Maximum characters from user text.
+        info_filter_failures_max: Max stored failures for info filter checks.
+        required_tool_failures_max: Max stored failures for required tool checks.
+
+    """
+
+    context_max_chars: int
+    context_max_items: int
+    assistant_max_chars: int
+    user_max_chars: int
+    info_filter_failures_max: int
+    required_tool_failures_max: int
+
+
+@dataclass(frozen=True, slots=True)
 class RoomsDataConfig:
     """Configuration for rooms baseline data used in eval runs.
 
@@ -192,6 +214,7 @@ class EvalConfig:
     Attributes:
         experiment: Experiment execution settings.
         metadata: Optional LangSmith metadata values.
+        evaluator_limits: Limits used by evaluators and summaries.
         rooms: Rooms dataset paths.
         orchestration: Orchestration readiness timing.
         schema_slots: Schema slot throttling parameters.
@@ -204,6 +227,7 @@ class EvalConfig:
 
     experiment: ExperimentConfig
     metadata: MetadataConfig
+    evaluator_limits: EvaluatorLimitsConfig
     rooms: RoomsDataConfig
     orchestration: OrchestrationConfig
     schema_slots: SchemaSlotsConfig
@@ -328,6 +352,7 @@ def parse_eval_config(data: Mapping[str, Any]) -> EvalConfig:
     """
     experiment = _expect_table(data, "experiment", "root")
     metadata = _expect_table(data, "metadata", "root")
+    evaluator_limits = _expect_table(data, "evaluator_limits", "root")
     rooms = _expect_table(data, "rooms", "root")
     orchestration = _expect_table(data, "orchestration", "root")
     schema_slots = _expect_table(data, "schema_slots", "root")
@@ -339,6 +364,7 @@ def parse_eval_config(data: Mapping[str, Any]) -> EvalConfig:
     return EvalConfig(
         experiment=parse_experiment_config(experiment),
         metadata=parse_metadata_config(metadata),
+        evaluator_limits=parse_evaluator_limits_config(evaluator_limits),
         rooms=parse_rooms_config(rooms),
         orchestration=parse_orchestration_config(orchestration),
         schema_slots=parse_schema_slots_config(schema_slots),
@@ -613,6 +639,51 @@ def parse_metadata_config(data: Mapping[str, Any]) -> MetadataConfig:
         schema_version=_normalize_optional_str(
             _get_optional_value(data, "schema_version", section, str),
         ),
+    )
+
+
+def parse_evaluator_limits_config(
+    data: Mapping[str, Any],
+) -> EvaluatorLimitsConfig:
+    """Parse evaluator limits configuration.
+
+    Args:
+        data: Config table containing evaluator limit values.
+
+    Returns:
+        Parsed EvaluatorLimitsConfig.
+
+    """
+    section = "evaluator_limits"
+    context_max_chars = _get_required_value(data, "context_max_chars", section, int)
+    context_max_items = _get_required_value(data, "context_max_items", section, int)
+    assistant_max_chars = _get_required_value(
+        data,
+        "assistant_max_chars",
+        section,
+        int,
+    )
+    user_max_chars = _get_required_value(data, "user_max_chars", section, int)
+    info_filter_failures_max = _get_required_value(
+        data,
+        "info_filter_failures_max",
+        section,
+        int,
+    )
+    required_tool_failures_max = _get_required_value(
+        data,
+        "required_tool_failures_max",
+        section,
+        int,
+    )
+
+    return EvaluatorLimitsConfig(
+        context_max_chars=max(1, context_max_chars),
+        context_max_items=max(1, context_max_items),
+        assistant_max_chars=max(1, assistant_max_chars),
+        user_max_chars=max(1, user_max_chars),
+        info_filter_failures_max=max(1, info_filter_failures_max),
+        required_tool_failures_max=max(1, required_tool_failures_max),
     )
 
 

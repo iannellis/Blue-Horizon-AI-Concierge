@@ -83,7 +83,7 @@ _RESET_POOL_LOCK = asyncio.Lock()
 _RESET_POOL: AsyncConnectionPool[Any] | None = None
 
 _MAX_SCHEMA_NAME_LEN = 63
-_ROUTE_KEY = "route"
+_ROUTE_KEY = "route"  # key from orchestration.py
 
 
 def _sanitize_identifier(raw: str) -> str:

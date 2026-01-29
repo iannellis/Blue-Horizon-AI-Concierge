@@ -14,10 +14,10 @@ from psycopg import sql
 from psycopg_pool import AsyncConnectionPool
 
 from blue_horizon.load_data.rooms_pgsql import (
-    DATA_PATH,
     ROOM_AVAIL_COLUMNS,
     ROOMS_COLUMNS,
     build_enum_definition,
+    get_data_path,
     get_pgsql_conn_string,
     prepare_room_availability_dataframe,
     prepare_rooms_dataframe,
@@ -278,7 +278,7 @@ async def _main() -> None:
     parser.add_argument(
         "--data-path",
         type=Path,
-        default=DATA_PATH,
+        default=get_data_path(),
         help="Path to the pickled room datasets.",
     )
     args = parser.parse_args()

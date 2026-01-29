@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
+from dotenv import load_dotenv
 from langsmith import Client
 from langsmith.evaluation import aevaluate
 
@@ -30,6 +31,7 @@ if TYPE_CHECKING:
 
     from langsmith.schemas import Example
 
+load_dotenv()
 
 @dataclass(frozen=True)
 class RunArtifacts:

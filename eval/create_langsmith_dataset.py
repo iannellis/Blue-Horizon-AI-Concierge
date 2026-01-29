@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from dotenv import load_dotenv
 from langsmith import Client
 from pydantic import (
     BaseModel,
@@ -20,6 +21,7 @@ from pydantic import (
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+load_dotenv()
 
 def _raise(message: str) -> None:
     """Raise a ValueError with a provided message.

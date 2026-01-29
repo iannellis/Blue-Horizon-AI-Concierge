@@ -25,6 +25,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
+from dotenv import load_dotenv
 from psycopg_pool import AsyncConnectionPool
 
 from blue_horizon.agents.rooms_sql import (
@@ -44,6 +45,7 @@ if TYPE_CHECKING:
 else:
     Token = object  # type: ignore[assignment]
 
+load_dotenv()
 
 @dataclass(frozen=True)
 class StressConfig:

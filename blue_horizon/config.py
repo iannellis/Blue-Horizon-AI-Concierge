@@ -1,6 +1,6 @@
 """Shared configuration parsing for Blue Horizon.
 
-By defualt loads from app_config.toml in the root of the blue_horizon package.
+By default, this module loads from ``app_config.toml`` in the package root.
 """
 
 import importlib.resources as importlib_resources
@@ -318,6 +318,44 @@ class RoomsSqlConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class LoadDataInfoConfig:
+    """Data ingestion configuration for Redis loaders.
+
+    Attributes:
+        data_path: Relative path to the information pickle dataset folder.
+
+    """
+
+    data_path: Path
+
+
+@dataclass(frozen=True, slots=True)
+class LoadDataRoomsConfig:
+    """Data ingestion configuration for PostgreSQL loaders.
+
+    Attributes:
+        data_path: Relative path to the rooms pickle dataset folder.
+
+    """
+
+    data_path: Path
+
+
+@dataclass(frozen=True, slots=True)
+class LoadDataConfig:
+    """Grouped data ingestion configuration.
+
+    Attributes:
+        information_redis: Redis data loader configuration.
+        rooms_pgsql: PostgreSQL data loader configuration.
+
+    """
+
+    information_redis: LoadDataInfoConfig
+    rooms_pgsql: LoadDataRoomsConfig
+
+
+@dataclass(frozen=True, slots=True)
 class OrchestrationLlmConfig:
     """LLM configuration for the router component.
 
@@ -413,12 +451,14 @@ class AppConfig:
         orchestration: Router/orchestrator settings.
         info: Information agent settings.
         rooms_sql: Rooms SQL agent settings.
+        load_data: Data ingestion settings for local loaders.
 
     """
 
     orchestration: OrchestrationConfig
     info: InfoRagConfig
     rooms_sql: RoomsSqlConfig
+    load_data: LoadDataConfig
 
 
 def parse_info_config(data: Mapping[str, Any]) -> InfoRagConfig:
@@ -715,6 +755,43 @@ def parse_orchestration_config(data: Mapping[str, Any]) -> OrchestrationConfig:
     )
 
 
+def parse_load_data_config(data: Mapping[str, Any]) -> LoadDataConfig:
+    """Parse the load data configuration from a dict.
+
+    Args:
+        data: Dict containing the ``load_data`` section.
+
+    Returns:
+        LoadDataConfig: Parsed data loader configuration.
+
+    Raises:
+        ValueError: If required keys are missing or values are invalid.
+
+    """
+    section = "load_data"
+    information = _expect_table(data, "information_redis", section)
+    rooms = _expect_table(data, "rooms_pgsql", section)
+
+    return LoadDataConfig(
+        information_redis=LoadDataInfoConfig(
+            data_path=_get_required_value(
+                information,
+                "data_path",
+                section + ".information_redis",
+                Path,
+            ),
+        ),
+        rooms_pgsql=LoadDataRoomsConfig(
+            data_path=_get_required_value(
+                rooms,
+                "data_path",
+                section + ".rooms_pgsql",
+                Path,
+            ),
+        ),
+    )
+
+
 def parse_app_config(data: Mapping[str, Any]) -> AppConfig:
     """Parse the root ``app_config`` dictionary.
 
@@ -731,11 +808,13 @@ def parse_app_config(data: Mapping[str, Any]) -> AppConfig:
     orchestration = _expect_table(data, "orchestration", "root")
     info = _expect_table(data, "info", "root")
     rooms = _expect_table(data, "rooms_sql", "root")
+    load_data = _expect_table(data, "load_data", "root")
 
     return AppConfig(
         orchestration=parse_orchestration_config(orchestration),
         info=parse_info_config(info),
         rooms_sql=parse_rooms_sql_config(rooms),
+        load_data=parse_load_data_config(load_data),
     )
 
 

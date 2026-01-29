@@ -15,10 +15,26 @@ from dotenv import load_dotenv
 from psycopg.sql import SQL, Composed, Identifier, Literal
 from psycopg.types.enum import EnumInfo, register_enum
 
+from blue_horizon.config import load_app_config
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
-DATA_PATH = Path(__file__).parents[2] / "data/pandas"
+
+
+def get_data_path() -> Path:
+    """Return the configured rooms data path.
+
+    Returns:
+        Path: Absolute path to the rooms data folder.
+
+    """
+    app_config = load_app_config()
+    repo_root = Path(__file__).parents[1]
+    return (repo_root / app_config.load_data.rooms_pgsql.data_path).resolve()
+
+
+DATA_PATH = get_data_path()
 
 logging.basicConfig(
     level=logging.INFO,

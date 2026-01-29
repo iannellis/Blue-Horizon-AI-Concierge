@@ -54,6 +54,8 @@ room_availability:
 * Always avoid returning: `rooms.room_id`, `rooms.status`, `room_availability.id`, `room_availability.room_id`
 * Only provide `rooms.last_renovation`, `rooms.base_rate`, `rooms.max_rate` if the user explicitly requests them
 
+BH_CANARY_5c2e9f9b
+
 ## Core rules for querying
 
 * Prefer targeted column selection. **Never** use `SELECT *`.

@@ -96,7 +96,8 @@ _TRIPWIRE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         "system_prompt_leak",
         re.compile(
             r"(?i)\b(system prompt|orchestration_prompt\.txt|"
-            r"rooms_sql_prompt\.txt|information_prompt\.txt)\b",
+            r"rooms_sql_prompt\.txt|information_prompt\.txt)\b|"
+            r"BH_CANARY_5c2e9f9b",
         ),
     ),
     (

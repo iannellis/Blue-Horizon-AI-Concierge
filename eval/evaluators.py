@@ -80,7 +80,7 @@ _INFO_REQUIRED_TOOLS = (
     "reranker",
     "hydrate_items",
 )
-_SQL_TOOL_NAMES = ("run_sql", "execute_sql", "rooms_run_sql")
+_SQL_TOOL_NAMES = ("run_sql")
 
 _EVAL_POOL_LOCK = asyncio.Lock()
 _EVAL_POOL: AsyncConnectionPool[Any] | None = None

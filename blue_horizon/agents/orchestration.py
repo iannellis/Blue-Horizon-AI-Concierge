@@ -474,10 +474,22 @@ class OrchestrationAgentFactory:
                     "Info agent timed out after %s s",
                     cfg.orchestration.info_timeout_s,
                 )
-                return {"messages": [AIMessage(content=cfg.messages.error)]}
+                return {
+                    "messages": [
+                        AIMessage(
+                            content=[{"type": "text", "text": cfg.messages.error}],
+                        ),
+                    ],
+                }
             except Exception:
                 logger.exception("Info agent failed")
-                return {"messages": [AIMessage(content=cfg.messages.error)]}
+                return {
+                    "messages": [
+                        AIMessage(
+                            content=[{"type": "text", "text": cfg.messages.error}],
+                        ),
+                    ],
+                }
 
             return cast("dict[str, Any]", result)
 
@@ -503,22 +515,42 @@ class OrchestrationAgentFactory:
                     "Rooms agent timed out after %s s",
                     cfg.orchestration.rooms_timeout_s,
                 )
-                return {"messages": [AIMessage(content=cfg.messages.error)]}
+                return {
+                    "messages": [
+                        AIMessage(
+                            content=[{"type": "text", "text": cfg.messages.error}],
+                        ),
+                    ],
+                }
             except Exception:
                 logger.exception("Rooms agent failed")
-                return {"messages": [AIMessage(content=cfg.messages.error)]}
+                return {
+                    "messages": [
+                        AIMessage(
+                            content=[{"type": "text", "text": cfg.messages.error}],
+                        ),
+                    ],
+                }
 
             return cast("dict[str, Any]", result)
 
         def refuse_node(_: ConversationState) -> dict[str, Any]:
             """Return an out-of-scope refusal response."""
             logger.info("Refusing request")
-            return {"messages": [AIMessage(content=cfg.messages.refusal)]}
+            return {
+                "messages": [
+                    AIMessage(content=[{"type": "text", "text": cfg.messages.refusal}]),
+                ],
+            }
 
         def error_node(_: ConversationState) -> dict[str, Any]:
             """Return a user-friendly error response."""
             logger.info("Returning error message")
-            return {"messages": [AIMessage(content=cfg.messages.error)]}
+            return {
+                "messages": [
+                    AIMessage(content=[{"type": "text", "text": cfg.messages.error}]),
+                ],
+            }
 
         def finalize_node(state: ConversationState) -> dict[str, Any]:
             """Prune intermediate tool chatter and keep user+final assistant messages.
@@ -564,7 +596,11 @@ class OrchestrationAgentFactory:
                 if current_assistants:
                     kept.extend(current_assistants)
                 else:
-                    kept.append(AIMessage(content=cfg.messages.error))
+                    kept.append(
+                        AIMessage(
+                            content=[{"type": "text", "text": cfg.messages.error}],
+                        ),
+                    )
                 current_user = None
                 current_assistants = []
 
@@ -734,7 +770,7 @@ class OrchestrationManager:
         """
         if self._agent is None:
             msg = self.get_unavailable_message()
-            return {"messages": [AIMessage(content=msg)]}
+            return {"messages": [AIMessage(content=[{"type": "text", "text": msg}])]}
 
         state: ConversationState = {"messages": [HumanMessage(content=user_text)]}
 

@@ -72,6 +72,15 @@ _CONTEXT_MAX_ITEMS = 6
 _ASSISTANT_MAX_CHARS = 1200
 _USER_MAX_CHARS = 800
 _INFO_FILTER_FAILURES_MAX = 25
+_REQUIRED_TOOL_FAILURES_MAX = 25
+_INFO_REQUIRED_TOOLS = (
+    "query_faq",
+    "query_amenities",
+    "query_services",
+    "reranker",
+    "hydrate_items",
+)
+_SQL_TOOL_NAMES = ("run_sql", "execute_sql", "rooms_run_sql")
 
 _EVAL_POOL_LOCK = asyncio.Lock()
 _EVAL_POOL: AsyncConnectionPool[Any] | None = None
@@ -320,28 +329,30 @@ def eval_info_expected_filters(run: Run, example: Example) -> list[dict[str, Any
     total_checks = 0
     passed_checks = 0
     failures: list[dict[str, Any]] = []
+    divergence_checks = 0
+    divergence_failures = 0
 
     for idx in range(total_turns):
         example_turn = example_turns[idx]
-        if (
-            "expected_filters" not in example_turn
-            or "expected_filter_tools" not in example_turn
-        ):
+        if "expected_filters" not in example_turn:
             continue
         labeled_turns += 1
-        expected_tools = example_turn.get("expected_filter_tools")
-        expected_filters = example_turn.get("expected_filters")
-        turn_output = turn_outputs[idx]
-
-        check_count, pass_count, failure = _evaluate_expected_filters_turn(
+        turn_output = turn_outputs[idx] if isinstance(turn_outputs[idx], dict) else {}
+        (
+            check_count,
+            pass_count,
+            divergence_count,
+            divergence_failed,
+            failure,
+        ) = _evaluate_expected_filters_turn(
             idx=idx,
             example_turn=example_turn,
-            expected_tools=expected_tools,
-            expected_filters=expected_filters,
             turn_output=turn_output,
         )
         total_checks += check_count
         passed_checks += pass_count
+        divergence_checks += divergence_count
+        divergence_failures += divergence_failed
         if failure and len(failures) < _INFO_FILTER_FAILURES_MAX:
             failures.append(failure)
 
@@ -350,11 +361,18 @@ def eval_info_expected_filters(run: Run, example: Example) -> list[dict[str, Any
             {
                 "key": "info_expected_filters_skipped",
                 "score": 1.0,
-                "comment": "No labeled expected_filters turns",
+                "comment": "No turns with expected_filters in dataset.",
             },
         ]
 
     pass_rate = passed_checks / total_checks if total_checks else 0.0
+    if divergence_checks:
+        divergence_rate = divergence_failures / divergence_checks
+        divergence_comment = None
+    else:
+        divergence_rate = 0.0
+        divergence_comment = "No divergence checks performed."
+
     return [
         {
             "key": "info_expected_filters_turns",
@@ -363,6 +381,11 @@ def eval_info_expected_filters(run: Run, example: Example) -> list[dict[str, Any
         {
             "key": "info_expected_filters_pass_rate",
             "score": pass_rate,
+        },
+        {
+            "key": "info_expected_filters_divergence_rate",
+            "score": divergence_rate,
+            "comment": divergence_comment,
         },
         {
             "key": "info_expected_filters_failures",
@@ -375,92 +398,69 @@ def _evaluate_expected_filters_turn(
     *,
     idx: int,
     example_turn: dict[str, Any],
-    expected_tools: object,
-    expected_filters: object,
     turn_output: dict[str, Any],
-) -> tuple[int, int, dict[str, Any] | None]:
-    """Evaluate a single labeled turn for expected filter usage.
+) -> tuple[int, int, int, int, dict[str, Any] | None]:
+    """Evaluate expected filters for a single labeled turn.
 
     Args:
         idx: Turn index within the run/example.
-        example_turn: Dataset turn containing expected filter labels.
-        expected_tools: Expected tool list (validated within this function).
-        expected_filters: Expected filter dict (validated within this function).
+        example_turn: Dataset turn containing expected filters.
         turn_output: Run output for the aligned turn.
 
     Returns:
-        Tuple of (total_checks, passed_checks, failure_entry or None).
+        Tuple of (total_checks, passed_checks, divergence_checks,
+        divergence_failures, failure_entry or None).
 
     """
-    if not isinstance(expected_tools, list) or not isinstance(expected_filters, dict):
-        return 0, 0, None
+    expected_full = example_turn.get("expected_filters")
+    expected = (
+        _canon_expected_filters(expected_full)
+        if isinstance(expected_full, dict)
+        else {}
+    )
+    tool_summary = turn_output.get("tool_summary")
+    amenity_filters, amenity_unknown = _extract_filters_for_tool(
+        tool_summary,
+        "query_amenities",
+    )
+    service_filters, service_unknown = _extract_filters_for_tool(
+        tool_summary,
+        "query_services",
+    )
 
-    eligible = _is_info_turn(turn_output)
-    expected_canon = _canon_expected_filters(expected_filters)
-    actual = _extract_tool_filters(turn_output.get("tool_summary"))
-    reasons: list[str] = []
-    total_checks = 0
-    passed_checks = 0
-
-    for tool_name in expected_tools:
-        if tool_name not in actual:
-            continue
-        total_checks += 1
-        tool_pass, tool_reasons = _score_expected_filter_tool(
-            tool_payload=actual[tool_name],
-            expected_filters=expected_canon,
-        )
-        reasons.extend(tool_reasons)
-        if tool_pass and eligible:
-            passed_checks += 1
-        elif tool_pass and not eligible:
-            reasons.append("tool_not_called")
-
-    if "query_amenities" in expected_tools and "query_services" in expected_tools:
-        total_checks += 1
-        amenity_filters = actual["query_amenities"]["filters_norm"]
-        service_filters = actual["query_services"]["filters_norm"]
-        if amenity_filters and service_filters and _dict_equal(
-            amenity_filters,
-            service_filters,
-        ):
-            if eligible:
-                passed_checks += 1
-        else:
-            reasons.append("filters_diverge_between_tools")
+    (
+        check_count,
+        pass_count,
+        divergence_count,
+        divergence_failed,
+        failed_checks,
+    ) = _score_expected_filters(
+        {
+            "expected": expected,
+            "amenity_filters": amenity_filters,
+            "service_filters": service_filters,
+            "amenity_unknown": amenity_unknown,
+            "service_unknown": service_unknown,
+        },
+    )
 
     failure = None
-    if reasons:
-        failure = _build_expected_filters_failure(
-            turn_context={
+    if failed_checks:
+        failure = _build_info_expected_filters_failure(
+            {
                 "idx": idx,
                 "example_turn": example_turn,
                 "turn_output": turn_output,
+                "expected": expected,
+                "amenity_filters": amenity_filters,
+                "service_filters": service_filters,
+                "amenity_unknown": amenity_unknown,
+                "service_unknown": service_unknown,
+                "failed_checks": failed_checks,
             },
-            expected_tools=expected_tools,
-            expected_filters=expected_canon,
-            actual=actual,
-            reasons=reasons,
         )
 
-    return total_checks, passed_checks, failure
-
-
-def _is_info_turn(turn_output: dict[str, Any]) -> bool:
-    """Return whether a turn should be evaluated as an info turn.
-
-    Args:
-        turn_output: Run output for a single turn.
-
-    Returns:
-        True if the turn is an info route or uses contexts, otherwise False.
-
-    """
-    route_pred = turn_output.get("route_pred")
-    contexts_used = turn_output.get("contexts_used") or []
-    return (isinstance(route_pred, str) and route_pred == "info") or (
-        isinstance(contexts_used, list) and len(contexts_used) > 0
-    )
+    return check_count, pass_count, divergence_count, divergence_failed, failure
 
 
 def _canon_expected_filters(raw_filters: dict[str, Any]) -> dict[str, Any]:
@@ -505,134 +505,443 @@ def _canon_expected_filters(raw_filters: dict[str, Any]) -> dict[str, Any]:
     return output
 
 
-def _extract_tool_filters(tool_summary: list[dict[str, Any]] | None) -> dict[str, Any]:
-    """Extract tool filter details for amenities and services.
+def _extract_filters_for_tool(
+    tool_summary: list[dict[str, Any]] | None,
+    tool_name: str,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Extract normalized filters and unknown keys for a tool from summaries.
 
     Args:
         tool_summary: Tool summary list from run outputs.
+        tool_name: Tool name to search for.
 
     Returns:
-        Dict keyed by tool name with filters and metadata.
+        Tuple of (filters_norm, unknown_keys) for the tool.
 
     """
-    result = {
-        "query_amenities": {
-            "filters_norm": None,
-            "unknown_keys": [],
-            "called": False,
-        },
-        "query_services": {
-            "filters_norm": None,
-            "unknown_keys": [],
-            "called": False,
-        },
-    }
     if not isinstance(tool_summary, list):
-        return result
-
-    for entry in tool_summary:
+        return None, []
+    for entry in reversed(tool_summary):
         if not isinstance(entry, dict):
             continue
-        tool = entry.get("tool")
-        if tool not in result:
+        if entry.get("tool") != tool_name:
             continue
-        result[tool]["called"] = True
         filters_norm = entry.get("filters_norm")
-        result[tool]["filters_norm"] = (
-            filters_norm if isinstance(filters_norm, dict) else None
-        )
+        filters_value = filters_norm if isinstance(filters_norm, dict) else None
         unknown_keys = entry.get("filters_unknown_keys", [])
-        result[tool]["unknown_keys"] = (
-            unknown_keys if isinstance(unknown_keys, list) else []
-        )
-
-    return result
+        unknown_list = unknown_keys if isinstance(unknown_keys, list) else []
+        return filters_value, unknown_list
+    return None, []
 
 
-def _score_expected_filter_tool(
-    *,
-    tool_payload: dict[str, Any],
-    expected_filters: dict[str, Any],
-) -> tuple[bool, list[str]]:
-    """Score a single tool's filters against the expected filters.
+def _score_expected_filters(
+    filter_context: dict[str, Any],
+) -> tuple[int, int, int, int, list[str]]:
+    """Score expected filters against amenities/services tool outputs.
 
     Args:
-        tool_payload: Extracted tool payload including filters and flags.
-        expected_filters: Expected canonical filters for comparison.
+        filter_context: Dict containing expected filters, actual filters, and
+            unknown keys.
 
     Returns:
-        Tuple of (passed, reasons) for the tool-level check.
+        Tuple of (total_checks, passed_checks, divergence_checks,
+        divergence_failures, failed_checks).
 
     """
-    reasons: list[str] = []
-    if not tool_payload["called"]:
-        reasons.append("tool_not_called")
-        return False, reasons
-    if not tool_payload["filters_norm"]:
-        reasons.append("filters_missing")
-        return False, reasons
-    if tool_payload["unknown_keys"]:
-        reasons.append("unknown_filter_keys_used")
-        return False, reasons
-    if not _dict_equal(tool_payload["filters_norm"], expected_filters):
-        reasons.append("filters_mismatch")
-        return False, reasons
-    return True, reasons
+    expected = filter_context.get("expected")
+    if not isinstance(expected, dict):
+        expected = {}
+    if expected:
+        return _score_expected_filters_present(filter_context)
+    return _score_expected_filters_empty(filter_context)
 
 
-def _dict_equal(left: dict[str, Any] | None, right: dict[str, Any] | None) -> bool:
-    """Compare two dicts with None handling.
+def _score_expected_filters_present(
+    filter_context: dict[str, Any],
+) -> tuple[int, int, int, int, list[str]]:
+    """Score a turn where filters are expected to be present.
 
     Args:
-        left: Left dict or None.
-        right: Right dict or None.
+        filter_context: Dict containing expected filters, actual filters, and
+            unknown keys.
 
     Returns:
-        True if both dicts are non-None and equal.
+        Tuple of (total_checks, passed_checks, divergence_checks,
+        divergence_failures, failed_checks).
 
     """
-    if left is None or right is None:
-        return False
-    return left == right
+    expected = filter_context.get("expected")
+    expected_filters = expected if isinstance(expected, dict) else {}
+    amenity_filters = filter_context.get("amenity_filters")
+    service_filters = filter_context.get("service_filters")
+    amenity_unknown = filter_context.get("amenity_unknown")
+    service_unknown = filter_context.get("service_unknown")
+    amenity_unknown_list = amenity_unknown if isinstance(amenity_unknown, list) else []
+    service_unknown_list = service_unknown if isinstance(service_unknown, list) else []
+
+    total_checks = 0
+    passed_checks = 0
+    divergence_checks = 0
+    divergence_failures = 0
+    failed_checks: list[str] = []
+
+    total_checks, passed_checks = _apply_filter_check(
+        condition=_has_filters(amenity_filters),
+        label="amenities_filters_present",
+        total_checks=total_checks,
+        passed_checks=passed_checks,
+        failed_checks=failed_checks,
+    )
+    total_checks, passed_checks = _apply_filter_check(
+        condition=_has_filters(service_filters),
+        label="services_filters_present",
+        total_checks=total_checks,
+        passed_checks=passed_checks,
+        failed_checks=failed_checks,
+    )
+    total_checks, passed_checks = _apply_filter_check(
+        condition=amenity_filters == expected_filters,
+        label="amenities_filters_match_expected",
+        total_checks=total_checks,
+        passed_checks=passed_checks,
+        failed_checks=failed_checks,
+    )
+    total_checks, passed_checks = _apply_filter_check(
+        condition=service_filters == expected_filters,
+        label="services_filters_match_expected",
+        total_checks=total_checks,
+        passed_checks=passed_checks,
+        failed_checks=failed_checks,
+    )
+
+    if _has_filters(amenity_filters) and _has_filters(service_filters):
+        divergence_checks += 1
+        total_checks += 1
+        if amenity_filters == service_filters:
+            passed_checks += 1
+        else:
+            divergence_failures += 1
+            failed_checks.append("filters_diverge_between_tools")
+
+    total_checks, passed_checks = _apply_filter_check(
+        condition=not (amenity_unknown_list or service_unknown_list),
+        label="unknown_filter_keys_used",
+        total_checks=total_checks,
+        passed_checks=passed_checks,
+        failed_checks=failed_checks,
+    )
+
+    return (
+        total_checks,
+        passed_checks,
+        divergence_checks,
+        divergence_failures,
+        failed_checks,
+    )
 
 
-def _build_expected_filters_failure(
+def _apply_filter_check(
     *,
-    turn_context: dict[str, object],
-    expected_tools: list[str],
-    expected_filters: dict[str, Any],
-    actual: dict[str, dict[str, Any]],
-    reasons: list[str],
+    condition: bool,
+    label: str,
+    total_checks: int,
+    passed_checks: int,
+    failed_checks: list[str],
+) -> tuple[int, int]:
+    """Apply a filter check and update counters.
+
+    Args:
+        condition: Boolean indicating whether the check passes.
+        label: Failure label to record when the check fails.
+        total_checks: Current total checks count.
+        passed_checks: Current passed checks count.
+        failed_checks: List of failure labels to append to.
+
+    Returns:
+        Updated (total_checks, passed_checks).
+
+    """
+    total_checks += 1
+    if condition:
+        passed_checks += 1
+    else:
+        failed_checks.append(label)
+    return total_checks, passed_checks
+
+
+def _has_filters(filters: dict[str, Any] | None) -> bool:
+    """Check whether a filters dict is non-empty.
+
+    Args:
+        filters: Filters dict or None.
+
+    Returns:
+        True if the dict is present and non-empty, otherwise False.
+
+    """
+    return isinstance(filters, dict) and bool(filters)
+
+
+def _score_expected_filters_empty(
+    filter_context: dict[str, Any],
+) -> tuple[int, int, int, int, list[str]]:
+    """Score a turn where no filters should be passed.
+
+    Args:
+        filter_context: Dict containing expected filters, actual filters, and
+            unknown keys.
+
+    Returns:
+        Tuple of (total_checks, passed_checks, divergence_checks,
+        divergence_failures, failed_checks).
+
+    """
+    amenity_filters = filter_context.get("amenity_filters")
+    service_filters = filter_context.get("service_filters")
+    amenity_unknown = filter_context.get("amenity_unknown")
+    service_unknown = filter_context.get("service_unknown")
+    amenity_unknown_list = amenity_unknown if isinstance(amenity_unknown, list) else []
+    service_unknown_list = service_unknown if isinstance(service_unknown, list) else []
+
+    total_checks = 0
+    passed_checks = 0
+    failed_checks: list[str] = []
+
+    total_checks, passed_checks = _apply_filter_check(
+        condition=not _has_filters(amenity_filters),
+        label="amenities_no_filters",
+        total_checks=total_checks,
+        passed_checks=passed_checks,
+        failed_checks=failed_checks,
+    )
+    total_checks, passed_checks = _apply_filter_check(
+        condition=not _has_filters(service_filters),
+        label="services_no_filters",
+        total_checks=total_checks,
+        passed_checks=passed_checks,
+        failed_checks=failed_checks,
+    )
+    total_checks, passed_checks = _apply_filter_check(
+        condition=not (amenity_unknown_list or service_unknown_list),
+        label="unknown_filter_keys_used",
+        total_checks=total_checks,
+        passed_checks=passed_checks,
+        failed_checks=failed_checks,
+    )
+
+    return total_checks, passed_checks, 0, 0, failed_checks
+
+
+def _build_info_expected_filters_failure(
+    failure_context: dict[str, Any],
 ) -> dict[str, Any]:
-    """Construct a failure entry for expected filters evaluation.
+    """Build a failure entry for expected filter evaluation.
 
     Args:
-        turn_context: Dict containing idx, example_turn, and turn_output.
-        expected_tools: Expected tool list.
-        expected_filters: Expected filters with non-null keys only.
-        actual: Extracted tool filters for the turn.
-        reasons: Failure reasons for this turn.
+        failure_context: Dict containing turn data for failure reporting.
 
     Returns:
         Failure dict for LangSmith feedback reporting.
 
     """
-    idx = turn_context.get("idx")
+    idx = failure_context.get("idx")
+    example_turn = failure_context.get("example_turn")
+    turn_output = failure_context.get("turn_output")
+    expected = failure_context.get("expected")
+    amenity_filters = failure_context.get("amenity_filters")
+    service_filters = failure_context.get("service_filters")
+    amenity_unknown = failure_context.get("amenity_unknown")
+    service_unknown = failure_context.get("service_unknown")
+    failed_checks = failure_context.get("failed_checks")
+
     turn_index = idx if isinstance(idx, int) else -1
-    example_turn = turn_context.get("example_turn")
     example_turn_dict = example_turn if isinstance(example_turn, dict) else {}
-    turn_output = turn_context.get("turn_output")
     turn_output_dict = turn_output if isinstance(turn_output, dict) else {}
+    expected_dict = expected if isinstance(expected, dict) else {}
+    amenity_unknown_list = amenity_unknown if isinstance(amenity_unknown, list) else []
+    service_unknown_list = service_unknown if isinstance(service_unknown, list) else []
+    failed_checks_list = failed_checks if isinstance(failed_checks, list) else []
 
     return {
         "turn_index": turn_index,
-        "user_snippet": _truncate(str(example_turn_dict.get("user", "")), 140),
+        "user_snippet": _truncate(str(example_turn_dict.get("user", "")), 160),
         "route_pred": turn_output_dict.get("route_pred"),
-        "expected_tools": expected_tools,
-        "expected_filters": expected_filters,
-        "actual": actual,
-        "reasons": reasons,
+        "expected": expected_dict,
+        "actual_amenities": amenity_filters,
+        "actual_services": service_filters,
+        "unknown_amenities": amenity_unknown_list,
+        "unknown_services": service_unknown_list,
+        "failed_checks": failed_checks_list,
     }
+
+
+def eval_required_tool_calls_present(
+    run: Run,
+    example: Example,
+) -> list[dict[str, Any]]:
+    """Verify required tool calls were present for info and rooms turns.
+
+    Args:
+        run: LangSmith run object containing turn outputs and tool summaries.
+        example: LangSmith example object containing dataset turns.
+
+    Returns:
+        List of LangSmith feedback dicts reporting required tool usage.
+
+    """
+    turn_outputs = _iter_turn_outputs(run)
+    example_turns = _get_example_turns(example)
+    total_turns = min(len(turn_outputs), len(example_turns))
+    total_scored = 0
+    passing_turns = 0
+    failures: list[dict[str, Any]] = []
+    info_missing_counts = dict.fromkeys(_INFO_REQUIRED_TOOLS, 0)
+    rooms_missing_sql = 0
+
+    for idx in range(total_turns):
+        turn_output = turn_outputs[idx]
+        route_pred = turn_output.get("route_pred")
+        if route_pred not in {"info", "rooms"}:
+            continue
+        total_scored += 1
+        tool_summary = turn_output.get("tool_summary")
+        called_tools = _tools_called(tool_summary)
+        if route_pred == "info":
+            missing_tools = _missing_info_tools(called_tools)
+            if missing_tools:
+                for tool_name in missing_tools:
+                    if tool_name in info_missing_counts:
+                        info_missing_counts[tool_name] += 1
+                _append_required_tool_failure(
+                    {
+                        "failures": failures,
+                        "idx": idx,
+                        "route_pred": "info",
+                        "user_text": example_turns[idx].get("user"),
+                        "missing_tools": missing_tools,
+                        "called_tools": called_tools,
+                    },
+                )
+            else:
+                passing_turns += 1
+        elif called_tools.intersection(_SQL_TOOL_NAMES):
+            passing_turns += 1
+        else:
+            rooms_missing_sql += 1
+            _append_required_tool_failure(
+                {
+                    "failures": failures,
+                    "idx": idx,
+                    "route_pred": "rooms",
+                    "user_text": example_turns[idx].get("user"),
+                    "missing_tools": ["run_sql"],
+                    "called_tools": called_tools,
+                },
+            )
+
+    if total_scored == 0:
+        return [
+            {
+                "key": "required_tool_calls_skipped",
+                "score": 1.0,
+                "comment": "No info/rooms turns to score.",
+            },
+        ]
+
+    pass_rate = passing_turns / total_scored if total_scored else 0.0
+    return [
+        {
+            "key": "required_tool_calls_pass_rate",
+            "score": pass_rate,
+        },
+        {
+            "key": "required_tool_calls_scored_turns",
+            "value": total_scored,
+        },
+        {
+            "key": "required_tool_calls_missing_counts",
+            "value": {
+                "info_missing": info_missing_counts,
+                "rooms_missing_sql": rooms_missing_sql,
+            },
+        },
+        {
+            "key": "required_tool_calls_failures",
+            "value": failures,
+        },
+    ]
+
+
+def _tools_called(tool_summary: object) -> set[str]:
+    """Extract tool names from a tool summary list.
+
+    Args:
+        tool_summary: Tool summary list from run outputs.
+
+    Returns:
+        Set of tool name strings found in the summary.
+
+    """
+    if not isinstance(tool_summary, list):
+        return set()
+    tools: set[str] = set()
+    for entry in tool_summary:
+        if not isinstance(entry, dict):
+            continue
+        tool_name = entry.get("tool")
+        if isinstance(tool_name, str) and tool_name:
+            tools.add(tool_name)
+    return tools
+
+
+def _missing_info_tools(called_tools: set[str]) -> list[str]:
+    """Determine which required info tools are missing.
+
+    Args:
+        called_tools: Set of tool names called in the turn.
+
+    Returns:
+        List of missing tool names.
+
+    """
+    return [name for name in _INFO_REQUIRED_TOOLS if name not in called_tools]
+
+
+def _append_required_tool_failure(
+    failure_context: dict[str, Any],
+) -> None:
+    """Append a required-tool failure record, respecting the cap.
+
+    Args:
+        failure_context: Dict containing failure details for reporting.
+
+    """
+    failures = failure_context.get("failures")
+    if not isinstance(failures, list):
+        return
+    if len(failures) >= _REQUIRED_TOOL_FAILURES_MAX:
+        return
+
+    idx = failure_context.get("idx")
+    route_pred = failure_context.get("route_pred")
+    user_text = failure_context.get("user_text")
+    missing_tools = failure_context.get("missing_tools")
+    called_tools = failure_context.get("called_tools")
+
+    turn_index = idx if isinstance(idx, int) else -1
+    route_value = route_pred if isinstance(route_pred, str) else ""
+    missing_list = missing_tools if isinstance(missing_tools, list) else []
+    called_set = called_tools if isinstance(called_tools, set) else set()
+
+    failures.append(
+        {
+            "turn_index": turn_index,
+            "route_pred": route_value,
+            "user_snippet": _truncate(str(user_text or ""), 140),
+            "missing_tools": missing_list,
+            "called_tools": sorted(called_set)[:12],
+        },
+    )
 
 
 async def eval_rooms_outcome_and_invariants(

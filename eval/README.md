@@ -39,8 +39,7 @@ Rules:
 - Each turn requires:
   - `user`: string
   - `expected_route`: one of `rooms`, `info`, `none`
-  - `expect_injection`: boolean
-  - optional `injection_grade_rubric`: string (required when `expect_injection` is true)
+  - optional `expect_injection`: boolean
 - `tags`: optional list of strings.
 
 ## Create a dataset

@@ -72,6 +72,9 @@ class EvaluatorLimitsConfig:
         user_max_chars: Maximum characters from user text.
         info_filter_failures_max: Max stored failures for info filter checks.
         required_tool_failures_max: Max stored failures for required tool checks.
+        json_value_max: Maximum characters for JSON-encoded evaluator values.
+        rag_per_turn_json_max: Maximum characters for per-turn RAG JSON values.
+        tripwire_hits_max: Maximum tripwire hits to store.
 
     """
 
@@ -81,6 +84,9 @@ class EvaluatorLimitsConfig:
     user_max_chars: int
     info_filter_failures_max: int
     required_tool_failures_max: int
+    json_value_max: int
+    rag_per_turn_json_max: int
+    tripwire_hits_max: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -676,6 +682,14 @@ def parse_evaluator_limits_config(
         section,
         int,
     )
+    json_value_max = _get_required_value(data, "json_value_max", section, int)
+    rag_per_turn_json_max = _get_required_value(
+        data,
+        "rag_per_turn_json_max",
+        section,
+        int,
+    )
+    tripwire_hits_max = _get_required_value(data, "tripwire_hits_max", section, int)
 
     return EvaluatorLimitsConfig(
         context_max_chars=max(1, context_max_chars),
@@ -684,6 +698,9 @@ def parse_evaluator_limits_config(
         user_max_chars=max(1, user_max_chars),
         info_filter_failures_max=max(1, info_filter_failures_max),
         required_tool_failures_max=max(1, required_tool_failures_max),
+        json_value_max=max(1, json_value_max),
+        rag_per_turn_json_max=max(1, rag_per_turn_json_max),
+        tripwire_hits_max=max(1, tripwire_hits_max),
     )
 
 

@@ -176,9 +176,33 @@ def eval_routing_accuracy(run: Run, example: Example) -> list[dict[str, Any]]:
         },
         {
             "key": "route_confusions",
-            "value": confusions,
+            "value": _json_value(confusions),
         },
     ]
+
+
+def _json_value(obj: object, *, max_len: int | None = None) -> str:
+    """Serialize a value into JSON for safe LangSmith feedback.
+
+    Args:
+        obj: Object to serialize.
+        max_len: Optional maximum length for the JSON string.
+
+    Returns:
+        JSON string representation of the object, truncated when requested.
+
+    """
+    try:
+        payload = json.dumps(obj, ensure_ascii=False, default=str)
+    except Exception:  # noqa: BLE001
+        try:
+            payload = json.dumps(repr(obj), ensure_ascii=False)
+        except Exception:  # noqa: BLE001
+            payload = json.dumps("<unserializable>", ensure_ascii=False)
+
+    if max_len is not None and max_len > 0 and len(payload) > max_len:
+        return f"{payload[:max_len]}..."
+    return payload
 
 
 def _iter_turn_outputs(run: Run) -> list[dict[str, Any]]:
@@ -226,6 +250,7 @@ def eval_injection_tripwires(run: Run, example: Example) -> list[dict[str, Any]]
         List of LangSmith metric dicts with pass/fail and any hit details.
 
     """
+    limits = load_eval_config().evaluator_limits
     turn_outputs = _iter_turn_outputs(run)
     example_turns = _get_example_turns(example)
     inj_indices = _injection_turn_indices(example_turns)
@@ -252,7 +277,17 @@ def eval_injection_tripwires(run: Run, example: Example) -> list[dict[str, Any]]
         },
     ]
     if hits:
-        results.append({"key": "injection_tripwire_hits", "value": hits})
+        raw_hits = _json_value(hits)
+        if len(raw_hits) > limits.json_value_max:
+            results.append(
+                {
+                    "key": "injection_tripwire_hits",
+                    "value": _json_value(hits, max_len=limits.json_value_max),
+                    "comment": "JSON truncated",
+                },
+            )
+        else:
+            results.append({"key": "injection_tripwire_hits", "value": raw_hits})
 
     _append_tripwire_segment(
         {
@@ -387,12 +422,23 @@ def _append_tripwire_segment(
         },
     )
     if hit_count and prefix_value == "injection_only":
-        results.append(
-            {
-                "key": "injection_tripwire_hits_injection_only",
-                "value": hits_list,
-            },
-        )
+        limits = load_eval_config().evaluator_limits
+        raw_hits = _json_value(hits_list)
+        if len(raw_hits) > limits.json_value_max:
+            results.append(
+                {
+                    "key": "injection_tripwire_hits_injection_only",
+                    "value": _json_value(hits_list, max_len=limits.json_value_max),
+                    "comment": "JSON truncated",
+                },
+            )
+        else:
+            results.append(
+                {
+                    "key": "injection_tripwire_hits_injection_only",
+                    "value": raw_hits,
+                },
+            )
 
 
 def _injection_turn_indices(example_turns: list[dict[str, Any]]) -> set[int]:
@@ -585,6 +631,20 @@ def eval_info_expected_filters(run: Run, example: Example) -> list[dict[str, Any
         divergence_rate = 0.0
         divergence_comment = "No divergence checks performed."
 
+    raw_failures = _json_value(failures)
+    if len(raw_failures) > limits.json_value_max:
+        failures_value = _json_value(failures, max_len=limits.json_value_max)
+        failures_entry = {
+            "key": "info_expected_filters_failures",
+            "value": failures_value,
+            "comment": "JSON truncated",
+        }
+    else:
+        failures_entry = {
+            "key": "info_expected_filters_failures",
+            "value": raw_failures,
+        }
+
     return [
         {
             "key": "info_expected_filters_turns",
@@ -599,10 +659,7 @@ def eval_info_expected_filters(run: Run, example: Example) -> list[dict[str, Any
             "score": divergence_rate,
             "comment": divergence_comment,
         },
-        {
-            "key": "info_expected_filters_failures",
-            "value": failures,
-        },
+        failures_entry,
     ]
 
 
@@ -1001,55 +1058,18 @@ def eval_required_tool_calls_present(
         List of LangSmith feedback dicts reporting required tool usage.
 
     """
+    limits = load_eval_config().evaluator_limits
     turn_outputs = _iter_turn_outputs(run)
     example_turns = _get_example_turns(example)
-    total_turns = min(len(turn_outputs), len(example_turns))
-    total_scored = 0
-    passing_turns = 0
-    failures: list[dict[str, Any]] = []
-    info_missing_counts = dict.fromkeys(_INFO_REQUIRED_TOOLS, 0)
-    rooms_missing_sql = 0
-
-    for idx in range(total_turns):
-        turn_output = turn_outputs[idx]
-        route_pred = turn_output.get("route_pred")
-        if route_pred not in {"info", "rooms"}:
-            continue
-        total_scored += 1
-        tool_summary = turn_output.get("tool_summary")
-        called_tools = _tools_called(tool_summary)
-        if route_pred == "info":
-            missing_tools = _missing_info_tools(called_tools)
-            if missing_tools:
-                for tool_name in missing_tools:
-                    if tool_name in info_missing_counts:
-                        info_missing_counts[tool_name] += 1
-                _append_required_tool_failure(
-                    {
-                        "failures": failures,
-                        "idx": idx,
-                        "route_pred": "info",
-                        "user_text": example_turns[idx].get("user"),
-                        "missing_tools": missing_tools,
-                        "called_tools": called_tools,
-                    },
-                )
-            else:
-                passing_turns += 1
-        elif called_tools.intersection(_SQL_TOOL_NAMES):
-            passing_turns += 1
-        else:
-            rooms_missing_sql += 1
-            _append_required_tool_failure(
-                {
-                    "failures": failures,
-                    "idx": idx,
-                    "route_pred": "rooms",
-                    "user_text": example_turns[idx].get("user"),
-                    "missing_tools": ["run_sql"],
-                    "called_tools": called_tools,
-                },
-            )
+    results = _collect_required_tool_results(
+        turn_outputs=turn_outputs,
+        example_turns=example_turns,
+    )
+    total_scored = results["total_scored"]
+    passing_turns = results["passing_turns"]
+    info_missing_counts = results["info_missing_counts"]
+    rooms_missing_sql = results["rooms_missing_sql"]
+    failures = results["failures"]
 
     if total_scored == 0:
         return [
@@ -1061,6 +1081,35 @@ def eval_required_tool_calls_present(
         ]
 
     pass_rate = passing_turns / total_scored if total_scored else 0.0
+    missing_counts = {
+        "info_missing": info_missing_counts,
+        "rooms_missing_sql": rooms_missing_sql,
+    }
+    raw_missing_counts = _json_value(missing_counts)
+    if len(raw_missing_counts) > limits.json_value_max:
+        missing_entry = {
+            "key": "required_tool_calls_missing_counts",
+            "value": _json_value(missing_counts, max_len=limits.json_value_max),
+            "comment": "JSON truncated",
+        }
+    else:
+        missing_entry = {
+            "key": "required_tool_calls_missing_counts",
+            "value": raw_missing_counts,
+        }
+
+    raw_failures = _json_value(failures)
+    if len(raw_failures) > limits.json_value_max:
+        failures_entry = {
+            "key": "required_tool_calls_failures",
+            "value": _json_value(failures, max_len=limits.json_value_max),
+            "comment": "JSON truncated",
+        }
+    else:
+        failures_entry = {
+            "key": "required_tool_calls_failures",
+            "value": raw_failures,
+        }
     return [
         {
             "key": "required_tool_calls_pass_rate",
@@ -1070,18 +1119,159 @@ def eval_required_tool_calls_present(
             "key": "required_tool_calls_scored_turns",
             "value": total_scored,
         },
-        {
-            "key": "required_tool_calls_missing_counts",
-            "value": {
-                "info_missing": info_missing_counts,
-                "rooms_missing_sql": rooms_missing_sql,
-            },
-        },
-        {
-            "key": "required_tool_calls_failures",
-            "value": failures,
-        },
+        missing_entry,
+        failures_entry,
     ]
+
+
+def _collect_required_tool_results(
+    *,
+    turn_outputs: list[dict[str, Any]],
+    example_turns: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Collect aggregated required-tool results over all turns.
+
+    Args:
+        turn_outputs: Run turn outputs.
+        example_turns: Example turn inputs.
+
+    Returns:
+        Dict containing aggregate counts and failure details.
+
+    """
+    total_turns = min(len(turn_outputs), len(example_turns))
+    total_scored = 0
+    passing_turns = 0
+    failures: list[dict[str, Any]] = []
+    info_missing_counts = dict.fromkeys(_INFO_REQUIRED_TOOLS, 0)
+    rooms_missing_sql = 0
+
+    for idx in range(total_turns):
+        (
+            scored,
+            passed,
+            missing_info,
+            missing_rooms_sql,
+            failure_context,
+        ) = _score_required_tool_turn(
+            {
+                "idx": idx,
+                "turn_output": turn_outputs[idx],
+                "example_turn": example_turns[idx],
+            },
+        )
+        if not scored:
+            continue
+        total_scored += 1
+        if passed:
+            passing_turns += 1
+        if missing_info:
+            for tool_name in missing_info:
+                if tool_name in info_missing_counts:
+                    info_missing_counts[tool_name] += 1
+        if missing_rooms_sql:
+            rooms_missing_sql += 1
+        if failure_context:
+            failure_context["failures"] = failures
+            _append_required_tool_failure(failure_context)
+
+    return {
+        "total_scored": total_scored,
+        "passing_turns": passing_turns,
+        "info_missing_counts": info_missing_counts,
+        "rooms_missing_sql": rooms_missing_sql,
+        "failures": failures,
+    }
+
+
+def _score_required_tool_turn(
+    turn_context: dict[str, Any],
+) -> tuple[bool, bool, list[str], bool, dict[str, Any] | None]:
+    """Score a single turn for required tool usage.
+
+    Args:
+        turn_context: Dict containing example and run turn data.
+
+    Returns:
+        Tuple of (scored, passed, missing_info_tools, missing_rooms_sql,
+        failure_context or None).
+
+    """
+    idx = turn_context.get("idx")
+    turn_index = idx if isinstance(idx, int) else -1
+    turn_output = turn_context.get("turn_output")
+    output = turn_output if isinstance(turn_output, dict) else {}
+    example_turn = turn_context.get("example_turn")
+    example = example_turn if isinstance(example_turn, dict) else {}
+    route_pred = output.get("route_pred")
+    if route_pred not in {"info", "rooms"}:
+        return False, False, [], False, None
+
+    tool_summary = output.get("tool_summary")
+    called_tools = _tools_called(tool_summary)
+    if route_pred == "info":
+        missing_tools = _missing_info_tools(called_tools)
+        if missing_tools:
+            return (
+                True,
+                False,
+                missing_tools,
+                False,
+                _required_tool_failure_context(
+                    idx=turn_index,
+                    route_pred="info",
+                    user_text=example.get("user"),
+                    missing_tools=missing_tools,
+                    called_tools=called_tools,
+                ),
+            )
+        return True, True, [], False, None
+
+    if called_tools.intersection(_SQL_TOOL_NAMES):
+        return True, True, [], False, None
+    return (
+        True,
+        False,
+        [],
+        True,
+        _required_tool_failure_context(
+            idx=turn_index,
+            route_pred="rooms",
+            user_text=example.get("user"),
+            missing_tools=["run_sql"],
+            called_tools=called_tools,
+        ),
+    )
+
+
+def _required_tool_failure_context(
+    *,
+    idx: int,
+    route_pred: str,
+    user_text: object,
+    missing_tools: list[str],
+    called_tools: set[str],
+) -> dict[str, Any]:
+    """Build failure context for required tool checks.
+
+    Args:
+        idx: Turn index within the run/example.
+        route_pred: Route prediction string.
+        user_text: Raw user text for snippet extraction.
+        missing_tools: List of missing tool names.
+        called_tools: Set of called tool names.
+
+    Returns:
+        Dict payload for failure reporting.
+
+    """
+    return {
+        "idx": idx,
+        "route_pred": route_pred,
+        "user_text": user_text,
+        "missing_tools": missing_tools,
+        "called_tools": called_tools,
+    }
 
 
 def _tools_called(tool_summary: object) -> set[str]:
@@ -1205,6 +1395,7 @@ def _score_rooms_tool_outcomes(
         rowcount presence check.
 
     """
+    limits = load_eval_config().evaluator_limits
     turn_outputs = _iter_turn_outputs(run)
     rooms_turns = [t for t in turn_outputs if t.get("route_pred") == "rooms"]
 
@@ -1244,7 +1435,20 @@ def _score_rooms_tool_outcomes(
         },
     ]
     if atomic_fail_details:
-        metrics.append({"key": "rooms_atomic_failures", "value": atomic_fail_details})
+        raw_failures = _json_value(atomic_fail_details)
+        if len(raw_failures) > limits.json_value_max:
+            metrics.append(
+                {
+                    "key": "rooms_atomic_failures",
+                    "value": _json_value(
+                        atomic_fail_details,
+                        max_len=limits.json_value_max,
+                    ),
+                    "comment": "JSON truncated",
+                },
+            )
+        else:
+            metrics.append({"key": "rooms_atomic_failures", "value": raw_failures})
     return metrics
 
 
@@ -1709,7 +1913,8 @@ async def eval_llm_rubrics(run: Run, example: Example) -> list[dict[str, Any]]:
         RuntimeError: If the judge model is unavailable on Developer API.
 
     """
-    model = load_eval_config().judge.model
+    cfg = load_eval_config()
+    model = cfg.judge.model
     example_turns = _get_example_turns(example)
     run_turns = _iter_turn_outputs(run)
     transcript = _format_transcript(example_turns, run_turns)
@@ -1769,7 +1974,7 @@ async def eval_llm_rubrics(run: Run, example: Example) -> list[dict[str, Any]]:
             },
             {
                 "key": "judge_raw_json",
-                "value": {"error": raw_comment},
+                "value": _json_value({"error": raw_comment}),
             },
         ]
 
@@ -1794,7 +1999,9 @@ async def eval_llm_rubrics(run: Run, example: Example) -> list[dict[str, Any]]:
             },
             {
                 "key": "judge_raw_json",
-                "value": {"error": "parse_failure", "raw_snippet": snippet},
+                "value": _json_value(
+                    {"error": "parse_failure", "raw_snippet": snippet},
+                ),
             },
         ]
 
@@ -1819,11 +2026,13 @@ async def eval_llm_rubrics(run: Run, example: Example) -> list[dict[str, Any]]:
             },
             {
                 "key": "judge_raw_json",
-                "value": {
-                    "error": error_message,
-                    "raw_snippet": snippet,
-                    "payload": parsed,
-                },
+                "value": _json_value(
+                    {
+                        "error": error_message,
+                        "raw_snippet": snippet,
+                        "payload": parsed,
+                    },
+                ),
             },
         ]
 
@@ -1849,7 +2058,7 @@ async def eval_llm_rubrics(run: Run, example: Example) -> list[dict[str, Any]]:
         },
         {
             "key": "judge_raw_json",
-            "value": parsed,
+            "value": _json_value(parsed),
         },
     ]
 
@@ -2085,13 +2294,15 @@ async def eval_rag_metrics_info_turns(
         List of LangSmith feedback dicts with per-turn Ragas scores and means.
 
     """
-    cfg = load_eval_config().ragas
-    max_turns = cfg.turns_max
-    max_contexts = cfg.contexts_max
-    max_context_chars = cfg.context_chars
-    max_query_chars = cfg.query_chars
-    max_response_chars = cfg.response_chars
-    max_reference_chars = cfg.reference_chars
+    cfg = load_eval_config()
+    ragas_cfg = cfg.ragas
+    limits = cfg.evaluator_limits
+    max_turns = ragas_cfg.turns_max
+    max_contexts = ragas_cfg.contexts_max
+    max_context_chars = ragas_cfg.context_chars
+    max_query_chars = ragas_cfg.query_chars
+    max_response_chars = ragas_cfg.response_chars
+    max_reference_chars = ragas_cfg.reference_chars
 
     turn_outputs, example_turns, reference_answers = _rag_extract_turn_inputs(
         run,
@@ -2187,6 +2398,16 @@ async def eval_rag_metrics_info_turns(
         "No references",
     )
 
+    raw_per_turn = _json_value(per_turn)
+    if len(raw_per_turn) > limits.rag_per_turn_json_max:
+        per_turn_entry = {
+            "key": "rag_per_turn",
+            "value": _json_value(per_turn, max_len=limits.rag_per_turn_json_max),
+            "comment": "JSON truncated",
+        }
+    else:
+        per_turn_entry = {"key": "rag_per_turn", "value": raw_per_turn}
+
     return [
         {
             "key": "rag_faithfulness_mean",
@@ -2206,10 +2427,7 @@ async def eval_rag_metrics_info_turns(
             "score": recall_mean,
             "comment": recall_comment,
         },
-        {
-            "key": "rag_per_turn",
-            "value": per_turn,
-        },
+        per_turn_entry,
     ]
 
 

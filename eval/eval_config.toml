@@ -1,10 +1,10 @@
 [experiment]
 # LangSmith dataset name to evaluate (required).
-dataset_name = "BlueHorizonEval_v1"
+dataset_name = "BlueHorizonEval_1case"
 # Prefix used when generating experiment names.
-experiment_prefix = "hotel-agent-eval"
+experiment_prefix = "hotel-agent-eval-1case"
 # Optional run notes appended to experiment names.
-run_notes = ""
+run_notes = "Small dataset of 1 item"
 # Maximum concurrent example evaluations.
 max_concurrency = 10
 # Base output directory for local evaluation artifacts.
@@ -37,6 +37,12 @@ user_max_chars = 800
 info_filter_failures_max = 25
 # Max stored failures included in evaluator outputs for required tool usage.
 required_tool_failures_max = 25
+# Maximum characters to keep when JSON-encoding evaluator detail values.
+json_value_max = 4000
+# Maximum characters to keep for large per-turn RAG detail JSON.
+rag_per_turn_json_max = 8000
+# Maximum number of injection tripwire hits to store.
+tripwire_hits_max = 200
 
 [rooms]
 # Filesystem path to the pickled rooms datasets used by eval resets.
@@ -45,7 +51,7 @@ data_path = "data/pandas"
 
 [orchestration]
 # Time in seconds to wait for OrchestrationManager readiness.
-ready_timeout_s = 60.0
+ready_timeout_s = 90.0
 
 [schema_slots]
 # Maximum active schemas (0 disables slot limiting).
@@ -69,17 +75,17 @@ model = "gemini-3-pro-preview"
 
 [ragas]
 # Maximum number of turns to score with Ragas.
-turns_max = 6
+turns_max = 10
 # Maximum number of retrieved contexts per turn.
-contexts_max = 6
+contexts_max = 10
 # Maximum characters per retrieved context.
-context_chars = 800
+context_chars = 5000
 # Maximum characters for the user query.
-query_chars = 600
+query_chars = 5000
 # Maximum characters for the assistant response.
-response_chars = 1200
+response_chars = 5000
 # Maximum characters for reference answers.
-reference_chars = 800
+reference_chars = 5000
 
 [stress]
 # Optional schema name override for stress runs (empty uses timestamp default).

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import platform
 import re
 from collections.abc import Iterable, Mapping, MutableMapping
 from dataclasses import dataclass
@@ -338,7 +339,9 @@ def _write_jsonl(path: Path, rows: Iterable[Mapping[str, object]]) -> None:
     """
     with path.open("w", encoding="utf-8") as handle:
         for row in rows:
-            handle.write(json.dumps(row, ensure_ascii=True) + "\n")
+            handle.write(
+                json.dumps(row, ensure_ascii=True, default=_json_default) + "\n",
+            )
 
 
 def _build_results_row(result: ResultLike | Mapping[str, object]) -> dict[str, object]:
@@ -507,9 +510,9 @@ def _collect_feedback(
     if isinstance(raw_feedback, Mapping):
         for key, payload in raw_feedback.items():
             if isinstance(payload, Mapping):
-                feedback[key] = dict(payload)
+                feedback[key] = _serialize_mapping(payload)
             else:
-                feedback[key] = {"value": payload}
+                feedback[key] = {"value": _json_default(payload)}
         return feedback
     if isinstance(raw_feedback, Iterable):
         for item in raw_feedback:
@@ -519,9 +522,9 @@ def _collect_feedback(
             if not key:
                 continue
             payload = {
-                "score": _get_attr(item, "score"),
-                "value": _get_attr(item, "value"),
-                "comment": _get_attr(item, "comment"),
+                "score": _json_default(_get_attr(item, "score")),
+                "value": _json_default(_get_attr(item, "value")),
+                "comment": _json_default(_get_attr(item, "comment")),
             }
             feedback[str(key)] = {k: v for k, v in payload.items() if v is not None}
     return feedback
@@ -731,6 +734,51 @@ def _build_error_summary(
     }
 
 
+def _serialize_mapping(payload: Mapping[str, object]) -> dict[str, object]:
+    """Serialize a mapping payload into JSON-safe primitives.
+
+    Args:
+        payload: Mapping payload from evaluation feedback.
+
+    Returns:
+        JSON-serializable dictionary.
+
+    """
+    return {key: _json_default(value) for key, value in payload.items()}
+
+
+def _json_default(value: object) -> object:
+    """Serialize unsupported types into JSON-safe structures.
+
+    Args:
+        value: Value to serialize.
+
+    Returns:
+        JSON-serializable representation.
+
+    """
+    if value is None:
+        serialized: object = None
+    elif isinstance(value, (str, int, float, bool)):
+        serialized = value
+    elif isinstance(value, Mapping):
+        serialized = _serialize_mapping(value)
+    elif isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
+        serialized = [_json_default(item) for item in value]
+    else:
+        model_dump = getattr(value, "model_dump", None)
+        dict_dump = getattr(value, "dict", None)
+        if callable(model_dump):
+            serialized = _json_default(model_dump())
+        elif callable(dict_dump):
+            serialized = _json_default(dict_dump())
+        elif hasattr(value, "__dict__"):
+            serialized = _json_default(vars(value))
+        else:
+            serialized = str(value)
+    return serialized
+
+
 def _get_attr(
     mapping_or_obj: Mapping[str, object] | SupportsAttrs | None,
     key: str,
@@ -774,4 +822,6 @@ def _as_attr_source(
 
 
 if __name__ == "__main__":
+    if platform.system() == "Windows":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     asyncio.run(main())

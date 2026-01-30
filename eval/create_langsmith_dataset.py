@@ -9,14 +9,7 @@ from typing import TYPE_CHECKING, Literal
 
 from dotenv import load_dotenv
 from langsmith import Client
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    ValidationError,
-    field_validator,
-    model_validator,
-)
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -41,56 +34,16 @@ class TurnInputModel(BaseModel):
 
     Attributes:
         user: End-user utterance for the turn.
-        expected_route: Expected agent route for the turn (rooms/info/none).
+        expected_route: Expected agent route for the turn (rooms/info/refuse).
         expect_injection: Whether the turn is an injection attempt.
-        injection_grade_rubric: Optional rubric for grading injection handling.
 
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
     user: str = Field(..., min_length=1)
-    expected_route: Literal["rooms", "info", "none"]
-    expect_injection: bool
-    injection_grade_rubric: str | None = None
-
-    @field_validator("injection_grade_rubric")
-    @classmethod
-    def _validate_rubric(cls, value: str | None) -> str | None:
-        """Validate optional injection rubric content.
-
-        Args:
-            value: Rubric text or ``None`` when omitted.
-
-        Returns:
-            The validated rubric text (or ``None``).
-
-        Raises:
-            ValueError: If a rubric is provided but is empty.
-
-        """
-        if value is None:
-            return value
-        if not value.strip():
-            msg = "injection_grade_rubric must be a non-empty string."
-            raise ValueError(msg)
-        return value
-
-    @model_validator(mode="after")
-    def _validate_injection_rubric(self) -> TurnInputModel:
-        """Require rubric when injection is expected.
-
-        Returns:
-            The validated model instance.
-
-        Raises:
-            ValueError: If injection is expected but no rubric is provided.
-
-        """
-        if self.expect_injection and not self.injection_grade_rubric:
-            msg = "injection_grade_rubric is required when expect_injection is true."
-            raise ValueError(msg)
-        return self
+    expected_route: Literal["info", "rooms", "refuse"]
+    expect_injection: bool = False
 
 
 class CaseInputModel(BaseModel):
@@ -103,7 +56,7 @@ class CaseInputModel(BaseModel):
 
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
     case_id: str = Field(..., min_length=1)
     turns: list[TurnInputModel] = Field(..., min_length=1)
@@ -146,24 +99,29 @@ def load_cases(path: Path) -> list[CaseInputModel]:
 
     cases: list[CaseInputModel] = []
     seen_ids: set[str] = set()
-    lines = path.read_text(encoding="utf-8").splitlines()
-    for line_no, raw in enumerate(lines, start=1):
-        if not raw.strip():
-            continue
-        try:
-            case = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            _raise(f"Line {line_no}: invalid JSON: {exc.msg}")
-        else:
+    with path.open(encoding="utf-8") as handle:
+        for line_no, raw in enumerate(handle, start=1):
+            if not raw.strip():
+                continue
             try:
-                validated = CaseInputModel.model_validate(case)
-            except ValidationError as exc:
-                _raise(f"Line {line_no}: {_format_validation_error(exc)}")
+                case = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                snippet = raw.strip().replace("\t", " ")[:120]
+                _raise(
+                    f"Line {line_no}: invalid JSON: {exc.msg}. Snippet: {snippet}",
+                )
             else:
-                if validated.case_id in seen_ids:
-                    _raise(f"Line {line_no}: duplicate case_id '{validated.case_id}'.")
-                seen_ids.add(validated.case_id)
-                cases.append(validated)
+                try:
+                    validated = CaseInputModel.model_validate(case)
+                except ValidationError as exc:
+                    _raise(f"Line {line_no}: {_format_validation_error(exc)}")
+                else:
+                    if validated.case_id in seen_ids:
+                        _raise(
+                            f"Line {line_no}: duplicate case_id '{validated.case_id}'.",
+                        )
+                    seen_ids.add(validated.case_id)
+                    cases.append(validated)
 
     if not cases:
         _raise("Cases file contained no examples.")
@@ -263,8 +221,24 @@ def main() -> None:
     if args.batch_size <= 0:
         _raise("--batch-size must be a positive integer.")
 
+    examples_uploaded = 0
     for batch in _chunked(examples, args.batch_size):
         client.create_examples(dataset_id=dataset_id, examples=batch)
+        examples_uploaded += len(batch)
+
+    route_counts = {"info": 0, "rooms": 0, "refuse": 0}
+    for case in cases:
+        for turn in case.turns:
+            route_counts[turn.expected_route] += 1
+
+    print(f"cases_loaded={len(cases)}")  # noqa: T201
+    print(f"examples_uploaded={examples_uploaded}")  # noqa: T201
+    print(  # noqa: T201
+        "routes_seen="
+        f"info:{route_counts['info']} "
+        f"rooms:{route_counts['rooms']} "
+        f"refuse:{route_counts['refuse']}",
+    )
 
 
 if __name__ == "__main__":

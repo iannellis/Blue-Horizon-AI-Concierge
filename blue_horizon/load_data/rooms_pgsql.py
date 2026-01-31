@@ -409,6 +409,7 @@ def reload_sql_tables() -> None:
         availability_status_def = build_enum_definition(availability_status_values)
 
         with psycopg.connect(conn_string) as conn:
+            conn.execute("SET search_path TO public;")
             setup_rooms_schema(conn, room_type_def, bed_type_def, room_status_def)
             register_room_type_enum(conn)
             insert_rooms_data(conn, df_rooms)

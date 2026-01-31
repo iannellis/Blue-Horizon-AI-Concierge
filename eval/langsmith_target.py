@@ -1220,13 +1220,9 @@ async def run_example(  # noqa: C901, PLR0912, PLR0915
             except Exception:
                 logger.exception("Failed to reset eval schema ContextVar")
 
-            try:
-                await schema_manager.drop_schema()
-            except Exception:
-                logger.exception("Failed to drop eval schema %s", schema_manager.schema)
-
     return {
         "turn_outputs": turn_outputs,
         "final_db_schema": schema_manager.schema,
+        "schema_slot_id": schema_manager.slot_id,
         "case_tags": case_tags,
     }

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 from typing import TYPE_CHECKING, Any, Protocol, TypeGuard, TypeVar, runtime_checkable
@@ -37,6 +38,8 @@ from ragas.metrics.collections import (
 )
 
 from eval.config import load_eval_config
+from eval.db_reset import drop_case_schema
+from eval.schema_slots import release_schema_slot
 
 try:  # Optional dependency for LangChain Gemini integration.
     from langchain_google_genai import ChatGoogleGenerativeAI as _ChatGoogleGenerativeAI
@@ -93,6 +96,8 @@ _RAGAS_METRICS: tuple[
 ] | None = None
 
 InstructorTypeVar = TypeVar("InstructorTypeVar", bound=BaseModel)
+
+logger = logging.getLogger(__name__)
 
 
 class AsyncFromSyncInstructorLLM(InstructorBaseRagasLLM):
@@ -1425,6 +1430,7 @@ async def eval_rooms_outcome_and_invariants(
     _ = example
     outputs = run.outputs or {}
     schema = outputs.get("final_db_schema")
+    slot_id = outputs.get("schema_slot_id")
     if not schema:
         return [
             {
@@ -1434,13 +1440,15 @@ async def eval_rooms_outcome_and_invariants(
             },
         ]
 
-    outcome_metrics = _score_rooms_tool_outcomes(run)
-    invariants_results = await _check_rooms_db_invariants(schema=str(schema))
-
-    return [
-        *outcome_metrics,
-        *invariants_results,
-    ]
+    try:
+        outcome_metrics = _score_rooms_tool_outcomes(run)
+        invariants_results = await _check_rooms_db_invariants(schema=str(schema))
+        return [
+            *outcome_metrics,
+            *invariants_results,
+        ]
+    finally:
+        await _drop_rooms_schema(schema=str(schema), slot_id=slot_id)
 
 
 def _score_rooms_tool_outcomes(
@@ -1885,6 +1893,27 @@ async def _ensure_eval_pool() -> AsyncConnectionPool[Any]:
         await pool.open()
         _EVAL_POOL = pool
         return pool
+
+
+async def _drop_rooms_schema(schema: str, slot_id: int | None) -> None:
+    """Drop the rooms evaluation schema and release its slot if needed.
+
+    Args:
+        schema: Schema name to drop.
+        slot_id: Slot identifier to release when non-null.
+
+    """
+    pool = await _ensure_eval_pool()
+    try:
+        await drop_case_schema(pool=pool, schema=schema)
+    except Exception:
+        logger.exception("Failed to drop rooms eval schema %s", schema)
+    if slot_id is None:
+        return
+    try:
+        await release_schema_slot(pool=pool, slot_id=int(slot_id))
+    except Exception:
+        logger.exception("Failed to release rooms eval slot %s", slot_id)
 
 
 async def _check_rooms_db_invariants(schema: str) -> list[dict[str, Any]]:

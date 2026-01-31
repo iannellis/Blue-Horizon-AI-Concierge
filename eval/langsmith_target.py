@@ -33,7 +33,7 @@ from blue_horizon.agents.information import (
     set_eval_info_tool_log,
 )
 from blue_horizon.agents.orchestration import OrchestrationManager
-from blue_horizon.agents.rooms_sql import reset_eval_schema, set_eval_schema
+from blue_horizon.agents.rooms import reset_eval_schema, set_eval_schema
 from blue_horizon.load_data.rooms_pgsql import get_pgsql_conn_string
 from eval.config import load_eval_config
 from eval.db_reset import create_case_schema, drop_case_schema

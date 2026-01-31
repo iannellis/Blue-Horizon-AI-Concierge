@@ -450,14 +450,14 @@ class AppConfig:
     Attributes:
         orchestration: Router/orchestrator settings.
         info: Information agent settings.
-        rooms_sql: Rooms SQL agent settings.
+        rooms: Rooms SQL agent settings.
         load_data: Data ingestion settings for local loaders.
 
     """
 
     orchestration: OrchestrationConfig
     info: InfoRagConfig
-    rooms_sql: RoomsSqlConfig
+    rooms: RoomsSqlConfig
     load_data: LoadDataConfig
 
 
@@ -557,11 +557,11 @@ def parse_info_config(data: Mapping[str, Any]) -> InfoRagConfig:
     )
 
 
-def parse_rooms_sql_config(data: Mapping[str, Any]) -> RoomsSqlConfig:
+def parse_rooms_config(data: Mapping[str, Any]) -> RoomsSqlConfig:
     """Parse the rooms SQL configuration from a dict.
 
     Args:
-        data: Dict containing the ``rooms_sql`` section.
+        data: Dict containing the ``rooms`` section.
 
     Returns:
         RoomsSqlConfig: Parsed rooms SQL configuration.
@@ -570,7 +570,7 @@ def parse_rooms_sql_config(data: Mapping[str, Any]) -> RoomsSqlConfig:
         ValueError: If required keys are missing or values are invalid.
 
     """
-    section = "rooms_sql"
+    section = "rooms"
     llm = _expect_table(data, "llm", section)
     agent = _expect_table(data, "agent", section)
     prompts = _expect_table(data, "prompts", section)
@@ -807,13 +807,13 @@ def parse_app_config(data: Mapping[str, Any]) -> AppConfig:
     """
     orchestration = _expect_table(data, "orchestration", "root")
     info = _expect_table(data, "info", "root")
-    rooms = _expect_table(data, "rooms_sql", "root")
+    rooms = _expect_table(data, "rooms", "root")
     load_data = _expect_table(data, "load_data", "root")
 
     return AppConfig(
         orchestration=parse_orchestration_config(orchestration),
         info=parse_info_config(info),
-        rooms_sql=parse_rooms_sql_config(rooms),
+        rooms=parse_rooms_config(rooms),
         load_data=parse_load_data_config(load_data),
     )
 

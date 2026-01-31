@@ -58,7 +58,7 @@ except Exception as _exc:  # noqa: BLE001
     _GENAI_IMPORT_ERROR = _exc
 
 try:  # Optional app import for DB URL lookup.
-    from blue_horizon.agents.rooms_sql import get_pgsql_db_url as _get_pgsql_db_url
+    from blue_horizon.agents.rooms import get_pgsql_db_url as _get_pgsql_db_url
 
     _PGSQL_IMPORT_ERROR: Exception | None = None
 except Exception as _exc:  # noqa: BLE001

@@ -52,7 +52,7 @@ from blue_horizon.agents.information import (
     get_redis_url,
 )
 from blue_horizon.agents.prompt_utils import load_packaged_text
-from blue_horizon.agents.rooms_sql import (
+from blue_horizon.agents.rooms import (
     RoomsAgentFactory,
     RoomsSqlResources,
     get_pgsql_db_url,
@@ -212,7 +212,7 @@ class OrchestrationResources:
         )
         self._info_agent = None
 
-        self._rooms_config = app_config.rooms_sql
+        self._rooms_config = app_config.rooms
         self._rooms_resources = RoomsSqlResources(
             pgsql_db_url=get_pgsql_db_url(),
             config=self._rooms_config,

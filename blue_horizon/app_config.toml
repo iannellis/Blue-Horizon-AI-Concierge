@@ -93,7 +93,7 @@ folder = "system_prompts"
 system_prompt_filename = "information.txt"
 
 # Non-secret configuration for the Rooms Agent.
-[rooms_sql.llm]
+[rooms.llm]
 # Chat model name. Keep this cheap if you're serving lots of traffic.
 model = "gpt-5.2"
 # 0.0 is best for deterministic SQL generation.
@@ -105,34 +105,34 @@ timeout_s = 20.0
 # Max retries for LLM requests.
 max_retries = 2
 
-[rooms_sql.prompts]
+[rooms.prompts]
 # Folder (relative to blue_horizon package root) containing prompt files
 folder = "system_prompts"
 # Prompt template filename inside the folder.
-system_prompt_filename = "rooms_sql.txt"
+system_prompt_filename = "rooms.txt"
 
-[rooms_sql.agent]
+[rooms.agent]
 # The default number of rooms to return to the user
 top_k = 4
 
-[rooms_sql.db.pool]
+[rooms.db.pool]
 # App-side pool. Even with Neon pooler, this provides sane backpressure.
 min_size = 1
 max_size = 10
 # Seconds to wait when acquiring a pooled connection before failing.
 timeout_s = 10.0
 
-[rooms_sql.db.guardrails]
+[rooms.db.guardrails]
 # Prevent huge responses from drowning your LLM.
 max_rows = 50
 # Restrict queries to known hotel tables. Good safety belt.
 allow_only_hotel_tables = true
 
-[rooms_sql.db.timeouts]
+[rooms.db.timeouts]
 # Postgres statement timeout (ms). Prevents long-running queries.
 statement_timeout_ms = 10000
 
-[rooms_sql.db.retry]
+[rooms.db.retry]
 # Retries for transient connection errors like connection closed unexpectedly.
 max_transient_retries = 1
 # Small backoff (seconds) before retry.

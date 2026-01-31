@@ -28,7 +28,7 @@ from uuid import uuid4
 from dotenv import load_dotenv
 from psycopg_pool import AsyncConnectionPool
 
-from blue_horizon.agents.rooms_sql import (
+from blue_horizon.agents.rooms import (
     get_pgsql_db_url,
     reset_eval_schema,
     set_eval_schema,

@@ -94,7 +94,7 @@ ENUM_TYPES: Final[tuple[str, ...]] = (
 # ============================
 
 
-def load_rooms_sql_config(config_path: Path | str | None = None) -> RoomsSqlConfig:
+def load_rooms_config(config_path: Path | str | None = None) -> RoomsSqlConfig:
     """Load the rooms SQL configuration section.
 
     For when using the rooms agent standalone.
@@ -108,7 +108,7 @@ def load_rooms_sql_config(config_path: Path | str | None = None) -> RoomsSqlConf
 
     """
     app_config = load_app_config(path=config_path)
-    return app_config.rooms_sql
+    return app_config.rooms
 
 
 # ============================

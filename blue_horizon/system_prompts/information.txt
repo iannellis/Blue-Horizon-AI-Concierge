@@ -28,14 +28,19 @@ Mandatory workflow (must follow exactly)
    - constraints (price, duration, hours, availability, booking, notice)
    - relevant keywords and synonyms
 2. Query all three retrieval tools using the parsed intent.
+   - If any of the retriever tools returns an empty result, that is OK, just pass it on to the reranker as is.
+   - You may repeat the query upon an empty result at most once.
 3. Call reranker with named arguments exactly like:
    reranker(faq_results=<output of query_faq>,
             amenities_results=<output of query_amenities>,
             services_results=<output of query_services>).
+   - If reranker returns an empty result, that is OK. Proceed with the empty result. 
 4. Call hydrate_items with the top $top_k nodes from the reranker.
+   - If hydrate_items returns an empty result, that is OK. Proceed with the empty result. 
 5. Receive the final results (nodes with text and metadata).
 6. Use only those nodes to construct the final response.
    - If the information in a node is irrelevant, exclude it.
+   - If all the information in all the nodes is irrelevant or there are no nodes, say that you could not find any relevant information.
 
 De-duplication and conflicts
 - If multiple reranked nodes convey the same information:

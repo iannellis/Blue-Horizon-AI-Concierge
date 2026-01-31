@@ -18,10 +18,11 @@ import asyncio
 import json
 import os
 import re
-from typing import TYPE_CHECKING, Any, Protocol, TypeGuard, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, TypeGuard, TypeVar, runtime_checkable
 
 from psycopg import sql
 from psycopg_pool import AsyncConnectionPool
+from pydantic import BaseModel
 from ragas.embeddings.base import (
     BaseRagasEmbedding,
     BaseRagasEmbeddings,
@@ -90,6 +91,66 @@ _RAGAS_METRICS: tuple[
     ContextPrecision,
     ContextRecall,
 ] | None = None
+
+InstructorTypeVar = TypeVar("InstructorTypeVar", bound=BaseModel)
+
+
+class AsyncFromSyncInstructorLLM(InstructorBaseRagasLLM):
+    """Wrap a sync Instructor LLM to provide async calls via threads.
+
+    This keeps the google-genai client flow while satisfying Ragas collection
+    metrics that require an async-capable InstructorBaseRagasLLM.
+
+    """
+
+    _sync_llm: InstructorBaseRagasLLM
+
+    def __init__(self, *, sync_llm: InstructorBaseRagasLLM) -> None:
+        """Initialize the wrapper with a sync Instructor LLM.
+
+        Args:
+            sync_llm: Synchronous Instructor LLM instance.
+
+        """
+        self._sync_llm = sync_llm
+
+    def generate(
+        self,
+        prompt: str,
+        response_model: type[InstructorTypeVar],
+    ) -> InstructorTypeVar:
+        """Generate a response using the wrapped sync LLM.
+
+        Args:
+            prompt: Prompt to send to the LLM.
+            response_model: Pydantic model used for structured output.
+
+        Returns:
+            Parsed structured response from the LLM.
+
+        """
+        return self._sync_llm.generate(prompt, response_model)
+
+    async def agenerate(
+        self,
+        prompt: str,
+        response_model: type[InstructorTypeVar],
+    ) -> InstructorTypeVar:
+        """Generate a response asynchronously using a worker thread.
+
+        Args:
+            prompt: Prompt to send to the LLM.
+            response_model: Pydantic model used for structured output.
+
+        Returns:
+            Parsed structured response from the LLM.
+
+        """
+        return await asyncio.to_thread(
+            self._sync_llm.generate,
+            prompt,
+            response_model,
+        )
 
 _TRIPWIRE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
@@ -269,11 +330,11 @@ def eval_injection_tripwires(run: Run, example: Example) -> list[dict[str, Any]]
         },
         {
             "key": "injection_turns_labeled",
-            "value": len(inj_indices),
+            "score": float(len(inj_indices)),
         },
         {
             "key": "injection_turns_scanned",
-            "value": inj_scanned,
+            "score": float(inj_scanned),
         },
     ]
     if hits:
@@ -648,7 +709,7 @@ def eval_info_expected_filters(run: Run, example: Example) -> list[dict[str, Any
     return [
         {
             "key": "info_expected_filters_turns",
-            "value": labeled_turns,
+            "score": float(labeled_turns),
         },
         {
             "key": "info_expected_filters_pass_rate",
@@ -1117,7 +1178,7 @@ def eval_required_tool_calls_present(
         },
         {
             "key": "required_tool_calls_scored_turns",
-            "value": total_scored,
+            "score": float(total_scored),
         },
         missing_entry,
         failures_entry,
@@ -2510,11 +2571,12 @@ def _build_ragas_llm() -> InstructorBaseRagasLLM:
 
     """
     client = _get_google_genai_client()
-    return llm_factory(
+    sync_llm = llm_factory(
         model="gemini-3-pro-preview",
         provider="google",
         client=client,
     )
+    return AsyncFromSyncInstructorLLM(sync_llm=sync_llm)
 
 
 def _get_google_genai_client() -> object:
@@ -2528,6 +2590,8 @@ def _get_google_genai_client() -> object:
         msg = "google-genai SDK is required for Ragas Gemini models."
         raise RuntimeError(msg) from _GENAI_IMPORT_ERROR
     return _genai.Client()
+
+
 
 
 def _build_ragas_embeddings() -> BaseRagasEmbeddings | BaseRagasEmbedding:

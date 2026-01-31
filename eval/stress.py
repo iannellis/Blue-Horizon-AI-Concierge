@@ -224,7 +224,7 @@ async def _start_orchestration() -> OrchestrationManager:
         TimeoutError: If readiness is not reached within 30 seconds.
 
     """
-    orchestration = OrchestrationManager()
+    orchestration = OrchestrationManager(prune_tool_messages=False)
     await orchestration.start()
 
     ready_deadline = time.perf_counter() + 30.0

@@ -388,11 +388,15 @@ class OrchestrationAgentFactory:
         """
         self._resources = resources
 
-    def build(self) -> CompiledStateGraph:  # noqa: C901, PLR0915
+    def build(self, *, prune_tool_messages: bool = True) -> CompiledStateGraph:  # noqa: C901, PLR0915
         """Compile and return the orchestration graph.
 
         Returns:
             Compiled orchestration state graph.
+
+        Args:
+            prune_tool_messages: Whether to remove tool messages from the returned
+                message history via the finalize node.
 
         """
         resources = self._resources
@@ -627,7 +631,8 @@ class OrchestrationAgentFactory:
         graph.add_node("rooms", RunnableLambda(rooms_node))
         graph.add_node("refuse", RunnableLambda(refuse_node))
         graph.add_node("error", RunnableLambda(error_node))
-        graph.add_node("finalize", RunnableLambda(finalize_node))
+        if prune_tool_messages:
+            graph.add_node("finalize", RunnableLambda(finalize_node))
 
         graph.add_edge(START, "router")
         graph.add_conditional_edges(
@@ -636,11 +641,17 @@ class OrchestrationAgentFactory:
             {"info": "info", "rooms": "rooms", "refuse": "refuse", "error": "error"},
         )
 
-        graph.add_edge("info", "finalize")
-        graph.add_edge("rooms", "finalize")
-        graph.add_edge("refuse", "finalize")
-        graph.add_edge("error", "finalize")
-        graph.add_edge("finalize", END)
+        if prune_tool_messages:
+            graph.add_edge("info", "finalize")
+            graph.add_edge("rooms", "finalize")
+            graph.add_edge("refuse", "finalize")
+            graph.add_edge("error", "finalize")
+            graph.add_edge("finalize", END)
+        else:
+            graph.add_edge("info", END)
+            graph.add_edge("rooms", END)
+            graph.add_edge("refuse", END)
+            graph.add_edge("error", END)
 
         return graph.compile(checkpointer=resources.get_checkpointer())
 
@@ -669,6 +680,7 @@ class OrchestrationManager:
         "_factory",
         "_init_task",
         "_lock",
+        "_prune_tool_messages",
         "_resources",
         "_stop_event",
     )
@@ -680,8 +692,14 @@ class OrchestrationManager:
     _lock: asyncio.Lock
     _stop_event: asyncio.Event
 
-    def __init__(self) -> None:
-        """Initialize the orchestration manager."""
+    def __init__(self, *, prune_tool_messages: bool = True) -> None:
+        """Initialize the orchestration manager.
+
+        Args:
+            prune_tool_messages: Whether to remove tool messages from message
+                history via the finalize node.
+
+        """
         self._resources = OrchestrationResources()
         self._factory = OrchestrationAgentFactory(resources=self._resources)
 
@@ -689,6 +707,7 @@ class OrchestrationManager:
         self._init_task = None
         self._lock = asyncio.Lock()
         self._stop_event = asyncio.Event()
+        self._prune_tool_messages = prune_tool_messages
 
     @property
     def is_ready(self) -> bool:
@@ -848,7 +867,9 @@ class OrchestrationManager:
                     if self._agent is None:
                         logger.info("Initializing orchestration resources...")
                         await self._resources.startup_check()
-                        self._agent = self._factory.build()
+                        self._agent = self._factory.build(
+                            prune_tool_messages=self._prune_tool_messages,
+                        )
                         logger.info("Orchestration agent ready")
                         backoff = cfg.init_retry_base_s
 

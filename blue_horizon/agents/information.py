@@ -31,6 +31,7 @@ import math
 import os
 from collections import OrderedDict
 from collections.abc import Iterable, Mapping, Sequence
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import lru_cache
@@ -67,6 +68,87 @@ if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class EvalInfoToolLog:
+    """Capture tool activity and contexts for evaluation runs.
+
+    Attributes:
+        tool_summary: Compact tool summaries for LangSmith eval.
+        contexts_used: Hydrated context strings used in responses.
+
+    """
+
+    tool_summary: list[dict[str, Any]]
+    contexts_used: list[str]
+
+
+_EVAL_INFO_TOOL_LOG: ContextVar[EvalInfoToolLog | None] = ContextVar(
+    "EVAL_INFO_TOOL_LOG",
+    default=None,
+)
+
+
+def set_eval_info_tool_log(log: EvalInfoToolLog) -> Token[EvalInfoToolLog | None]:
+    """Set the per-task evaluation tool log container.
+
+    Args:
+        log: Log container to use for the current task.
+
+    Returns:
+        Token used to reset the ContextVar to its prior state.
+
+    """
+    return _EVAL_INFO_TOOL_LOG.set(log)
+
+
+def reset_eval_info_tool_log(token: Token[EvalInfoToolLog | None]) -> None:
+    """Reset the evaluation tool log ContextVar.
+
+    Args:
+        token: Token returned by ``set_eval_info_tool_log``.
+
+    """
+    _EVAL_INFO_TOOL_LOG.reset(token)
+
+
+def get_eval_info_tool_log() -> EvalInfoToolLog | None:
+    """Return the active evaluation tool log container, if any.
+
+    Returns:
+        EvalInfoToolLog when set, otherwise ``None``.
+
+    """
+    return _EVAL_INFO_TOOL_LOG.get()
+
+
+def _log_eval_tool_summary(summary: dict[str, Any]) -> None:
+    """Append a tool summary entry when evaluation logging is enabled.
+
+    Args:
+        summary: Tool summary payload to append.
+
+    """
+    log = get_eval_info_tool_log()
+    if log is None:
+        return
+    log.tool_summary.append(summary)
+
+
+def _log_eval_contexts(contexts: Iterable[str]) -> None:
+    """Append hydrated contexts when evaluation logging is enabled.
+
+    Args:
+        contexts: Iterable of context strings.
+
+    """
+    log = get_eval_info_tool_log()
+    if log is None:
+        return
+    for context in contexts:
+        if context:
+            log.contexts_used.append(str(context))
 
 
 # ============================
@@ -1185,7 +1267,7 @@ class InfoAgentFactory:
         self._resources = resources
         self._config = config
 
-    def build(self) -> CompiledStateGraph:  # noqa: C901
+    def build(self) -> CompiledStateGraph:  # noqa: C901, PLR0915
         """Build and return a compiled agent graph.
 
         Returns:
@@ -1244,13 +1326,36 @@ class InfoAgentFactory:
 
             """
             try:
-                return await resources.retrieve_faq(query)
+                results = await resources.retrieve_faq(query)
             except OperationalError as exc:
                 logger.warning("query_faq operational failure: %s", exc)
+                _log_eval_tool_summary(
+                    {
+                        "tool": "query_faq",
+                        "status": "error",
+                        "error": str(exc),
+                    },
+                )
                 return []
             except Exception as exc:  # noqa: BLE001
                 _log_tool_failure("query_faq", exc)
+                _log_eval_tool_summary(
+                    {
+                        "tool": "query_faq",
+                        "status": "error",
+                        "error": str(exc),
+                    },
+                )
                 return []
+            else:
+                _log_eval_tool_summary(
+                    {
+                        "tool": "query_faq",
+                        "status": "ok",
+                        "count": len(results),
+                    },
+                )
+                return results
 
         @tool(parse_docstring=True)
         async def query_amenities(  # noqa: PLR0913
@@ -1296,17 +1401,40 @@ class InfoAgentFactory:
                 max_duration_minutes=max_duration_minutes,
             )
             try:
-                return await resources.retrieve_filtered_catalog_items(
+                results = await resources.retrieve_filtered_catalog_items(
                     source=Source.AMENITIES,
                     query=query,
                     filters=filters,
                 )
             except OperationalError as exc:
                 logger.warning("query_amenities operational failure: %s", exc)
+                _log_eval_tool_summary(
+                    {
+                        "tool": "query_amenities",
+                        "status": "error",
+                        "error": str(exc),
+                    },
+                )
                 return []
             except Exception as exc:  # noqa: BLE001
                 _log_tool_failure("query_amenities", exc)
+                _log_eval_tool_summary(
+                    {
+                        "tool": "query_amenities",
+                        "status": "error",
+                        "error": str(exc),
+                    },
+                )
                 return []
+            else:
+                _log_eval_tool_summary(
+                    {
+                        "tool": "query_amenities",
+                        "status": "ok",
+                        "count": len(results),
+                    },
+                )
+                return results
 
         @tool(parse_docstring=True)
         async def query_services(  # noqa: PLR0913
@@ -1361,17 +1489,40 @@ class InfoAgentFactory:
                 max_duration_minutes=max_duration_minutes,
             )
             try:
-                return await resources.retrieve_filtered_catalog_items(
+                results = await resources.retrieve_filtered_catalog_items(
                     source=Source.SERVICES,
                     query=query,
                     filters=filters,
                 )
             except OperationalError as exc:
                 logger.warning("query_services operational failure: %s", exc)
+                _log_eval_tool_summary(
+                    {
+                        "tool": "query_services",
+                        "status": "error",
+                        "error": str(exc),
+                    },
+                )
                 return []
             except Exception as exc:  # noqa: BLE001
                 _log_tool_failure("query_services", exc)
+                _log_eval_tool_summary(
+                    {
+                        "tool": "query_services",
+                        "status": "error",
+                        "error": str(exc),
+                    },
+                )
                 return []
+            else:
+                _log_eval_tool_summary(
+                    {
+                        "tool": "query_services",
+                        "status": "ok",
+                        "count": len(results),
+                    },
+                )
+                return results
 
         @tool(args_schema=RerankInput)
         def reranker(
@@ -1394,7 +1545,15 @@ class InfoAgentFactory:
 
             """
             all_results = [*faq_results, *amenities_results, *services_results]
-            return heapq.nlargest(top_k, all_results, key=lambda x: x.score)
+            ranked = heapq.nlargest(top_k, all_results, key=lambda x: x.score)
+            _log_eval_tool_summary(
+                {
+                    "tool": "reranker",
+                    "status": "ok",
+                    "count": len(ranked),
+                },
+            )
+            return ranked
 
         @tool(args_schema=HydrateInput)
         async def hydrate_items(items: list[RetrievalItemLite]) -> list[RetrievalItem]:
@@ -1409,13 +1568,43 @@ class InfoAgentFactory:
 
             """
             try:
-                return await resources.hydrate(items, best_effort=True)
+                hydrated = await resources.hydrate(items, best_effort=True)
             except OperationalError as exc:
                 logger.warning("hydrate_items operational failure: %s", exc)
+                _log_eval_tool_summary(
+                    {
+                        "tool": "hydrate_items",
+                        "status": "error",
+                        "error": str(exc),
+                    },
+                )
                 return []
             except Exception as exc:  # noqa: BLE001
                 _log_tool_failure("hydrate_items", exc)
+                _log_eval_tool_summary(
+                    {
+                        "tool": "hydrate_items",
+                        "status": "error",
+                        "error": str(exc),
+                    },
+                )
                 return []
+            else:
+                _log_eval_tool_summary(
+                    {
+                        "tool": "hydrate_items",
+                        "status": "ok",
+                        "count": len(hydrated),
+                    },
+                )
+                _log_eval_contexts(
+                    [
+                        item.text
+                        for item in hydrated
+                        if isinstance(item.text, str) and item.text
+                    ],
+                )
+                return hydrated
 
         system_prompt = resources.get_system_prompt()
 

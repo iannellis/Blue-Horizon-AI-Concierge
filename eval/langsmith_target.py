@@ -17,10 +17,21 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from langchain_core.callbacks import AsyncCallbackHandler
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    ToolMessage,
+)
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from blue_horizon.agents.information import (
+    EvalInfoToolLog,
+    get_eval_info_tool_log,
+    reset_eval_info_tool_log,
+    set_eval_info_tool_log,
+)
 from blue_horizon.agents.orchestration import OrchestrationManager
 from blue_horizon.agents.rooms_sql import reset_eval_schema, set_eval_schema
 from blue_horizon.load_data.rooms_pgsql import get_pgsql_conn_string
@@ -434,6 +445,116 @@ def _extract_assistant_text(messages: list[BaseMessage]) -> str:
     return ""
 
 
+def _extract_tool_payload(output: object) -> object:
+    """Extract the tool payload from LangChain tool outputs.
+
+    Args:
+        output: Tool output payload, which may be a ToolMessage.
+
+    Returns:
+        The raw payload content for downstream parsing.
+
+    """
+    if isinstance(output, ToolMessage):
+        if output.artifact is not None:
+            return output.artifact
+        return output.content
+    return output
+
+
+def _parse_tool_content(content: object) -> object:
+    """Parse tool message content into Python objects when possible.
+
+    Args:
+        content: Tool content payload, often a JSON string.
+
+    Returns:
+        Parsed object when JSON is detected, otherwise the original content.
+
+    """
+    parsed: object = content
+    if isinstance(content, str):
+        stripped = content.strip()
+        if stripped.startswith(("[", "{")) and stripped.endswith(("]", "}")):
+            try:
+                parsed = json.loads(stripped)
+            except json.JSONDecodeError:
+                parsed = content
+    elif isinstance(content, list):
+        for block in content:
+            if not isinstance(block, Mapping):
+                continue
+            if block.get("type") == "json" and "json" in block:
+                parsed = block.get("json")
+                break
+            if block.get("type") == "text" and "text" in block:
+                text = block.get("text")
+                if isinstance(text, str):
+                    parsed = _parse_tool_content(text)
+                    break
+    return parsed
+
+def _tool_messages_since_last_user(
+    messages: list[BaseMessage],
+) -> list[ToolMessage]:
+    """Collect tool messages that occurred after the last user message.
+
+    Args:
+        messages: Ordered list of LangChain messages.
+
+    Returns:
+        List of ToolMessage objects for the most recent turn.
+
+    """
+    last_user_index = -1
+    for idx in range(len(messages) - 1, -1, -1):
+        if isinstance(messages[idx], HumanMessage):
+            last_user_index = idx
+            break
+    if last_user_index == -1:
+        return []
+    return [
+        message
+        for message in messages[last_user_index + 1 :]
+        if isinstance(message, ToolMessage)
+    ]
+
+
+def _extract_hydrate_contexts_from_messages(
+    messages: list[BaseMessage],
+) -> list[str]:
+    """Extract hydrate_items contexts from tool messages.
+
+    Args:
+        messages: Ordered list of LangChain messages.
+
+    Returns:
+        List of context strings extracted from hydrate_items tool payloads.
+
+    """
+    contexts: list[str] = []
+    for tool_message in _tool_messages_since_last_user(messages):
+        tool_name = getattr(tool_message, "name", None)
+        if tool_name != "hydrate_items":
+            continue
+        payload = _extract_tool_payload(tool_message)
+        payload = _parse_tool_content(payload)
+        if not isinstance(payload, list):
+            continue
+        for item in payload:
+            try:
+                parsed = HydratedItemOutput.model_validate(
+                    item,
+                    from_attributes=True,
+                )
+            except ValidationError:
+                continue
+            if parsed.text is None:
+                continue
+            contexts.append(str(parsed.text))
+    return contexts
+
+
 async def ensure_orchestration_ready() -> OrchestrationManager:
     """Ensure the shared orchestration manager is initialized and ready.
 
@@ -450,7 +571,7 @@ async def ensure_orchestration_ready() -> OrchestrationManager:
 
     async with _ORCHESTRATION_LOCK:
         if _ORCHESTRATION is None:
-            _ORCHESTRATION = OrchestrationManager()
+            _ORCHESTRATION = OrchestrationManager(prune_tool_messages=False)
         if _ORCHESTRATION.is_ready:
             return _ORCHESTRATION
         await _ORCHESTRATION.start()
@@ -764,8 +885,10 @@ class EvalCaptureCallback(AsyncCallbackHandler):
 
         """
         _ = run_id, parent_run_id, tags, kwargs
-        tool_name = _get_tool_name(kwargs)
         entry = self._pending_tool_entries.pop(run_id, None)
+        tool_name = _get_tool_name(kwargs)
+        if tool_name is None and isinstance(entry, dict):
+            tool_name = entry.get("tool")
         if tool_name == "run_sql":
             self._capture_run_sql(output, entry)
             return
@@ -916,14 +1039,16 @@ class EvalCaptureCallback(AsyncCallbackHandler):
             base_entry: Optional base entry with input previews.
 
         """
-        if not isinstance(output, list):
+        payload = _extract_tool_payload(output)
+        payload = _parse_tool_content(payload)
+        if not isinstance(payload, list):
             return
         summary = dict(base_entry or {})
         summary["tool"] = "hydrate_items"
         summary["status"] = summary.get("status") or "ok"
-        summary["count"] = len(output)
+        summary["count"] = len(payload)
         parsed_items: list[HydratedItemOutput] = []
-        for item in output:
+        for item in payload:
             if isinstance(item, HydratedItemOutput):
                 parsed_items.append(item)
                 continue
@@ -971,7 +1096,9 @@ def _get_tool_name(metadata: dict[str, Any]) -> str | None:
     return None
 
 
-async def run_example(example: dict[str, Any]) -> dict[str, Any]:
+async def run_example(  # noqa: C901, PLR0912, PLR0915
+    example: dict[str, Any],
+) -> dict[str, Any]:
     """Run a single LangSmith example through the orchestration pipeline.
 
     Args:
@@ -1012,13 +1139,20 @@ async def run_example(example: dict[str, Any]) -> dict[str, Any]:
                 "db_schema": schema_manager.schema,
             }
 
-            result = await orchestration_mgr.ainvoke(
-                thread_id=thread_id,
-                user_text=user_text,
-                callbacks=[callback],
-                tags=tags,
-                metadata=metadata,
+            token = set_eval_info_tool_log(
+                EvalInfoToolLog(tool_summary=[], contexts_used=[]),
             )
+            try:
+                result = await orchestration_mgr.ainvoke(
+                    thread_id=thread_id,
+                    user_text=user_text,
+                    callbacks=[callback],
+                    tags=tags,
+                    metadata=metadata,
+                )
+            finally:
+                log = get_eval_info_tool_log()
+                reset_eval_info_tool_log(token)
 
             messages_raw = result.get("messages", [])
             messages = messages_raw if isinstance(messages_raw, list) else []
@@ -1030,29 +1164,51 @@ async def run_example(example: dict[str, Any]) -> dict[str, Any]:
                 if isinstance(fallback_route, str):
                     route_pred = fallback_route
 
+            tool_summary = callback.tool_summary
+            contexts_used = callback.contexts_used
+            if not contexts_used:
+                contexts_used = _extract_hydrate_contexts_from_messages(messages)
+            if log is not None:
+                if not tool_summary and log.tool_summary:
+                    tool_summary = list(log.tool_summary)
+                if not contexts_used and log.contexts_used:
+                    contexts_used = list(log.contexts_used)
+                if log.tool_summary and tool_summary:
+                    logged_names = {
+                        entry.get("tool")
+                        for entry in tool_summary
+                        if isinstance(entry, dict)
+                    }
+                    for entry in log.tool_summary:
+                        if (
+                            isinstance(entry, dict)
+                            and entry.get("tool") not in logged_names
+                        ):
+                            tool_summary.append(entry)
+
             turn_outputs.append(
                 {
                     "assistant_text": assistant_text,
                     "route_pred": route_pred,
-                    "tool_summary": callback.tool_summary,
-                    "contexts_used": callback.contexts_used,
+                    "tool_summary": tool_summary,
+                    "contexts_used": contexts_used,
                 },
             )
             if (
-                callback.contexts_used
+                contexts_used
                 and not any(
                     entry.get("tool") == "hydrate_items"
-                    for entry in callback.tool_summary
+                    for entry in tool_summary
                     if isinstance(entry, dict)
                 )
             ):
-                callback.tool_summary.append(
+                tool_summary.append(
                     {
                         "tool": "hydrate_items",
                         "status": "ok",
                         "input_keys": ["num_items"],
                         "input_preview": _preview(
-                            {"num_items": len(callback.contexts_used)},
+                            {"num_items": len(contexts_used)},
                         ),
                     },
                 )

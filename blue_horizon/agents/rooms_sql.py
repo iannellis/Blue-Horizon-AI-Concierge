@@ -71,7 +71,14 @@ def reset_eval_schema(token: Token[str | None]) -> None:
             previous value.
 
     """
-    EVAL_SCHEMA.reset(token)
+    try:
+        EVAL_SCHEMA.reset(token)
+    except ValueError:
+        logger.warning(
+            "Eval schema ContextVar reset failed due to context mismatch; "
+            "clearing schema instead.",
+        )
+        EVAL_SCHEMA.set(None)
 
 # Enums used in SQL
 ENUM_TYPES: Final[tuple[str, ...]] = (
@@ -198,6 +205,7 @@ async def fetch_rooms_metadata(
             await psycopg.AsyncConnection.connect(pgsql_db_url) as conn,
             conn.cursor() as cur,
         ):
+            await cur.execute("SET search_path TO public;")
             for enum_type in ENUM_TYPES:
                 query = sql.SQL("SELECT enum_range(NULL::{});").format(
                     sql.Identifier(enum_type),
@@ -662,6 +670,8 @@ class RoomsSqlResources:
                                 sql.Identifier(schema),
                             ),
                         )
+                    else:
+                        await cur.execute("SET search_path TO public;")
 
                     # NOTE: psycopg's type stubs expect a LiteralString for `execute()`.
                     # This cast is only to satisfy static type checkers. Runtime safety

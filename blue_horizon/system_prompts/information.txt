@@ -29,7 +29,6 @@ Mandatory workflow (must follow exactly)
    - relevant keywords and synonyms
 2. Query all three retrieval tools using the parsed intent.
    - If any of the retriever tools returns an empty result, that is OK, just pass it on to the reranker as is.
-   - You may repeat the query upon an empty result at most once.
 3. Call reranker with named arguments exactly like:
    reranker(faq_results=<output of query_faq>,
             amenities_results=<output of query_amenities>,

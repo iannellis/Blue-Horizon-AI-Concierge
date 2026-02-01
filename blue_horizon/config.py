@@ -135,12 +135,18 @@ class InfoRedisConfig:
         connect_timeout_s: Timeout for establishing new Redis connections.
         socket_timeout_s: Socket read/write timeout in seconds.
         health_check_interval_s: Interval between health checks on idle connections.
+        retry_max_retries: Retry count for transient Redis failures.
+        retry_backoff_base_s: Base backoff (seconds) for Redis retries.
+        retry_backoff_max_s: Maximum backoff (seconds) for Redis retries.
 
     """
 
     connect_timeout_s: float
     socket_timeout_s: float
     health_check_interval_s: int
+    retry_max_retries: int
+    retry_backoff_base_s: float
+    retry_backoff_max_s: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -543,6 +549,24 @@ def parse_info_config(data: Mapping[str, Any]) -> InfoRagConfig:
                 "health_check_interval_s",
                 section + ".redis",
                 int,
+            ),
+            retry_max_retries=_get_required_value(
+                redis,
+                "retry_max_retries",
+                section + ".redis",
+                int,
+            ),
+            retry_backoff_base_s=_get_required_value(
+                redis,
+                "retry_backoff_base_s",
+                section + ".redis",
+                float,
+            ),
+            retry_backoff_max_s=_get_required_value(
+                redis,
+                "retry_backoff_max_s",
+                section + ".redis",
+                float,
             ),
         ),
         prompts=InfoPromptsConfig(

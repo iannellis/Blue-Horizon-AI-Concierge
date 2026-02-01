@@ -52,6 +52,11 @@ from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.vector_stores.redis import RedisVectorStore
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis as AsyncRedis
+from redis.backoff import ExponentialBackoff
+from redis.exceptions import BusyLoadingError
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
+from redis.retry import Retry
 from redisvl.schema import IndexSchema
 
 from blue_horizon.agents.exceptions import OperationalError
@@ -59,6 +64,7 @@ from blue_horizon.agents.prompt_utils import load_prompt_template
 from blue_horizon.config import (
     InfoEmbeddingsConfig,
     InfoRagConfig,
+    InfoRedisConfig,
     load_app_config,
 )
 
@@ -521,12 +527,14 @@ class InfoRagResources:
 
         self._init_llamaindex(config.embeddings)
 
+        retry = self._build_redis_retry(config.redis)
         self.redis_async: AsyncRedis = AsyncRedis.from_url(
             redis_url,
             decode_responses=True,
             socket_connect_timeout=float(config.redis.connect_timeout_s),
             socket_timeout=float(config.redis.socket_timeout_s),
             health_check_interval=int(config.redis.health_check_interval_s),
+            retry=retry,
         )
 
         self.indexes = self._build_indexes(
@@ -551,6 +559,32 @@ class InfoRagResources:
         else:
             self._system_prompt_resource = config.prompts.system_prompt_filename
         self.system_prompt: str | None = None
+
+    @staticmethod
+    def _build_redis_retry(config: InfoRedisConfig) -> Retry:
+        """Build a Redis retry policy from configuration.
+
+        Args:
+            config: Redis configuration section.
+
+        Returns:
+            Retry: Configured retry policy for transient Redis errors.
+
+        """
+        backoff = ExponentialBackoff(
+            base=float(config.retry_backoff_base_s),
+            cap=float(config.retry_backoff_max_s),
+        )
+        return Retry(
+            backoff=backoff,
+            retries=int(config.retry_max_retries),
+            supported_errors=(
+                RedisConnectionError,
+                RedisTimeoutError,
+                TimeoutError,
+                BusyLoadingError,
+            ),
+        )
 
     async def startup_check(self) -> None:
         """Validate Redis connectivity, retriever capability, and index schema.

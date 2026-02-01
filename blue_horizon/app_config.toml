@@ -85,6 +85,12 @@ connect_timeout_s = 2.0
 socket_timeout_s = 4.0
 # Redis client health check interval (seconds).
 health_check_interval_s = 30
+# Retry count for transient Redis failures.
+retry_max_retries = 2
+# Base backoff (seconds) for Redis retries.
+retry_backoff_base_s = 0.1
+# Maximum backoff (seconds) for Redis retries.
+retry_backoff_max_s = 1.0
 
 [info.prompts]
 # Folder (relative to blue_horizon package root) containing prompt files

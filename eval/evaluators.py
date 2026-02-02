@@ -1110,11 +1110,180 @@ def _build_info_expected_filters_failure(
     }
 
 
+def eval_info_reference_subset(run: Run, example: Example) -> list[dict[str, Any]]:
+    """Evaluate whether expected reference snippets appear in retrieval contexts.
+
+    Args:
+        run: LangSmith run object containing turn outputs.
+        example: LangSmith example object containing dataset turns.
+
+    Returns:
+        List of LangSmith feedback dicts for subset reference checks.
+
+    """
+    cfg = load_eval_config()
+    limits = cfg.evaluator_limits
+    max_reference_chars = cfg.ragas.reference_chars
+    turn_outputs, example_turns, reference_answers = _rag_extract_turn_inputs(
+        run,
+        example,
+    )
+    total_turns = min(len(turn_outputs), len(example_turns))
+    scored_turns = 0
+    passed_turns = 0
+    failures: list[dict[str, Any]] = []
+
+    for idx in range(total_turns):
+        example_turn = example_turns[idx]
+        reference = _rag_extract_reference(
+            example_turn,
+            reference_answers,
+            idx,
+            max_reference_chars,
+        )
+        if reference is None:
+            continue
+        expected_snippets = _split_expected_reference(reference)
+        if not expected_snippets:
+            continue
+        turn_output = turn_outputs[idx] if isinstance(turn_outputs[idx], dict) else {}
+        candidate_text = _build_reference_candidate_text(turn_output)
+        matched, missing_snippets = _reference_subset_match(
+            expected_snippets,
+            candidate_text,
+        )
+        scored_turns += 1
+        if matched:
+            passed_turns += 1
+            continue
+        if len(failures) < limits.info_filter_failures_max:
+            failures.append(
+                {
+                    "turn_index": idx,
+                    "user_snippet": _truncate(
+                        str(example_turn.get("user", "")),
+                        160,
+                    ),
+                    "expected_snippets": expected_snippets,
+                    "missing_snippets": missing_snippets,
+                },
+            )
+
+    if scored_turns == 0:
+        return [
+            {
+                "key": "info_reference_subset_skipped",
+                "score": 1.0,
+                "comment": "No turns with reference snippets to score.",
+            },
+        ]
+
+    pass_rate = passed_turns / scored_turns if scored_turns else 0.0
+    raw_failures = _json_value(failures)
+    if len(raw_failures) > limits.json_value_max:
+        failures_entry = {
+            "key": "info_reference_subset_failures",
+            "value": _json_value(failures, max_len=limits.json_value_max),
+            "comment": "JSON truncated",
+        }
+    else:
+        failures_entry = {
+            "key": "info_reference_subset_failures",
+            "value": raw_failures,
+        }
+
+    return [
+        {
+            "key": "info_reference_subset_turns",
+            "score": float(scored_turns),
+        },
+        {
+            "key": "info_reference_subset_pass_rate",
+            "score": pass_rate,
+        },
+        failures_entry,
+    ]
+
+
+def _split_expected_reference(reference: str) -> list[str]:
+    """Split a reference string into expected snippet parts.
+
+    Args:
+        reference: Reference string containing one or more snippets.
+
+    Returns:
+        List of non-empty snippet strings.
+
+    """
+    if not reference:
+        return []
+    return [snippet.strip() for snippet in reference.split(" | ") if snippet.strip()]
+
+
+def _build_reference_candidate_text(turn_output: dict[str, Any]) -> str:
+    """Build a candidate text blob from retrieval contexts and the response.
+
+    Args:
+        turn_output: Turn output dict containing contexts and assistant text.
+
+    Returns:
+        Combined candidate text used for subset matching.
+
+    """
+    contexts = turn_output.get("contexts_used")
+    context_list = contexts if isinstance(contexts, list) else []
+    context_text = "\n".join([str(item) for item in context_list if item is not None])
+    assistant_text = turn_output.get("assistant_text")
+    if assistant_text:
+        if context_text:
+            return f"{context_text}\n{assistant_text}"
+        return str(assistant_text)
+    return context_text
+
+
+def _normalize_text(text: str) -> str:
+    """Normalize text for substring matching.
+
+    Args:
+        text: Raw input text.
+
+    Returns:
+        Lowercased text with collapsed whitespace.
+
+    """
+    if not text:
+        return ""
+    return " ".join(str(text).lower().split())
+
+
+def _reference_subset_match(
+    expected_snippets: list[str],
+    candidate_text: str,
+) -> tuple[bool, list[str]]:
+    """Determine whether all expected snippets appear in candidate text.
+
+    Args:
+        expected_snippets: Snippets expected to appear in the candidate text.
+        candidate_text: Combined retrieval contexts and assistant response.
+
+    Returns:
+        Tuple of (matched, missing_snippets).
+
+    """
+    normalized_candidate = _normalize_text(candidate_text)
+    missing = []
+    for snippet in expected_snippets:
+        normalized_snippet = _normalize_text(snippet)
+        if normalized_snippet and normalized_snippet not in normalized_candidate:
+            missing.append(snippet)
+    return len(missing) == 0, missing
+
+
 def eval_required_tool_calls_present(
     run: Run,
     example: Example,
 ) -> list[dict[str, Any]]:
-    """Verify required tool calls were present for info and rooms turns.
+    """Verify required tool calls were present for rooms turns.
 
     Args:
         run: LangSmith run object containing turn outputs and tool summaries.
@@ -1142,7 +1311,7 @@ def eval_required_tool_calls_present(
             {
                 "key": "required_tool_calls_skipped",
                 "score": 1.0,
-                "comment": "No info/rooms turns to score.",
+                "comment": "No rooms turns to score.",
             },
         ]
 
@@ -1253,7 +1422,7 @@ def _collect_required_tool_results(
 def _score_required_tool_turn(
     turn_context: dict[str, Any],
 ) -> tuple[bool, bool, list[str], bool, dict[str, Any] | None]:
-    """Score a single turn for required tool usage.
+    """Score a single rooms turn for required tool usage.
 
     Args:
         turn_context: Dict containing example and run turn data.
@@ -1276,22 +1445,7 @@ def _score_required_tool_turn(
     tool_summary = output.get("tool_summary")
     called_tools = _tools_called(tool_summary)
     if route_pred == "info":
-        missing_tools = _missing_info_tools(called_tools)
-        if missing_tools:
-            return (
-                True,
-                False,
-                missing_tools,
-                False,
-                _required_tool_failure_context(
-                    idx=turn_index,
-                    route_pred="info",
-                    user_text=example.get("user"),
-                    missing_tools=missing_tools,
-                    called_tools=called_tools,
-                ),
-            )
-        return True, True, [], False, None
+        return False, False, [], False, None
 
     if called_tools.intersection(_SQL_TOOL_NAMES):
         return True, True, [], False, None

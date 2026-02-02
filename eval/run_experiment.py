@@ -19,6 +19,7 @@ from langsmith.evaluation import aevaluate
 from eval.config import MetadataConfig, load_eval_config
 from eval.evaluators import (
     eval_info_expected_filters,
+    eval_info_reference_subset,
     eval_injection_tripwires,
     eval_llm_rubrics,
     eval_rag_metrics_info_turns,
@@ -151,6 +152,7 @@ async def main() -> None:
         eval_rooms_outcome_and_invariants,
         eval_llm_rubrics,
         eval_rag_metrics_info_turns,
+        eval_info_reference_subset,
         eval_info_expected_filters,
     ]
 
@@ -577,6 +579,7 @@ def _init_metric_values() -> dict[str, list[float]]:
         "rag_answer_relevancy_mean": [],
         "rag_context_precision_mean": [],
         "rag_context_recall_mean": [],
+        "info_reference_subset_pass_rate": [],
         "info_expected_filters_pass_rate": [],
     }
 
@@ -605,6 +608,8 @@ def _update_metric_values(
             metric_values["route_accuracy"].append(score)
         if key == "rooms_atomic_success_rate" and score is not None:
             metric_values["rooms_atomic_success_rate"].append(score)
+        if key == "info_reference_subset_pass_rate" and score is not None:
+            metric_values["info_reference_subset_pass_rate"].append(score)
         if "expected_filters" in key and value is not None:
             metric_values["info_expected_filters_pass_rate"].append(value)
 
@@ -666,6 +671,9 @@ def _mean_metrics(metric_values: Mapping[str, list[float]]) -> dict[str, object]
         ),
         "mean_rag_context_recall_mean": _mean(
             metric_values["rag_context_recall_mean"],
+        ),
+        "mean_info_reference_subset_pass_rate": _mean(
+            metric_values["info_reference_subset_pass_rate"],
         ),
         "mean_info_expected_filters_pass_rate": _mean(
             metric_values["info_expected_filters_pass_rate"],

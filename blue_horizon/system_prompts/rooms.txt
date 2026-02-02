@@ -703,3 +703,4 @@ After responding, only offer follow-ups related to:
 * booking specific room(s)
 * canceling a reservation for a specific room
 * modifying an existing reservation
+* providing other information about the hotel and its offerings

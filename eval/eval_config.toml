@@ -1,10 +1,10 @@
 [experiment]
 # LangSmith dataset name to evaluate (required).
-dataset_name = "BlueHorizonEval_1case"
+dataset_name = "BlueHorizonEval_case5"
 # Prefix used when generating experiment names.
-experiment_prefix = "hotel-agent-eval-1case"
+experiment_prefix = "hotel-agent-eval-case5"
 # Optional run notes appended to experiment names.
-run_notes = "Small dataset of 1 item"
+run_notes = "Small dataset with just case 5"
 # Maximum concurrent example evaluations.
 max_concurrency = 10
 # Base output directory for local evaluation artifacts.
@@ -70,8 +70,8 @@ max_size = 4
 min_size = 1
 
 [judge]
-# Judge model name used for rubric grading.
-model = "gemini-3-pro-preview"
+# Judge model name used for rubric grading (Gemini model unless code edited).
+model = "gemini-3-flash-preview"
 
 [ragas]
 # Maximum number of turns to score with Ragas.

@@ -1,4 +1,4 @@
-"""Hotel info RAG agent (LangChain create_agent + LangGraph) with RedisVectorStore.
+"""Hotel info RAG agent (LangGraph DAG) with RedisVectorStore.
 
 Goals:
 - Modular, readable, PEP8-compliant
@@ -38,9 +38,9 @@ from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
 from dotenv import load_dotenv
-from langchain.agents import create_agent
-from langchain.tools import tool
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
+from langgraph.graph import END, START, MessagesState, StateGraph
 from llama_index.core import Settings, StorageContext, VectorStoreIndex
 from llama_index.core.retrievers import BaseRetriever, VectorIndexRetriever
 from llama_index.core.vector_stores.types import (
@@ -185,7 +185,20 @@ def load_info_config(config_path: Path | str | None = None) -> InfoRagConfig:
 
 
 def build_system_prompt(*, top_k: int, prompt_resource: str) -> str:
-    """Render the system prompt with runtime substitutions."""
+    """Render the system prompt with runtime substitutions.
+
+    Args:
+        top_k: Maximum number of retrieval items referenced by the prompt.
+        prompt_resource: Package resource path to the prompt template file.
+
+    Returns:
+        Rendered system prompt with runtime placeholders filled in.
+
+    Raises:
+        FileNotFoundError: If the prompt template resource cannot be located.
+        RuntimeError: If the template cannot be loaded or substituted.
+
+    """
     template = load_prompt_template(prompt_resource)
     return template.safe_substitute(top_k=top_k)
 
@@ -307,6 +320,79 @@ class HydrateInput(BaseModel):
 
     items: list[RetrievalItemLite] = Field(..., description="Top items from reranker")
 
+
+class ParsedQuery(BaseModel):
+    """Structured interpretation of a user request for retrieval tools.
+
+    This model captures the core query plus optional constraints that map directly
+    to the amenity/service metadata filters in Redis.
+    """
+
+    query: str = Field(
+        ...,
+        description=("The primary, cleaned query string capturing the user's intent."),
+    )
+    booking_required: bool | None = Field(
+        default=None,
+        description=(
+            "If the user explicitly requires booking, set True. "
+            "If the user explicitly wants no booking, set False. "
+        ),
+    )
+    min_price: float | None = Field(
+        default=None,
+        description=("Minimum acceptable price in USD (inclusive)."),
+    )
+    max_price: float | None = Field(
+        default=None,
+        description=("Maximum acceptable price in USD (inclusive)."),
+    )
+    min_notice_hours: int | None = Field(
+        default=None,
+        description=("Minimum advance notice required in hours (inclusive)."),
+    )
+    max_notice_hours: int | None = Field(
+        default=None,
+        description=("Maximum acceptable advance notice in hours (inclusive)."),
+    )
+    min_duration_minutes: int | None = Field(
+        default=None,
+        description=("Minimum duration in minutes (inclusive)."),
+    )
+    max_duration_minutes: int | None = Field(
+        default=None,
+        description=("Maximum duration in minutes (inclusive)"),
+    )
+
+
+class InfoState(MessagesState, total=False):
+    """LangGraph state for the information DAG.
+
+    Attributes:
+        faq_results: Retrieved FAQ items.
+        amenities_results: Retrieved amenity items.
+        services_results: Retrieved service items.
+        top_results: Reranked items across sources.
+        hydrated_results: Hydrated text + metadata results.
+
+    """
+
+    faq_results: list[RetrievalItemLite]
+    amenities_results: list[RetrievalItemLite]
+    services_results: list[RetrievalItemLite]
+    top_results: list[RetrievalItemLite]
+    hydrated_results: list[RetrievalItem]
+
+
+class ParsedState(InfoState):
+    """State with required parsed query info along with extracted constraints."""
+
+    parsed: ParsedQuery
+
+INFO_AGENT_ENDING = (
+    "Is there any other information I can provide about the hotel? "
+    "I can also help finding and booking a room."
+)
 
 # ============================
 # Retrieval helpers
@@ -1268,15 +1354,55 @@ class InfoRagResources:
 # ============================
 
 
+def _latest_user_text(messages: Sequence[BaseMessage]) -> str:
+    """Return the most recent user message content as a string.
+
+    Args:
+        messages: Ordered conversation messages to scan from newest to oldest.
+
+    Returns:
+        Most recent user message content, or an empty string if none exists.
+
+    """
+    for message in reversed(messages):
+        if isinstance(message, HumanMessage):
+            return str(message.content)
+    return ""
+
+
+def _build_context_block(items: Sequence[RetrievalItem]) -> str:
+    """Build a plain-text context block from hydrated items.
+
+    Args:
+        items: Hydrated retrieval items to serialize into a context block.
+
+    Returns:
+        Context block string with one section per item.
+
+    """
+    lines = [
+        "\n".join(
+            [
+                f"source={item.source}",
+                f"score={item.score}",
+                f"text={item.text}",
+                f"metadata={item.metadata}",
+            ],
+        )
+        for item in items
+    ]
+    return "\n\n".join(lines)
+
+
 class InfoAgentFactory:
-    """Factory for constructing the LangChain agent with bound async tools.
+    """Factory for constructing the info retrieval DAG.
 
     This factory wires together:
         - configuration
         - shared async retrieval resources
         - prompt templates
 
-    The resulting agent uses tool calls for retrieval/reranking/hydration.
+    The resulting agent performs a single retrieval round in a fixed DAG.
 
     """
 
@@ -1305,14 +1431,21 @@ class InfoAgentFactory:
         """Build and return a compiled agent graph.
 
         Returns:
-            CompiledStateGraph: A compiled agent graph created by LangChain.
+            CompiledStateGraph: A compiled LangGraph DAG for info retrieval.
 
         """
         resources = self._resources
         top_k = resources.top_k
 
         llm_cfg = self._config.llm
-        llm = ChatOpenAI(
+        parser_llm = ChatOpenAI(
+            model=str(llm_cfg.model),
+            temperature=0.0,
+            timeout=float(llm_cfg.timeout_s),
+            max_retries=int(llm_cfg.max_retries),
+            reasoning={"effort": llm_cfg.reasoning_effort},
+        ).with_structured_output(ParsedQuery)
+        responder_llm = ChatOpenAI(
             model=str(llm_cfg.model),
             temperature=float(llm_cfg.temperature),
             timeout=float(llm_cfg.timeout_s),
@@ -1320,330 +1453,239 @@ class InfoAgentFactory:
             reasoning={"effort": llm_cfg.reasoning_effort},
         )
 
-        def _log_tool_failure(tool_name: str, exc: Exception) -> None:
-            """Log a tool failure with traceback.
+        def _log_node_failure(node_name: str, exc: Exception) -> None:
+            """Log a node failure with traceback."""
+            logger.exception("Info DAG node %s failed: %s", node_name, exc)
+
+        async def parse_node(state: InfoState) -> dict[str, Any]:
+            """Parse the user request into a structured query and constraints."""
+            try:
+                parsed = await parser_llm.ainvoke(
+                    [
+                        SystemMessage(
+                            content=(
+                                "Extract a single query string plus any constraints "
+                                "(booking, price, notice, duration) from the full "
+                                "conversation. Prefer the latest user request."
+                            ),
+                        ),
+                        *state["messages"],
+                    ],
+                )
+            except Exception as exc:  # noqa: BLE001
+                _log_node_failure("parse", exc)
+                parsed = ParsedQuery(query=_latest_user_text(state["messages"]))
+            return {"parsed": parsed}
+
+        async def query_faq_node(state: ParsedState) -> dict[str, Any]:
+            """Retrieve FAQ entries for the parsed query.
 
             Args:
-                tool_name: Name of the tool that failed.
-                exc: Exception raised by the tool.
-
-            """
-            logger.exception("Tool %s failed: %s", tool_name, exc)
-
-        @tool(parse_docstring=True)
-        async def query_faq(query: str) -> list[RetrievalItemLite]:
-            """Retrieve FAQ entries relevant to a user query.
-
-            This tool performs vector search over the **FAQ** knowledge base. Use it
-            when the user asks about hotel policies, rules, hours, check-in/check-out,
-            deposits, cancellations, parking, pet policy, accessibility, or other
-            "how does the hotel work" questions.
-
-            Notes:
-                - This tool returns lightweight items (source, item_id, score). The
-                  system will later rerank across sources and then hydrate the final
-                  selection to retrieve full text + metadata.
-                - If you are unsure whether a question is policy-related, it is still
-                  safe to call this tool; irrelevant FAQ hits will be dropped later.
-
-            Args:
-                query: Natural-language query describing what the user wants.
+                state: Parsed state containing the query text.
 
             Returns:
-                list[RetrievalItemLite]: Up to ``top_k`` lightweight FAQ matches.
-
-            Examples:
-                - "What time is check-in?"
-                - "Do you allow pets?"
-                - "Is there parking and how much does it cost?"
-                - "What is the cancellation policy?"
+                State patch with ``faq_results`` populated.
 
             """
+            query = state["parsed"].query
             try:
                 results = await resources.retrieve_faq(query)
             except OperationalError as exc:
                 logger.warning("query_faq operational failure: %s", exc)
                 _log_eval_tool_summary(
-                    {
-                        "tool": "query_faq",
-                        "status": "error",
-                        "error": str(exc),
-                    },
+                    {"tool": "query_faq", "status": "error", "error": str(exc)},
                 )
-                return []
+                return {"faq_results": []}
             except Exception as exc:  # noqa: BLE001
-                _log_tool_failure("query_faq", exc)
+                _log_node_failure("query_faq", exc)
                 _log_eval_tool_summary(
-                    {
-                        "tool": "query_faq",
-                        "status": "error",
-                        "error": str(exc),
-                    },
+                    {"tool": "query_faq", "status": "error", "error": str(exc)},
                 )
-                return []
-            else:
-                _log_eval_tool_summary(
-                    {
-                        "tool": "query_faq",
-                        "status": "ok",
-                        "count": len(results),
-                    },
-                )
-                return results
+                return {"faq_results": []}
+            _log_eval_tool_summary(
+                {"tool": "query_faq", "status": "ok", "count": len(results)},
+            )
+            return {"faq_results": results}
 
-        @tool(parse_docstring=True)
-        async def query_amenities(  # noqa: PLR0913
-            query: str,
-            booking_required: bool | None = None,  # noqa: FBT001
-            min_price: float | None = None,
-            max_price: float | None = None,
-            min_notice_hours: int | None = None,
-            max_notice_hours: int | None = None,
-            min_duration_minutes: int | None = None,
-            max_duration_minutes: int | None = None,
-        ) -> list[RetrievalItemLite]:
-            """Retrieve hotel amenities relevant to a user query.
-
-            This tool performs vector search over the **amenities** catalog and can
-            apply optional metadata constraints. All provided constraints are combined
-            using logical **AND**.
-
-            Use this tool when the user asks about amenities such as facilities,
-            on-property features, classes, rentals, or other amenity offerings.
+        async def query_amenities_node(state: ParsedState) -> dict[str, Any]:
+            """Retrieve amenities for the parsed query and constraints.
 
             Args:
-                query: Natural-language query describing what the user wants.
-                booking_required: Restrict results to booking_required==True/False.
-                min_price: Minimum price in USD (inclusive).
-                max_price: Maximum price in USD (inclusive).
-                min_notice_hours: Minimum advance notice in hours (inclusive).
-                max_notice_hours: Maximum advance notice in hours (inclusive).
-                min_duration_minutes: Minimum duration in minutes (inclusive).
-                max_duration_minutes: Maximum duration in minutes (inclusive).
+                state: Parsed state containing query text and constraints.
 
             Returns:
-                list[RetrievalItemLite]: Up to ``top_k`` lightweight results.
+                State patch with ``amenities_results`` populated.
 
             """
+            parsed = state["parsed"]
             filters = build_filters(
-                booking_required=booking_required,
-                min_price=min_price,
-                max_price=max_price,
-                min_notice_hours=min_notice_hours,
-                max_notice_hours=max_notice_hours,
-                min_duration_minutes=min_duration_minutes,
-                max_duration_minutes=max_duration_minutes,
+                booking_required=parsed.booking_required,
+                min_price=parsed.min_price,
+                max_price=parsed.max_price,
+                min_notice_hours=parsed.min_notice_hours,
+                max_notice_hours=parsed.max_notice_hours,
+                min_duration_minutes=parsed.min_duration_minutes,
+                max_duration_minutes=parsed.max_duration_minutes,
             )
             try:
                 results = await resources.retrieve_filtered_catalog_items(
                     source=Source.AMENITIES,
-                    query=query,
+                    query=parsed.query,
                     filters=filters,
                 )
             except OperationalError as exc:
                 logger.warning("query_amenities operational failure: %s", exc)
                 _log_eval_tool_summary(
-                    {
-                        "tool": "query_amenities",
-                        "status": "error",
-                        "error": str(exc),
-                    },
+                    {"tool": "query_amenities", "status": "error", "error": str(exc)},
                 )
-                return []
+                return {"amenities_results": []}
             except Exception as exc:  # noqa: BLE001
-                _log_tool_failure("query_amenities", exc)
+                _log_node_failure("query_amenities", exc)
                 _log_eval_tool_summary(
-                    {
-                        "tool": "query_amenities",
-                        "status": "error",
-                        "error": str(exc),
-                    },
+                    {"tool": "query_amenities", "status": "error", "error": str(exc)},
                 )
-                return []
-            else:
-                _log_eval_tool_summary(
-                    {
-                        "tool": "query_amenities",
-                        "status": "ok",
-                        "count": len(results),
-                    },
-                )
-                return results
+                return {"amenities_results": []}
+            _log_eval_tool_summary(
+                {
+                    "tool": "query_amenities",
+                    "status": "ok",
+                    "count": len(results),
+                },
+            )
+            return {"amenities_results": results}
 
-        @tool(parse_docstring=True)
-        async def query_services(  # noqa: PLR0913
-            query: str,
-            booking_required: bool | None = None,  # noqa: FBT001
-            min_price: float | None = None,
-            max_price: float | None = None,
-            min_notice_hours: int | None = None,
-            max_notice_hours: int | None = None,
-            min_duration_minutes: int | None = None,
-            max_duration_minutes: int | None = None,
-        ) -> list[RetrievalItemLite]:
-            """Retrieve hotel services relevant to a user query.
-
-            This tool performs vector search over the **services** catalog (e.g.,
-            spa treatments, housekeeping add-ons, transportation, concierge offerings,
-            dining-related services, etc.).
-
-            You may optionally apply metadata constraints. All provided constraints are
-            combined using logical **AND**.
-
-            Use this tool when the user asks for *staff-provided* or *bookable* services
-            rather than physical amenities.
+        async def query_services_node(state: ParsedState) -> dict[str, Any]:
+            """Retrieve services for the parsed query and constraints.
 
             Args:
-                query: Natural-language query describing what the user wants.
-                booking_required: Restrict results to booking_required==True/False.
-                min_price: Minimum price in USD (inclusive).
-                max_price: Maximum price in USD (inclusive).
-                min_notice_hours: Minimum advance notice in hours (inclusive).
-                max_notice_hours: Maximum advance notice in hours (inclusive).
-                min_duration_minutes: Minimum duration in minutes (inclusive).
-                max_duration_minutes: Maximum duration in minutes (inclusive).
+                state: Parsed state containing query text and constraints.
 
             Returns:
-                list[RetrievalItemLite]: Up to ``top_k`` lightweight results.
-
-            Examples:
-                - "airport shuttle"
-                - "in-room massage under $200"
-                - "late checkout service"
-                - "laundry with at least 2 hours notice"
+                State patch with ``services_results`` populated.
 
             """
+            parsed = state["parsed"]
             filters = build_filters(
-                booking_required=booking_required,
-                min_price=min_price,
-                max_price=max_price,
-                min_notice_hours=min_notice_hours,
-                max_notice_hours=max_notice_hours,
-                min_duration_minutes=min_duration_minutes,
-                max_duration_minutes=max_duration_minutes,
+                booking_required=parsed.booking_required,
+                min_price=parsed.min_price,
+                max_price=parsed.max_price,
+                min_notice_hours=parsed.min_notice_hours,
+                max_notice_hours=parsed.max_notice_hours,
+                min_duration_minutes=parsed.min_duration_minutes,
+                max_duration_minutes=parsed.max_duration_minutes,
             )
             try:
                 results = await resources.retrieve_filtered_catalog_items(
                     source=Source.SERVICES,
-                    query=query,
+                    query=parsed.query,
                     filters=filters,
                 )
             except OperationalError as exc:
                 logger.warning("query_services operational failure: %s", exc)
                 _log_eval_tool_summary(
-                    {
-                        "tool": "query_services",
-                        "status": "error",
-                        "error": str(exc),
-                    },
+                    {"tool": "query_services", "status": "error", "error": str(exc)},
                 )
-                return []
+                return {"services_results": []}
             except Exception as exc:  # noqa: BLE001
-                _log_tool_failure("query_services", exc)
+                _log_node_failure("query_services", exc)
                 _log_eval_tool_summary(
-                    {
-                        "tool": "query_services",
-                        "status": "error",
-                        "error": str(exc),
-                    },
+                    {"tool": "query_services", "status": "error", "error": str(exc)},
                 )
-                return []
-            else:
-                _log_eval_tool_summary(
-                    {
-                        "tool": "query_services",
-                        "status": "ok",
-                        "count": len(results),
-                    },
-                )
-                return results
+                return {"services_results": []}
+            _log_eval_tool_summary(
+                {"tool": "query_services", "status": "ok", "count": len(results)},
+            )
+            return {"services_results": results}
 
-        @tool(args_schema=RerankInput)
-        def reranker(
-            faq_results: list[RetrievalItemLite],
-            amenities_results: list[RetrievalItemLite],
-            services_results: list[RetrievalItemLite],
-        ) -> list[RetrievalItemLite]:
+        def rerank_node(state: InfoState) -> dict[str, Any]:
             """Select the top-k results across FAQ, amenities, and services.
 
-            This tool merges results from earlier retrieval tools and selects the
-            highest-scoring items.
-
             Args:
-                faq_results: Output from ``query_faq``.
-                amenities_results: Output from ``query_amenities``.
-                services_results: Output from ``query_services``.
+                state: Current state with retrieval results.
 
             Returns:
-                list[RetrievalItemLite]: The top-k items by score.
+                State patch with ``top_results`` populated.
 
             """
-            all_results = [*faq_results, *amenities_results, *services_results]
+            all_results = [
+                *state.get("faq_results", []),
+                *state.get("amenities_results", []),
+                *state.get("services_results", []),
+            ]
             ranked = heapq.nlargest(top_k, all_results, key=lambda x: x.score)
             _log_eval_tool_summary(
-                {
-                    "tool": "reranker",
-                    "status": "ok",
-                    "count": len(ranked),
-                },
+                {"tool": "reranker", "status": "ok", "count": len(ranked)},
             )
-            return ranked
+            return {"top_results": ranked}
 
-        @tool(args_schema=HydrateInput)
-        async def hydrate_items(items: list[RetrievalItemLite]) -> list[RetrievalItem]:
+        async def hydrate_node(state: InfoState) -> dict[str, Any]:
             """Hydrate reranked items into full text + metadata objects.
 
             Args:
-                items: Lightweight items returned by the reranker.
+                state: Current state with reranked results.
 
             Returns:
-                list[RetrievalItem]: Hydrated results. Returns an empty list on
-                operational failures.
+                State patch with ``hydrated_results`` populated.
 
             """
+            items = state.get("top_results", [])
             try:
                 hydrated = await resources.hydrate(items, best_effort=True)
             except OperationalError as exc:
                 logger.warning("hydrate_items operational failure: %s", exc)
                 _log_eval_tool_summary(
-                    {
-                        "tool": "hydrate_items",
-                        "status": "error",
-                        "error": str(exc),
-                    },
+                    {"tool": "hydrate_items", "status": "error", "error": str(exc)},
                 )
-                return []
+                return {"hydrated_results": []}
             except Exception as exc:  # noqa: BLE001
-                _log_tool_failure("hydrate_items", exc)
+                _log_node_failure("hydrate_items", exc)
                 _log_eval_tool_summary(
-                    {
-                        "tool": "hydrate_items",
-                        "status": "error",
-                        "error": str(exc),
-                    },
+                    {"tool": "hydrate_items", "status": "error", "error": str(exc)},
                 )
-                return []
-            else:
-                _log_eval_tool_summary(
-                    {
-                        "tool": "hydrate_items",
-                        "status": "ok",
-                        "count": len(hydrated),
-                    },
-                )
-                _log_eval_contexts(
-                    [
-                        item.text
-                        for item in hydrated
-                        if isinstance(item.text, str) and item.text
-                    ],
-                )
-                return hydrated
+                return {"hydrated_results": []}
+            _log_eval_tool_summary(
+                {"tool": "hydrate_items", "status": "ok", "count": len(hydrated)},
+            )
+            _log_eval_contexts(
+                [
+                    item.text
+                    for item in hydrated
+                    if isinstance(item.text, str) and item.text
+                ],
+            )
+            return {"hydrated_results": hydrated}
 
-        system_prompt = resources.get_system_prompt()
+        async def respond_node(state: InfoState) -> dict[str, Any]:
+            """Generate the final response using hydrated context."""
+            hydrated = state.get("hydrated_results", [])
+            context_block = _build_context_block(hydrated)
+            system_prompt = resources.get_system_prompt()
+            response = await responder_llm.ainvoke(
+                [
+                    SystemMessage(content=(f"{system_prompt}{context_block}")),
+                    *state["messages"],
+                ],
+            )
+            return {"messages": [response]}
 
-        return create_agent(
-            model=llm,
-            tools=[query_faq, query_amenities, query_services, reranker, hydrate_items],
-            system_prompt=system_prompt,
-        )
+        graph = StateGraph(InfoState)
+        graph.add_node("parse", parse_node)
+        graph.add_node("query_faq", query_faq_node)
+        graph.add_node("query_amenities", query_amenities_node)
+        graph.add_node("query_services", query_services_node)
+        graph.add_node("rerank", rerank_node)
+        graph.add_node("hydrate", hydrate_node)
+        graph.add_node("respond", respond_node)
+
+        graph.add_edge(START, "parse")
+        graph.add_edge("parse", "query_faq")
+        graph.add_edge("parse", "query_amenities")
+        graph.add_edge("parse", "query_services")
+        graph.add_edge("query_faq", "rerank")
+        graph.add_edge("query_amenities", "rerank")
+        graph.add_edge("query_services", "rerank")
+        graph.add_edge("rerank", "hydrate")
+        graph.add_edge("hydrate", "respond")
+        graph.add_edge("respond", END)
+
+        return graph.compile()

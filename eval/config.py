@@ -168,6 +168,8 @@ class RagasConfig:
         query_chars: Maximum characters for the user query.
         response_chars: Maximum characters for the assistant response.
         reference_chars: Maximum characters for the reference answer.
+        llm_model: Model name for the Ragas LLM backend.
+        embedding_model: Model name for the Ragas embeddings backend.
 
     """
 
@@ -177,6 +179,8 @@ class RagasConfig:
     query_chars: int
     response_chars: int
     reference_chars: int
+    llm_model: str
+    embedding_model: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -819,6 +823,8 @@ def parse_ragas_config(data: Mapping[str, Any]) -> RagasConfig:
             0,
             _get_required_value(data, "reference_chars", section, int),
         ),
+        llm_model=_get_required_value(data, "llm_model", section, str),
+        embedding_model=_get_required_value(data, "embedding_model", section, str),
     )
 
 

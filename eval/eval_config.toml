@@ -86,6 +86,10 @@ query_chars = 5000
 response_chars = 5000
 # Maximum characters for reference answers.
 reference_chars = 5000
+# Gemini model used for Ragas LLM scoring.
+llm_model = "gemini-3-flash-preview"
+# Gemini model used for Ragas embeddings.
+embedding_model = "gemini-embedding-001"
 
 [stress]
 # Optional schema name override for stress runs (empty uses timestamp default).

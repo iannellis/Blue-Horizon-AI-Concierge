@@ -2600,8 +2600,9 @@ def _build_ragas_llm() -> InstructorBaseRagasLLM:
 
     """
     client = _get_google_genai_client()
+    ragas_cfg = load_eval_config().ragas
     sync_llm = llm_factory(
-        model="gemini-3-pro-preview",
+        model=ragas_cfg.llm_model,
         provider="google",
         client=client,
     )
@@ -2631,9 +2632,10 @@ def _build_ragas_embeddings() -> BaseRagasEmbeddings | BaseRagasEmbedding:
 
     """
     client = _get_google_genai_client()
+    ragas_cfg = load_eval_config().ragas
     return embedding_factory(
         provider="google",
-        model="gemini-embedding-001",
+        model=ragas_cfg.embedding_model,
         client=client,
     )
 

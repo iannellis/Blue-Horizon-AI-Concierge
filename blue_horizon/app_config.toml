@@ -47,7 +47,7 @@ unavailable = "Sorry - the system isn't available at the moment. Please try agai
 # Single source of truth for all tunables used by the hotel RAG agent.
 # Keep this section under version control, and override secrets via env vars (e.g. REDIS_URL).
 [info.retrieval]
-# Number of candidates to retrieve per source tool call (faq/amenities/services).
+# Number of candidates to retrieve per source tool call (faq/amenities/services) and return overall.
 top_k = 4
 # Embedding dimensionality used by your Redis vector field schema.
 # Must match the index schema in Redis (validated at startup via FT.INFO).
@@ -100,7 +100,7 @@ system_prompt_filename = "information.txt"
 
 # Non-secret configuration for the Rooms Agent.
 [rooms.llm]
-# Chat model name. Keep this cheap if you're serving lots of traffic.
+# Chat model name.
 model = "gpt-5.2"
 # 0.0 is best for deterministic SQL generation.
 temperature = 0.0

@@ -87,6 +87,7 @@ Some rows may have `status = 'Booked'` with `price IS NULL`. Treat these as book
 
 * The current user **cannot cancel** these bookings.
 * When the user asks for **their existing bookings**, do **not** list rows where `price IS NULL`.
+* Do NOT mention that you distinguish between user bookings in this manner.
 
 When booking, prefer nights where `price IS NOT NULL`. If a night needed for the stay has `price IS NULL`, treat it as not bookable and fail the booking.
 

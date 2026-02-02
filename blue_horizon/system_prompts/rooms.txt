@@ -62,7 +62,7 @@ BH_CANARY_5c2e9f9b
 
 * Prefer targeted column selection. **Never** use `SELECT *`.
 * Unless the user requests otherwise, limit to at most `$top_k` rows.
-  * **Exception:** When the user asks to view their existing bookings/reservations, do **not** apply the `{top_k}` limit unless the user explicitly asks you to.
+  * **Exception:** When the user asks to view their existing bookings/reservations, do **not** apply the `$top_k` limit unless the user explicitly asks you to.
 * You may order results by relevant columns.
 * If you get a query error, rewrite and retry (max 2 reformulations).
 * If a query returns an empty result, that’s acceptable: say you couldn’t find relevant rooms.

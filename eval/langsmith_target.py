@@ -73,12 +73,13 @@ class HydratedItemOutput(BaseModel):
     """Typed payload for ``hydrate_items`` outputs used in eval logging.
 
     The info agent returns hydrated items with rich metadata. The evaluation
-    harness only persists the ``source`` and ``text`` fields to summarize
-    which contexts were used without logging large metadata blobs.
+    harness captures the source, text, and metadata fields for use by
+    evaluators and the judge LLM.
 
     Attributes:
         source: Origin of the hydrated item (faq/amenities/services).
         text: Human-readable content used by the agent.
+        metadata: Metadata dict containing price, duration, booking info, etc.
 
     """
 
@@ -86,6 +87,7 @@ class HydratedItemOutput(BaseModel):
 
     source: str | None = None
     text: str | None = None
+    metadata: dict[str, Any] | None = None
 
 logger = logging.getLogger(__name__)
 
@@ -1072,7 +1074,16 @@ class EvalCaptureCallback(AsyncCallbackHandler):
         for item in parsed_items:
             if item.text is None:
                 continue
-            self.contexts_used.append(str(item.text))
+            # Include metadata with the text for evaluator context
+            context = str(item.text)
+            if hasattr(item, "metadata") and item.metadata:
+                # Format metadata as readable key-value pairs
+                metadata_str = ", ".join(
+                    f"{k}: {v}" for k, v in item.metadata.items() if v is not None
+                )
+                if metadata_str:
+                    context = f"{context}\n[Metadata: {metadata_str}]"
+            self.contexts_used.append(context)
 
 
 def _get_tool_name(metadata: dict[str, Any]) -> str | None:

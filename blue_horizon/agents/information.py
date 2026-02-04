@@ -1719,13 +1719,21 @@ class InfoAgentFactory:
             _log_eval_tool_summary(
                 {"tool": "hydrate_items", "status": "ok", "count": len(hydrated)},
             )
-            _log_eval_contexts(
-                [
-                    item.text
-                    for item in hydrated
-                    if isinstance(item.text, str) and item.text
-                ],
-            )
+            # Log contexts with metadata for evaluators and judge LLM
+            contexts_with_metadata = []
+            for item in hydrated:
+                if not isinstance(item.text, str) or not item.text:
+                    continue
+                context = item.text
+                if item.metadata:
+                    # Format metadata as readable key-value pairs
+                    metadata_str = ", ".join(
+                        f"{k}: {v}" for k, v in item.metadata.items() if v is not None
+                    )
+                    if metadata_str:
+                        context = f"{context}\n[Metadata: {metadata_str}]"
+                contexts_with_metadata.append(context)
+            _log_eval_contexts(contexts_with_metadata)
             return {"hydrated_results": hydrated}
 
         async def respond_node(state: InfoState) -> dict[str, Any]:

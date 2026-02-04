@@ -691,11 +691,12 @@ def eval_info_expected_filters(run: Run, example: Example) -> list[dict[str, Any
 
     pass_rate = passed_checks / total_checks if total_checks else 0.0
     if divergence_checks:
-        divergence_rate = divergence_failures / divergence_checks
-        divergence_comment = None
+        # Convergence rate: 1.0 = all filters converge, 0.0 = all diverge
+        convergence_rate = 1.0 - (divergence_failures / divergence_checks)
+        convergence_comment = None
     else:
-        divergence_rate = 0.0
-        divergence_comment = "No divergence checks performed."
+        convergence_rate = 1.0
+        convergence_comment = "No convergence checks performed."
 
     raw_failures = _json_value(failures)
     if len(raw_failures) > limits.json_value_max:
@@ -721,9 +722,9 @@ def eval_info_expected_filters(run: Run, example: Example) -> list[dict[str, Any
             "score": pass_rate,
         },
         {
-            "key": "info_expected_filters_divergence_rate",
-            "score": divergence_rate,
-            "comment": divergence_comment,
+            "key": "info_expected_filters_convergence_rate",
+            "score": convergence_rate,
+            "comment": convergence_comment,
         },
         failures_entry,
     ]

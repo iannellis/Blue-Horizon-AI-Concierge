@@ -43,8 +43,13 @@ Explicit formatting by type
   **Description:** <...>
 
 Handling missing or weak matches
+- If no reranked nodes are meaningfully relevant to the user's query:
+  - Respond with: "I could not find exactly what you requested."
+- If the user specified specific constraints (e.g., price limit, duration, booking requirements, notice time) in their query, but the retrieved results do not explicitly contain those specific attributes or do not meet those criteria:
+  - Begin your response with: "I could not find exactly what you requested."
+  - Then you may provide any related results that partially match, while noting what constraints could not be met.
 - If fewer than $top_k reranked nodes are meaningfully relevant:
-  - Return fewer results and clearly state what could not be found.
+  - Return fewer results and clearly state what specific aspects could not be found.
 - If the user request is ambiguous:
   - Present the reranked results as-is.
 

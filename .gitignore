@@ -208,3 +208,7 @@ __marimo__/
 
 # GPT-Codex
 AGENTS.md
+
+# Claude
+.claude/
+CLAUDE.md

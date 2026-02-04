@@ -336,7 +336,9 @@ class ParsedQuery(BaseModel):
         default=None,
         description=(
             "If the user explicitly requires booking, set True. "
-            "If the user explicitly wants no booking, set False. "
+            "If the user explicitly wants no booking (e.g., 'no booking', "
+            "'no reservation', 'walk-in'), set False. "
+            "Do not infer notice requirements from booking status."
         ),
     )
     min_price: float | None = Field(
@@ -349,19 +351,40 @@ class ParsedQuery(BaseModel):
     )
     min_notice_hours: int | None = Field(
         default=None,
-        description=("Minimum advance notice required in hours (inclusive)."),
+        description=(
+            "Minimum advance notice required in hours (inclusive). "
+            "Only set if explicitly mentioned (e.g., 'need at least X hours notice')."
+        ),
     )
     max_notice_hours: int | None = Field(
         default=None,
-        description=("Maximum acceptable advance notice in hours (inclusive)."),
+        description=(
+            "Maximum acceptable advance notice in hours (inclusive). "
+            "Only set if explicitly mentioned (e.g., 'can only give X hours notice'). "
+            "Do not infer from 'walk-in' or 'no booking' - "
+            "those only affect booking_required."
+        ),
     )
     min_duration_minutes: int | None = Field(
         default=None,
-        description=("Minimum duration in minutes (inclusive)."),
+        description=(
+            "Minimum duration in minutes (inclusive). "
+            "Set BOTH min and max to X when the user requests a structured service "
+            "with a specific duration (e.g., 'X-minute massage/spa/class/tour'). "
+            "Structured services typically have fixed durations. "
+            "Only set min alone for 'at least X minutes' phrases."
+        ),
     )
     max_duration_minutes: int | None = Field(
         default=None,
-        description=("Maximum duration in minutes (inclusive)"),
+        description=(
+            "Maximum duration in minutes (inclusive). "
+            "For structured services (massage, spa, class, tour): "
+            "set BOTH min and max to the same value (exact duration). "
+            "For flexible services (food, quick activities) or time constraints: "
+            "set ONLY max (e.g., '15-minute bite' → max=15, min=None). "
+            "Use context to determine if duration is exact or a limit."
+        ),
     )
 
 
@@ -486,6 +509,34 @@ def build_filters(  # noqa: PLR0913
         )
 
     return MetadataFilters(filters=filters) if filters else None
+
+
+def _build_eval_filter_payload(parsed: ParsedQuery) -> dict[str, Any] | None:
+    """Build a compact filters payload for evaluation logging.
+
+    Args:
+        parsed: Parsed query containing the extracted constraints.
+
+    Returns:
+        Dict of non-null filter values, or None when no constraints are present.
+
+    """
+    payload: dict[str, Any] = {}
+    if parsed.booking_required is not None:
+        payload["booking_required"] = parsed.booking_required
+    if parsed.min_price is not None:
+        payload["min_price"] = parsed.min_price
+    if parsed.max_price is not None:
+        payload["max_price"] = parsed.max_price
+    if parsed.min_notice_hours is not None:
+        payload["min_notice_hours"] = parsed.min_notice_hours
+    if parsed.max_notice_hours is not None:
+        payload["max_notice_hours"] = parsed.max_notice_hours
+    if parsed.min_duration_minutes is not None:
+        payload["min_duration_minutes"] = parsed.min_duration_minutes
+    if parsed.max_duration_minutes is not None:
+        payload["max_duration_minutes"] = parsed.max_duration_minutes
+    return payload or None
 
 
 def build_index_schema(
@@ -1518,6 +1569,7 @@ class InfoAgentFactory:
 
             """
             parsed = state["parsed"]
+            filters_payload = _build_eval_filter_payload(parsed)
             filters = build_filters(
                 booking_required=parsed.booking_required,
                 min_price=parsed.min_price,
@@ -1535,23 +1587,31 @@ class InfoAgentFactory:
                 )
             except OperationalError as exc:
                 logger.warning("query_amenities operational failure: %s", exc)
-                _log_eval_tool_summary(
-                    {"tool": "query_amenities", "status": "error", "error": str(exc)},
-                )
+                summary: dict[str, Any] = {
+                    "tool": "query_amenities",
+                    "status": "error",
+                    "error": str(exc),
+                    "filters": filters_payload or {},
+                }
+                _log_eval_tool_summary(summary)
                 return {"amenities_results": []}
             except Exception as exc:  # noqa: BLE001
                 _log_node_failure("query_amenities", exc)
-                _log_eval_tool_summary(
-                    {"tool": "query_amenities", "status": "error", "error": str(exc)},
-                )
-                return {"amenities_results": []}
-            _log_eval_tool_summary(
-                {
+                summary: dict[str, Any] = {
                     "tool": "query_amenities",
-                    "status": "ok",
-                    "count": len(results),
-                },
-            )
+                    "status": "error",
+                    "error": str(exc),
+                    "filters": filters_payload or {},
+                }
+                _log_eval_tool_summary(summary)
+                return {"amenities_results": []}
+            summary: dict[str, Any] = {
+                "tool": "query_amenities",
+                "status": "ok",
+                "count": len(results),
+                "filters": filters_payload or {},
+            }
+            _log_eval_tool_summary(summary)
             return {"amenities_results": results}
 
         async def query_services_node(state: ParsedState) -> dict[str, Any]:
@@ -1565,6 +1625,7 @@ class InfoAgentFactory:
 
             """
             parsed = state["parsed"]
+            filters_payload = _build_eval_filter_payload(parsed)
             filters = build_filters(
                 booking_required=parsed.booking_required,
                 min_price=parsed.min_price,
@@ -1582,19 +1643,31 @@ class InfoAgentFactory:
                 )
             except OperationalError as exc:
                 logger.warning("query_services operational failure: %s", exc)
-                _log_eval_tool_summary(
-                    {"tool": "query_services", "status": "error", "error": str(exc)},
-                )
+                summary: dict[str, Any] = {
+                    "tool": "query_services",
+                    "status": "error",
+                    "error": str(exc),
+                    "filters": filters_payload or {},
+                }
+                _log_eval_tool_summary(summary)
                 return {"services_results": []}
             except Exception as exc:  # noqa: BLE001
                 _log_node_failure("query_services", exc)
-                _log_eval_tool_summary(
-                    {"tool": "query_services", "status": "error", "error": str(exc)},
-                )
+                summary: dict[str, Any] = {
+                    "tool": "query_services",
+                    "status": "error",
+                    "error": str(exc),
+                    "filters": filters_payload or {},
+                }
+                _log_eval_tool_summary(summary)
                 return {"services_results": []}
-            _log_eval_tool_summary(
-                {"tool": "query_services", "status": "ok", "count": len(results)},
-            )
+            summary: dict[str, Any] = {
+                "tool": "query_services",
+                "status": "ok",
+                "count": len(results),
+                "filters": filters_payload or {},
+            }
+            _log_eval_tool_summary(summary)
             return {"services_results": results}
 
         def rerank_node(state: InfoState) -> dict[str, Any]:

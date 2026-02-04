@@ -1171,6 +1171,21 @@ async def run_example(  # noqa: C901, PLR0912, PLR0915
             if log is not None:
                 if not tool_summary and log.tool_summary:
                     tool_summary = list(log.tool_summary)
+                    # Normalize filters for query_amenities/query_services from log
+                    for entry in tool_summary:
+                        if (
+                            isinstance(entry, dict)
+                            and entry.get("tool")
+                            in {"query_amenities", "query_services"}
+                            and "filters" in entry
+                            and "filters_norm" not in entry
+                        ):
+                            normalized, unknown = _normalize_info_filters_strict(
+                                entry.get("filters"),
+                            )
+                            entry["filters_norm"] = normalized
+                            if unknown:
+                                entry["filters_unknown_keys"] = unknown
                 if not contexts_used and log.contexts_used:
                     contexts_used = list(log.contexts_used)
                 if log.tool_summary and tool_summary:
@@ -1184,6 +1199,18 @@ async def run_example(  # noqa: C901, PLR0912, PLR0915
                             isinstance(entry, dict)
                             and entry.get("tool") not in logged_names
                         ):
+                            if (
+                                entry.get("tool")
+                                in {"query_amenities", "query_services"}
+                                and "filters" in entry
+                                and "filters_norm" not in entry
+                            ):
+                                normalized, unknown = _normalize_info_filters_strict(
+                                    entry.get("filters"),
+                                )
+                                entry["filters_norm"] = normalized
+                                if unknown:
+                                    entry["filters_unknown_keys"] = unknown
                             tool_summary.append(entry)
 
             turn_outputs.append(

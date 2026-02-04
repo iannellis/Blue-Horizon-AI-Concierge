@@ -2166,7 +2166,8 @@ async def eval_llm_rubrics(run: Run, example: Example) -> list[dict[str, Any]]:
     prompt = (
         "You are an evaluation judge for a hotel concierge agent.\n"
         "Score the assistant on the rubric below. Output STRICT JSON only with "
-        "the required schema. No markdown, no prose, no extra keys.\n\n"
+        "the required schema. No markdown code fences, no prose, no extra keys. "
+        "Start your response directly with { and end with }.\n\n"
         "Rubric anchors:\n"
         "consumer_quality:\n"
         "  5: correct, complete, clear, actionable; matches user intent; "
@@ -2379,14 +2380,26 @@ def _safe_json_loads(payload: str) -> dict[str, Any] | None:
     """Parse a JSON string into a dict, returning None on failure.
 
     Args:
-        payload: Raw JSON text.
+        payload: Raw JSON text, possibly wrapped in markdown code fences.
 
     Returns:
         Parsed dict if the JSON is valid and a dict, otherwise None.
 
     """
+    # Strip markdown code fences if present
+    text = payload.strip()
+    if text.startswith("```"):
+        # Remove opening fence (```json or ```)
+        lines = text.split("\n")
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        # Remove closing fence
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines)
+
     try:
-        parsed = json.loads(payload)
+        parsed = json.loads(text)
     except json.JSONDecodeError:
         return None
     if isinstance(parsed, dict):
@@ -2759,6 +2772,7 @@ def _build_ragas_llm() -> InstructorBaseRagasLLM:
         model=ragas_cfg.llm_model,
         provider="google",
         client=client,
+        max_tokens=ragas_cfg.llm_max_tokens,
     )
     return AsyncFromSyncInstructorLLM(sync_llm=sync_llm)
 
@@ -2943,10 +2957,18 @@ async def _rag_score_turn(
         response=answer,
         retrieved_contexts=contexts,
     )
-    answer_relevancy_score = await answer_relevancy.ascore(
-        user_input=question,
-        response=answer,
-    )
+
+    try:
+        answer_relevancy_score = await answer_relevancy.ascore(
+            user_input=question,
+            response=answer,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "AnswerRelevancy metric failed: %s. Defaulting to 0.0",
+            exc,
+        )
+        answer_relevancy_score = 0.0
 
     context_precision_score: float | None = None
     context_recall_score: float | None = None

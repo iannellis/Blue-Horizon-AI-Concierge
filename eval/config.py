@@ -169,6 +169,7 @@ class RagasConfig:
         response_chars: Maximum characters for the assistant response.
         reference_chars: Maximum characters for the reference answer.
         llm_model: Model name for the Ragas LLM backend.
+        llm_max_tokens: Maximum output tokens for the Ragas LLM.
         embedding_model: Model name for the Ragas embeddings backend.
 
     """
@@ -180,6 +181,7 @@ class RagasConfig:
     response_chars: int
     reference_chars: int
     llm_model: str
+    llm_max_tokens: int
     embedding_model: str
 
 
@@ -824,6 +826,10 @@ def parse_ragas_config(data: Mapping[str, Any]) -> RagasConfig:
             _get_required_value(data, "reference_chars", section, int),
         ),
         llm_model=_get_required_value(data, "llm_model", section, str),
+        llm_max_tokens=max(
+            1,
+            _get_required_value(data, "llm_max_tokens", section, int),
+        ),
         embedding_model=_get_required_value(data, "embedding_model", section, str),
     )
 

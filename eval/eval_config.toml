@@ -1,10 +1,10 @@
 [experiment]
 # LangSmith dataset name to evaluate (required).
-dataset_name = "BlueHorizonEval_case5"
+dataset_name = "BlueHorizonEval_case2"
 # Prefix used when generating experiment names.
-experiment_prefix = "hotel-agent-eval-case5"
+experiment_prefix = "hotel-agent-eval-case2"
 # Optional run notes appended to experiment names.
-run_notes = "Small dataset with just case 5"
+run_notes = "Small dataset with just case 2"
 # Maximum concurrent example evaluations.
 max_concurrency = 10
 # Base output directory for local evaluation artifacts.
@@ -71,13 +71,13 @@ min_size = 1
 
 [judge]
 # Judge model name used for rubric grading (Gemini model unless code edited).
-model = "gemini-3-flash-preview"
+model = "gemini-2.5-flash"
 
 [ragas]
 # Maximum number of turns to score with Ragas.
 turns_max = 10
 # Maximum number of retrieved contexts per turn.
-contexts_max = 10
+contexts_max = 4
 # Maximum characters per retrieved context.
 context_chars = 5000
 # Maximum characters for the user query.
@@ -87,7 +87,9 @@ response_chars = 5000
 # Maximum characters for reference answers.
 reference_chars = 5000
 # Gemini model used for Ragas LLM scoring.
-llm_model = "gemini-3-flash-preview"
+llm_model = "gemini-2.5-flash"
+# Maximum output tokens for the Ragas LLM.
+llm_max_tokens = 2048
 # Gemini model used for Ragas embeddings.
 embedding_model = "gemini-embedding-001"
 

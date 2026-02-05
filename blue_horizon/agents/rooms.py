@@ -389,6 +389,27 @@ def _contains_statement_separator(query: str) -> bool:  # noqa: C901, PLR0912, P
     return False
 
 
+def _extract_cte_names(query: str) -> set[str]:
+    """Extract CTE names from WITH clauses in a SQL query.
+
+    Args:
+        query: SQL query string.
+
+    Returns:
+        Set of normalized CTE names found in the query.
+
+    """
+    # Match CTE definitions: WITH [RECURSIVE] name AS ( or , name AS (
+    cte_pattern = re.compile(
+        r"(?:\bWITH\s+(?:RECURSIVE\s+)?|,\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s+AS\s*\(",
+        re.IGNORECASE,
+    )
+    return {
+        _normalize_identifier(match.group(1))
+        for match in cte_pattern.finditer(query)
+    }
+
+
 def validate_sql(query: str, *, allow_only_hotel_tables: bool) -> None:
     """Validate a SQL statement against conservative guardrails.
 
@@ -396,7 +417,7 @@ def validate_sql(query: str, *, allow_only_hotel_tables: bool) -> None:
       - Exactly one statement per call (no statement separators).
       - Blocks common catalog/extension escape hatches.
       - Blocks DDL and privileged commands.
-      - Optionally restricts table references to an allowlist.
+      - Optionally restricts table references to an allowlist (CTEs are allowed).
 
     Args:
         query: SQL statement to validate.
@@ -426,10 +447,14 @@ def validate_sql(query: str, *, allow_only_hotel_tables: bool) -> None:
         raise ValueError(msg)
 
     if allow_only_hotel_tables:
+        # Extract CTE names from the query - these are allowed references
+        cte_names = _extract_cte_names(query)
+        allowed = _ALLOWED_TABLES | cte_names
+
         for _, part1, part2 in _TABLE_REF.findall(q):
             table_token = part2 or part1
             table = _normalize_identifier(table_token)
-            if table not in _ALLOWED_TABLES:
+            if table not in allowed:
                 msg = f"Table not allowed: {table_token}"
                 raise ValueError(msg)
 

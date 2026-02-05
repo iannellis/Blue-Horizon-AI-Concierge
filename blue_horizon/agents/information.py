@@ -1520,7 +1520,11 @@ class InfoAgentFactory:
                                     "Extract a single query string plus any "
                                     "constraints (booking, price, notice, duration) "
                                     "from the full conversation. Prefer the latest "
-                                    "user request."
+                                    "user request.\n\n"
+                                    "Note: Service and amenity descriptions often "
+                                    "include duration information. Do not extract "
+                                    "these as user duration constraints unless the "
+                                    "user explicitly requests a specific duration."
                                 ),
                             ),
                             *state["messages"],

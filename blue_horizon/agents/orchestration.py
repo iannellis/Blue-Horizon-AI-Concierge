@@ -456,11 +456,15 @@ class OrchestrationAgentFactory:
             logger.info("Router decision: %s", step)
             return {"route": step}
 
-        async def info_node(state: ConversationState) -> dict[str, Any]:
+        async def info_node(
+            state: ConversationState,
+            config: RunnableConfig,
+        ) -> dict[str, Any]:
             """Invoke the compiled info agent.
 
             Args:
                 state: Current conversation state.
+                config: Runnable config with callbacks, tags, metadata.
 
             Returns:
                 State patch from the info agent.
@@ -470,7 +474,7 @@ class OrchestrationAgentFactory:
 
             try:
                 result = await asyncio.wait_for(
-                    resources.get_info_agent().ainvoke(state),
+                    resources.get_info_agent().ainvoke(state, config=config),
                     timeout=cfg.orchestration.info_timeout_s,
                 )
             except asyncio.TimeoutError:  # noqa: UP041
@@ -497,11 +501,15 @@ class OrchestrationAgentFactory:
 
             return cast("dict[str, Any]", result)
 
-        async def rooms_node(state: ConversationState) -> dict[str, Any]:
+        async def rooms_node(
+            state: ConversationState,
+            config: RunnableConfig,
+        ) -> dict[str, Any]:
             """Invoke the compiled rooms agent.
 
             Args:
                 state: Current conversation state.
+                config: Runnable config with callbacks, tags, metadata.
 
             Returns:
                 State patch from the rooms agent.
@@ -511,7 +519,7 @@ class OrchestrationAgentFactory:
 
             try:
                 result = await asyncio.wait_for(
-                    resources.get_rooms_agent().ainvoke(state),
+                    resources.get_rooms_agent().ainvoke(state, config=config),
                     timeout=cfg.orchestration.rooms_timeout_s,
                 )
             except asyncio.TimeoutError:  # noqa: UP041

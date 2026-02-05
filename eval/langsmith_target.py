@@ -8,6 +8,7 @@ the router sends a turn to the "rooms" path.
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import json
 import logging
@@ -867,7 +868,7 @@ class EvalCaptureCallback(AsyncCallbackHandler):
                 entry["k"] = k_value
         self._pending_tool_entries[run_id] = entry
 
-    async def on_tool_end(
+    async def on_tool_end(  # noqa: C901, PLR0912
         self,
         output: Any,  # noqa: ANN401
         *,
@@ -891,8 +892,41 @@ class EvalCaptureCallback(AsyncCallbackHandler):
         tool_name = _get_tool_name(kwargs)
         if tool_name is None and isinstance(entry, dict):
             tool_name = entry.get("tool")
+
         if tool_name == "run_sql":
-            self._capture_run_sql(output, entry)
+            # Extract content from ToolMessage if needed
+            actual_output = output
+            if isinstance(output, ToolMessage):
+                actual_output = output.content
+                # Parse string if needed (could be JSON or Python literal)
+                if isinstance(actual_output, str):
+                    try:
+                        actual_output = json.loads(actual_output)
+                    except json.JSONDecodeError:
+                        # Try Python literal_eval for dict string representations
+                        # Preprocess to handle Decimal('...') and datetime.date(...)
+                        cleaned = re.sub(
+                            r"Decimal\('([^']*)'\)",
+                            r'"\1"',
+                            actual_output,
+                        )
+                        cleaned = re.sub(
+                            r"datetime\.date\((\d+),\s*(\d+),\s*(\d+)\)",
+                            lambda m: (
+                                f'"{m.group(1)}-'
+                                f'{int(m.group(2)):02d}-'
+                                f'{int(m.group(3)):02d}"'
+                            ),
+                            cleaned,
+                        )
+                        try:  # noqa: SIM105
+                            actual_output = ast.literal_eval(cleaned)
+                        except (ValueError, SyntaxError):
+                            pass
+
+            # Only capture if we successfully parsed to a dict/mapping
+            if isinstance(actual_output, Mapping):
+                self._capture_run_sql(actual_output, entry)
             return
         if tool_name == "hydrate_items":
             self._capture_hydrate_items(output, entry)
@@ -980,6 +1014,17 @@ class EvalCaptureCallback(AsyncCallbackHandler):
             },
         )
         self.tool_summary.append(summary)
+
+        # Add SQL results to contexts_used for judge LLM evaluation
+        if isinstance(payload.rows, list) and payload.rows:
+            for row in payload.rows:
+                if isinstance(row, Mapping):
+                    # Format as readable key-value pairs
+                    row_str = ", ".join(
+                        f"{k}: {v}" for k, v in row.items() if v is not None
+                    )
+                    if row_str:
+                        self.contexts_used.append(f"SQL result: {row_str}")
 
     @staticmethod
     def _json_safe(value: object) -> object:

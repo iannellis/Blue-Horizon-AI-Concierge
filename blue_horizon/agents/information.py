@@ -35,7 +35,7 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from dotenv import load_dotenv
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
@@ -1511,21 +1511,35 @@ class InfoAgentFactory:
         async def parse_node(state: InfoState) -> dict[str, Any]:
             """Parse the user request into a structured query and constraints."""
             try:
-                parsed = await parser_llm.ainvoke(
-                    [
-                        SystemMessage(
-                            content=(
-                                "Extract a single query string plus any constraints "
-                                "(booking, price, notice, duration) from the full "
-                                "conversation. Prefer the latest user request."
+                parsed = cast(
+                    "ParsedQuery",
+                    await parser_llm.ainvoke(
+                        [
+                            SystemMessage(
+                                content=(
+                                    "Extract a single query string plus any "
+                                    "constraints (booking, price, notice, duration) "
+                                    "from the full conversation. Prefer the latest "
+                                    "user request."
+                                ),
                             ),
-                        ),
-                        *state["messages"],
-                    ],
+                            *state["messages"],
+                        ],
+                    ),
                 )
             except Exception as exc:  # noqa: BLE001
                 _log_node_failure("parse", exc)
                 parsed = ParsedQuery(query=_latest_user_text(state["messages"]))
+
+            # Log parsed query for evaluation visibility
+            _log_eval_tool_summary(
+                {
+                    "tool": "parser",
+                    "status": "ok",
+                    "parsed_query": parsed.model_dump(exclude_none=True),
+                },
+            )
+
             return {"parsed": parsed}
 
         async def query_faq_node(state: ParsedState) -> dict[str, Any]:

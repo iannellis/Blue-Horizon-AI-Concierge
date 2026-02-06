@@ -514,6 +514,19 @@ to_acquire AS (
   LEFT JOIN old_dates od ON od.date = nd.date
   WHERE od.date IS NULL
 ),
+overlap_dates AS (
+  SELECT od.date
+  FROM old_dates od
+  JOIN new_dates nd ON nd.date = od.date
+),
+overlap_prices AS (
+  SELECT ra.price
+  FROM room_availability ra
+  JOIN overlap_dates ovd ON ovd.date = ra.date
+  WHERE ra.room_number = $5
+    AND ra.status = 'Booked'
+    AND ra.price IS NOT NULL
+),
 release_rows AS (
   SELECT ra.id, ra.date
   FROM room_availability ra
@@ -556,12 +569,9 @@ acquired AS (
   RETURNING ra.date, ra.price
 ),
 new_total AS (
-  SELECT COALESCE(SUM(ra.price), 0) AS total_price
-  FROM room_availability ra
-  JOIN new_dates nd ON nd.date = ra.date
-  WHERE ra.room_number = $5
-    AND ra.status = 'Booked'
-    AND ra.price IS NOT NULL
+  SELECT
+    COALESCE((SELECT SUM(price) FROM acquired), 0) +
+    COALESCE((SELECT SUM(price) FROM overlap_prices), 0) AS total_price
 )
 SELECT
   (SELECT release_needed FROM counts) AS release_needed,
@@ -614,6 +624,19 @@ to_acquire AS (
   LEFT JOIN old_dates od ON od.date = nd.date
   WHERE od.date IS NULL
 ),
+overlap_dates AS (
+  SELECT od.date
+  FROM old_dates od
+  JOIN new_dates nd ON nd.date = od.date
+),
+overlap_prices AS (
+  SELECT ra.price
+  FROM room_availability ra
+  JOIN requested_rooms rr ON rr.room_number = ra.room_number
+  JOIN overlap_dates ovd ON ovd.date = ra.date
+  WHERE ra.status = 'Booked'
+    AND ra.price IS NOT NULL
+),
 release_rows AS (
   SELECT ra.id, ra.room_number, ra.date
   FROM room_availability ra
@@ -659,12 +682,9 @@ acquired AS (
   RETURNING ra.room_number, ra.date, ra.price
 ),
 new_total AS (
-  SELECT COALESCE(SUM(ra.price), 0) AS total_price
-  FROM room_availability ra
-  JOIN requested_rooms rr ON rr.room_number = ra.room_number
-  JOIN new_dates nd ON nd.date = ra.date
-  WHERE ra.status = 'Booked'
-    AND ra.price IS NOT NULL
+  SELECT
+    COALESCE((SELECT SUM(price) FROM acquired), 0) +
+    COALESCE((SELECT SUM(price) FROM overlap_prices), 0) AS total_price
 )
 SELECT
   (SELECT rooms_requested FROM counts) AS rooms_requested,
@@ -713,3 +733,7 @@ After responding, only offer follow-ups related to:
 ### Required closing offer
 
 At the end of every user-facing response, include a brief final sentence offering to look up information about the hotel and its offerings (e.g., amenities, services, policies). Keep it short and natural.
+
+### Language requirements
+
+Keep your responses in English

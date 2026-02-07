@@ -1576,13 +1576,12 @@ async def eval_rooms_outcome_and_invariants(
 
     Args:
         run: LangSmith run object containing tool summaries and final schema.
-        example: LangSmith example object (unused, for interface parity).
+        example: LangSmith example with per-turn ``expected_success`` flags.
 
     Returns:
         List of LangSmith metric dicts for tool outcomes and DB invariants.
 
     """
-    _ = example
     outputs = run.outputs or {}
     schema = outputs.get("final_db_schema")
     slot_id = outputs.get("schema_slot_id")
@@ -1596,7 +1595,7 @@ async def eval_rooms_outcome_and_invariants(
         ]
 
     try:
-        outcome_metrics = _score_rooms_tool_outcomes(run)
+        outcome_metrics = _score_rooms_tool_outcomes(run, example)
         invariants_results = await _check_rooms_db_invariants(schema=str(schema))
         return [
             *outcome_metrics,
@@ -1608,37 +1607,49 @@ async def eval_rooms_outcome_and_invariants(
 
 def _score_rooms_tool_outcomes(
     run: Run,
+    example: Example,
 ) -> list[dict[str, Any]]:
-    """Score rooms tool outcomes using atomic booking/modify summaries.
+    """Score rooms tool outcomes against expected results.
 
     Args:
         run: LangSmith run object containing tool summaries.
+        example: LangSmith example with per-turn ``expected_success`` flags.
 
     Returns:
-        List of LangSmith metrics for tool errors, atomic success, and a soft
-        rowcount presence check.
+        List of LangSmith metrics for tool errors, outcome match rate, and a
+        soft rowcount presence check.
 
     """
     limits = load_eval_config().evaluator_limits
     turn_outputs = _iter_turn_outputs(run)
-    rooms_turns = [t for t in turn_outputs if t.get("route_pred") == "rooms"]
+    example_turns = _get_example_turns(example)
 
     counts = _init_rooms_outcome_counts()
-    atomic_fail_details: list[dict[str, Any]] = []
+    unexpected_fail_details: list[dict[str, Any]] = []
 
-    for turn_idx, turn in enumerate(rooms_turns):
+    for global_idx, turn in enumerate(turn_outputs):
+        if turn.get("route_pred") != "rooms":
+            continue
         tool_summary = turn.get("tool_summary") or []
         if not isinstance(tool_summary, list):
             continue
+
+        expected_success: bool | None = None
+        if global_idx < len(example_turns):
+            es = example_turns[global_idx].get("expected_success")
+            if isinstance(es, bool):
+                expected_success = es
+
         _accumulate_rooms_turn(
-            turn_idx=turn_idx,
+            turn_idx=global_idx,
             tool_summary=tool_summary,
             counts=counts,
-            atomic_fail_details=atomic_fail_details,
+            unexpected_fail_details=unexpected_fail_details,
+            expected_success=expected_success,
         )
 
     tool_error_score, tool_error_comment = _format_tool_error_metric(counts)
-    atomic_rate, atomic_comment = _format_atomic_metric(counts)
+    match_rate, match_comment = _format_outcome_match_metric(counts)
     rowcount_score, rowcount_comment = _format_rowcount_metric(counts)
 
     metrics: list[dict[str, Any]] = [
@@ -1648,9 +1659,9 @@ def _score_rooms_tool_outcomes(
             "comment": tool_error_comment,
         },
         {
-            "key": "rooms_atomic_success_rate",
-            "score": atomic_rate,
-            "comment": atomic_comment,
+            "key": "rooms_outcome_match_rate",
+            "score": match_rate,
+            "comment": match_comment,
         },
         {
             "key": "rooms_rowcount_sanity",
@@ -1658,21 +1669,23 @@ def _score_rooms_tool_outcomes(
             "comment": rowcount_comment,
         },
     ]
-    if atomic_fail_details:
-        raw_failures = _json_value(atomic_fail_details)
+    if unexpected_fail_details:
+        raw_failures = _json_value(unexpected_fail_details)
         if len(raw_failures) > limits.json_value_max:
             metrics.append(
                 {
-                    "key": "rooms_atomic_failures",
+                    "key": "rooms_unexpected_failures",
                     "value": _json_value(
-                        atomic_fail_details,
+                        unexpected_fail_details,
                         max_len=limits.json_value_max,
                     ),
                     "comment": "JSON truncated",
                 },
             )
         else:
-            metrics.append({"key": "rooms_atomic_failures", "value": raw_failures})
+            metrics.append(
+                {"key": "rooms_unexpected_failures", "value": raw_failures},
+            )
     return metrics
 
 
@@ -1687,8 +1700,8 @@ def _init_rooms_outcome_counts() -> dict[str, int]:
         "tool_errors": 0,
         "rowcount_present": 0,
         "run_sql_calls": 0,
-        "atomic_successes": 0,
-        "atomic_failures": 0,
+        "outcome_matches": 0,
+        "unexpected_failures": 0,
     }
 
 
@@ -1697,15 +1710,19 @@ def _accumulate_rooms_turn(
     turn_idx: int,
     tool_summary: list[object],
     counts: dict[str, int],
-    atomic_fail_details: list[dict[str, Any]],
+    unexpected_fail_details: list[dict[str, Any]],
+    expected_success: bool | None,
 ) -> None:
     """Accumulate outcome counts for a single rooms turn.
 
     Args:
-        turn_idx: Index of the rooms turn within the run.
+        turn_idx: Global turn index within the run.
         tool_summary: Tool summary entries for the turn.
         counts: Mutable counter dict updated in place.
-        atomic_fail_details: Failure details list updated in place.
+        unexpected_fail_details: Unexpected failure details list updated in
+            place.
+        expected_success: Whether the example expects this turn to succeed.
+            ``False`` means a failure is expected and should not be penalised.
 
     """
     for entry in tool_summary:
@@ -1716,11 +1733,12 @@ def _accumulate_rooms_turn(
             counts["tool_errors"] += 1
         if entry.get("rowcount") is not None:
             counts["rowcount_present"] += 1
-        _accumulate_atomic_outcome(
+        _accumulate_outcome(
             turn_idx=turn_idx,
             entry=entry,
             counts=counts,
-            atomic_fail_details=atomic_fail_details,
+            unexpected_fail_details=unexpected_fail_details,
+            expected_success=expected_success,
         )
 
 
@@ -1753,20 +1771,24 @@ def _has_tool_error(summary: dict[str, Any]) -> bool:
     return bool(summary.get("error"))
 
 
-def _accumulate_atomic_outcome(
+def _accumulate_outcome(
     *,
     turn_idx: int,
     entry: dict[str, Any],
     counts: dict[str, int],
-    atomic_fail_details: list[dict[str, Any]],
+    unexpected_fail_details: list[dict[str, Any]],
+    expected_success: bool | None,
 ) -> None:
-    """Accumulate atomic outcome counts for a single run_sql entry.
+    """Accumulate outcome counts for a single run_sql entry.
 
     Args:
-        turn_idx: Index of the rooms turn within the run.
+        turn_idx: Global turn index within the run.
         entry: Tool summary dict for a run_sql call.
         counts: Mutable counter dict updated in place.
-        atomic_fail_details: Failure details list updated in place.
+        unexpected_fail_details: Unexpected failure details list updated in
+            place.
+        expected_success: Whether the example expects this turn to succeed.
+            When ``False``, a booking/modify failure is not penalised.
 
     """
     rows = _extract_rows(entry)
@@ -1776,10 +1798,13 @@ def _accumulate_atomic_outcome(
         return
     success, detail = _score_atomic_outcome(op=op, row=first_row)
     if success:
-        counts["atomic_successes"] += 1
+        counts["outcome_matches"] += 1
         return
-    counts["atomic_failures"] += 1
-    atomic_fail_details.append({"turn": turn_idx, "op": op, **detail})
+    if expected_success is False:
+        counts["outcome_matches"] += 1
+        return
+    counts["unexpected_failures"] += 1
+    unexpected_fail_details.append({"turn": turn_idx, "op": op, **detail})
 
 
 def _format_tool_error_metric(counts: dict[str, int]) -> tuple[float, str]:
@@ -1798,24 +1823,24 @@ def _format_tool_error_metric(counts: dict[str, int]) -> tuple[float, str]:
     return 0.0, f"{tool_errors} run_sql errors detected."
 
 
-def _format_atomic_metric(counts: dict[str, int]) -> tuple[float, str]:
-    """Format the atomic success metric from accumulated counts.
+def _format_outcome_match_metric(counts: dict[str, int]) -> tuple[float, str]:
+    """Format the outcome match metric from accumulated counts.
 
     Args:
         counts: Counter dict accumulated across rooms turns.
 
     Returns:
-        Tuple of (score, comment) for rooms_atomic_success_rate.
+        Tuple of (score, comment) for rooms_outcome_match_rate.
 
     """
-    atomic_successes = counts["atomic_successes"]
-    atomic_failures = counts["atomic_failures"]
-    atomic_total = atomic_successes + atomic_failures
-    if atomic_total == 0:
-        return 1.0, "No atomic BOOK/MODIFY outcomes detected."
+    matches = counts["outcome_matches"]
+    unexpected = counts["unexpected_failures"]
+    total = matches + unexpected
+    if total == 0:
+        return 1.0, "No BOOK/MODIFY outcomes to evaluate."
     return (
-        atomic_successes / atomic_total,
-        f"Atomic successes {atomic_successes}/{atomic_total}.",
+        matches / total,
+        f"Outcomes matched {matches}/{total}.",
     )
 
 

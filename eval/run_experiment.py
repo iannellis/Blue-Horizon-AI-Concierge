@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import logging
 import platform
 import re
 from collections.abc import Iterable, Mapping, MutableMapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from dotenv import load_dotenv
@@ -29,8 +31,6 @@ from eval.evaluators import (
 from eval.langsmith_target import run_example
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from langsmith.schemas import Example
 
 load_dotenv()
@@ -143,6 +143,8 @@ async def main() -> None:
     upload_results = cfg.experiment.upload_results
     limit = cfg.experiment.limit
 
+    _configure_logging(experiment_name)
+
     # Setting LANGSMITH_TEST_CACHE enables caching of example runs to reduce cost/time.
     metadata = _build_metadata(cfg.metadata)
 
@@ -204,6 +206,42 @@ async def main() -> None:
         summary = _build_error_summary(context, exc)
         _write_summary(artifacts.summary_path, summary)
         raise
+
+
+def _configure_logging(experiment_name: str) -> None:
+    """Configure file-based logging for the evaluation run.
+
+    Writes logs to ``eval/logs/<experiment_name>.log`` and also emits to
+    stderr so that console output is preserved.
+
+    Args:
+        experiment_name: Name of the current experiment, used as the log
+            filename stem.
+
+    """
+    log_dir = Path("eval/logs")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"{experiment_name}.log"
+
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s %(levelname)-8s [%(name)s] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        ),
+    )
+
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(
+        logging.Formatter("%(levelname)-8s [%(name)s] %(message)s"),
+    )
+
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.addHandler(file_handler)
+    root.addHandler(console_handler)
 
 
 def _build_experiment_name(
@@ -571,7 +609,7 @@ def _init_metric_values() -> dict[str, list[float]]:
     """
     return {
         "route_accuracy": [],
-        "rooms_atomic_success_rate": [],
+        "rooms_outcome_match_rate": [],
         "consumer_quality": [],
         "grounding": [],
         "injection_resistance": [],
@@ -606,8 +644,8 @@ def _update_metric_values(
                 values.append(metric_value)
         if key in {"route_accuracy", "routing_accuracy"} and score is not None:
             metric_values["route_accuracy"].append(score)
-        if key == "rooms_atomic_success_rate" and score is not None:
-            metric_values["rooms_atomic_success_rate"].append(score)
+        if key == "rooms_outcome_match_rate" and score is not None:
+            metric_values["rooms_outcome_match_rate"].append(score)
         if key == "info_reference_subset_pass_rate" and score is not None:
             metric_values["info_reference_subset_pass_rate"].append(score)
         if "expected_filters" in key and value is not None:
@@ -654,8 +692,8 @@ def _mean_metrics(metric_values: Mapping[str, list[float]]) -> dict[str, object]
     """
     mean_values = {
         "mean_route_accuracy": _mean(metric_values["route_accuracy"]),
-        "mean_rooms_atomic_success_rate": _mean(
-            metric_values["rooms_atomic_success_rate"],
+        "mean_rooms_outcome_match_rate": _mean(
+            metric_values["rooms_outcome_match_rate"],
         ),
         "mean_consumer_quality": _mean(metric_values["consumer_quality"]),
         "mean_grounding": _mean(metric_values["grounding"]),

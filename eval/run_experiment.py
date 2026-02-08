@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 from langsmith import Client
 from langsmith.evaluation import aevaluate
 
-from blue_horizon.load_data.rooms_pgsql import reload_sql_tables
+from blue_horizon.agents.rooms import get_pgsql_db_url, set_eval_schema
 from eval.config import MetadataConfig, load_eval_config
 from eval.evaluators import (
     eval_info_expected_filters,
@@ -30,9 +30,20 @@ from eval.evaluators import (
     eval_routing_accuracy,
 )
 from eval.langsmith_target import run_example
+from eval.rooms_schema_manager import (
+    create_case_schema,
+    generate_schema_name,
+    open_schema_pool,
+    teardown_schema,
+)
 
 if TYPE_CHECKING:
+    from contextvars import Token
+
     from langsmith.schemas import Example
+    from psycopg_pool import AsyncConnectionPool
+
+    from eval.config import EvalConfig
 
 load_dotenv()
 
@@ -174,9 +185,8 @@ async def main() -> None:
         aevaluate_kwargs["experiment_prefix"] = experiment_name
 
     examples = _load_dataset_examples(dataset_name, limit)
-    if _has_rooms_cases(examples):
-        logger.info("Dataset contains rooms-path cases; resetting SQL tables.")
-        reload_sql_tables()
+    has_rooms = _has_rooms_cases(examples)
+    schema_resources = await _setup_eval_schema(cfg) if has_rooms else None
 
     try:
         results = await aevaluate(run_example, examples, **aevaluate_kwargs)
@@ -210,6 +220,12 @@ async def main() -> None:
         summary = _build_error_summary(context, exc)
         _write_summary(artifacts.summary_path, summary)
         raise
+    finally:
+        if schema_resources is not None:
+            pool, schema, token = schema_resources
+            drop_err = await teardown_schema(token, pool, schema)
+            if drop_err:
+                logger.warning("Schema teardown error: %s", drop_err)
 
 
 def _configure_logging(experiment_name: str) -> None:
@@ -384,6 +400,37 @@ def _has_rooms_cases(examples: Iterable[Example]) -> bool:
         if _ROOMS_TAGS.intersection(tags):
             return True
     return False
+
+
+async def _setup_eval_schema(
+    cfg: EvalConfig,
+) -> tuple[AsyncConnectionPool[Any], str, Token[str | None]]:
+    """Create a dedicated schema for the evaluation run.
+
+    Opens a connection pool, generates a unique schema name, loads baseline
+    room data into the new schema, and sets the ``EVAL_SCHEMA`` ContextVar so
+    that the rooms agent routes SQL there.
+
+    Args:
+        cfg: The loaded evaluation configuration.
+
+    Returns:
+        A tuple of ``(pool, schema_name, token)`` for later teardown.
+
+    """
+    schema = generate_schema_name("eval")
+    pool = await open_schema_pool(
+        get_pgsql_db_url(),
+        max_size=cfg.reset_pool.max_size,
+    )
+    await create_case_schema(
+        pool=pool,
+        schema=schema,
+        data_path=str(cfg.rooms.data_path),
+    )
+    token = set_eval_schema(schema)
+    logger.info("Eval schema ready: %s", schema)
+    return pool, schema, token
 
 
 def _write_summary(path: Path, summary: Mapping[str, object]) -> None:

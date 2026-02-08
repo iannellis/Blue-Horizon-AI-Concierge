@@ -16,34 +16,32 @@ import json
 import os
 import random
 import statistics
-import string
 import time
 from collections.abc import Mapping, Sequence
-from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from psycopg_pool import AsyncConnectionPool
 
-from blue_horizon.agents.rooms import (
-    get_pgsql_db_url,
-    reset_eval_schema,
-    set_eval_schema,
-)
+from blue_horizon.agents.rooms import get_pgsql_db_url, set_eval_schema
 from eval.config import load_eval_config
 from eval.langsmith_target import OrchestrationManager
-from eval.rooms_schema_manager import create_case_schema, drop_case_schema
+from eval.rooms_schema_manager import (
+    create_case_schema,
+    generate_schema_name,
+    open_schema_pool,
+    teardown_schema,
+)
 
 HOT_TARGET_PROBABILITY = 0.8
 
 if TYPE_CHECKING:
     from contextvars import Token
     from pathlib import Path
-else:
-    Token = object  # type: ignore[assignment]
+
+    from psycopg_pool import AsyncConnectionPool
 
 load_dotenv()
 
@@ -109,7 +107,7 @@ async def run_stress() -> None:
     start_time = time.perf_counter()
     try:
         orchestration = await _start_orchestration()
-        pool = await _open_pool(cfg.db_url, cfg.pool_max)
+        pool = await open_schema_pool(cfg.db_url, max_size=cfg.pool_max)
         token, targets, hot_targets = await _init_schema_and_targets(pool, cfg)
         op_logs, user_logs = await _run_workload(
             orchestration,
@@ -119,11 +117,7 @@ async def run_stress() -> None:
         )
         invariants = await _check_invariants(pool, cfg.schema)
     finally:
-        schema_drop_error = await _cleanup(
-            token=token,
-            pool=pool,
-            schema=cfg.schema,
-        )
+        schema_drop_error = await teardown_schema(token, pool, cfg.schema)
 
     elapsed_s = max(0.0, time.perf_counter() - start_time)
     summary = _build_summary(
@@ -154,7 +148,7 @@ def _load_config() -> StressConfig:
 
     """
     cfg = load_eval_config().stress
-    schema = cfg.schema or _default_schema_name()
+    schema = cfg.schema or generate_schema_name("stress")
     users = cfg.users
     ops_per_user = cfg.ops_per_user
     max_concurrency = cfg.max_concurrency
@@ -189,31 +183,6 @@ def _load_config() -> StressConfig:
     )
 
 
-def _default_schema_name() -> str:
-    """Construct a default stress schema name with timestamp and randomness.
-
-    Returns:
-        A schema name of the form ``stress_<YYYYMMDD_HHMMSS>_<rand6>``.
-
-    """
-    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-    return f"stress_{ts}_{_rand_suffix(6)}"
-
-
-def _rand_suffix(n: int = 6) -> str:
-    """Generate a short random suffix for schema names.
-
-    Args:
-        n: The number of characters to include in the suffix.
-
-    Returns:
-        A random lowercase alphanumeric string of length ``n``.
-
-    """
-    alphabet = string.ascii_lowercase + string.digits
-    return "".join(random.choice(alphabet) for _ in range(n))  # noqa: S311
-
-
 async def _start_orchestration() -> OrchestrationManager:
     """Start the orchestrator and wait for readiness with a timeout.
 
@@ -235,27 +204,6 @@ async def _start_orchestration() -> OrchestrationManager:
         await asyncio.sleep(0.1)
 
     return orchestration
-
-
-async def _open_pool(db_url: str, pool_max: int) -> AsyncConnectionPool:
-    """Create and open an async Postgres connection pool.
-
-    Args:
-        db_url: The Postgres connection URL.
-        pool_max: The maximum size of the connection pool.
-
-    Returns:
-        An open ``AsyncConnectionPool``.
-
-    """
-    pool = AsyncConnectionPool(
-        conninfo=db_url,
-        min_size=1,
-        max_size=pool_max,
-        open=False,
-    )
-    await pool.open()
-    return cast("AsyncConnectionPool", pool)
 
 
 async def _init_schema_and_targets(
@@ -1049,39 +997,6 @@ async def _check_invariants(
         "null_status_count": int(null_status_count),
         "passed": len(double_booked_rows) == 0 and int(null_status_count) == 0,
     }
-
-
-async def _cleanup(
-    *,
-    token: Token[str | None] | None,
-    pool: AsyncConnectionPool | None,
-    schema: str,
-) -> str | None:
-    """Best-effort cleanup of eval schema and stress schema.
-
-    Args:
-        token: The schema token returned by ``set_eval_schema``.
-        pool: The open database pool, if any.
-        schema: The schema name to drop.
-
-    Returns:
-        A schema drop error message, if one occurred.
-
-    """
-    schema_drop_error: str | None = None
-    if token is not None:
-        with suppress(Exception):
-            reset_eval_schema(token)
-
-    if pool is not None:
-        try:
-            await drop_case_schema(pool=pool, schema=schema)
-        except Exception as exc:  # noqa: BLE001
-            schema_drop_error = f"{type(exc).__name__}: {exc}"
-        with suppress(Exception):
-            await pool.close()
-
-    return schema_drop_error
 
 
 def _build_summary(  # noqa: PLR0913

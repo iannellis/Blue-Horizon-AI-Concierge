@@ -21,6 +21,7 @@ import os
 import re
 from typing import TYPE_CHECKING, Any, Protocol, TypeGuard, TypeVar, runtime_checkable
 
+from psycopg import sql
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 from ragas.embeddings.base import (
@@ -36,6 +37,7 @@ from ragas.metrics.collections import (
     Faithfulness,
 )
 
+from blue_horizon.agents.rooms import EVAL_SCHEMA
 from eval.config import load_eval_config
 
 try:  # Optional dependency for LangChain Gemini integration.
@@ -2074,7 +2076,10 @@ async def _ensure_eval_pool() -> AsyncConnectionPool[Any]:
 
 
 async def _check_rooms_db_invariants() -> list[dict[str, Any]]:
-    """Check rooms DB invariants in the public schema.
+    """Check rooms DB invariants in the current evaluation schema.
+
+    Uses the ``EVAL_SCHEMA`` ContextVar to determine the schema.  Falls back
+    to ``public`` when the variable is unset.
 
     Returns:
         List of LangSmith metric dicts for DB invariants.
@@ -2084,8 +2089,13 @@ async def _check_rooms_db_invariants() -> list[dict[str, Any]]:
     double_booking_rows = 0
     null_status_count = 0
 
+    eval_schema = EVAL_SCHEMA.get() or "public"
     async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute("SET search_path TO public;")
+        await cur.execute(
+            sql.SQL("SET search_path TO {};").format(
+                sql.Identifier(eval_schema),
+            ),
+        )
 
         await cur.execute(
             """

@@ -22,7 +22,7 @@
     "turns_with_expected_filters": 40
   },
   "expected_filters_key_usage": {
-    "booking_required": 10,
+    "booking_required": 5,
     "min_price": 0,
     "max_price": 38,
     "min_notice_hours": 0,
@@ -124,14 +124,9 @@
     ],
     "case_ids_with_booking_required_constraints": [
       "case_0005",
-      "case_0008",
-      "case_0013",
-      "case_0018",
       "case_0023",
       "case_0045",
-      "case_0151",
-      "case_0156",
-      "case_0167"
+      "case_0156"
     ]
   }
 }

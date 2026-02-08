@@ -22,13 +22,13 @@
     "turns_with_expected_filters": 40
   },
   "expected_filters_key_usage": {
-    "booking_required": 13,
+    "booking_required": 10,
     "min_price": 0,
     "max_price": 38,
     "min_notice_hours": 0,
     "max_notice_hours": 31,
-    "min_duration_minutes": 30,
-    "max_duration_minutes": 40
+    "min_duration_minutes": 32,
+    "max_duration_minutes": 39
   },
   "sanity_checks": {
     "turns_expected_route_invalid": 0,
@@ -101,9 +101,9 @@
       "case_0025",
       "case_0037",
       "case_0045",
-      "case_0068",
       "case_0151",
-      "case_0153"
+      "case_0153",
+      "case_0156"
     ],
     "case_ids_with_price_constraints": [
       "case_0002",
@@ -127,9 +127,7 @@
       "case_0008",
       "case_0013",
       "case_0018",
-      "case_0021",
       "case_0023",
-      "case_0025",
       "case_0045",
       "case_0151",
       "case_0156",

@@ -1,4 +1,4 @@
-"""Schema-per-case helpers for evaluation DB resets."""
+"""Use a separate DB schema for stress and evaluation."""
 
 from __future__ import annotations
 

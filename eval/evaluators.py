@@ -21,7 +21,6 @@ import os
 import re
 from typing import TYPE_CHECKING, Any, Protocol, TypeGuard, TypeVar, runtime_checkable
 
-from psycopg import sql
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 from ragas.embeddings.base import (
@@ -38,8 +37,6 @@ from ragas.metrics.collections import (
 )
 
 from eval.config import load_eval_config
-from eval.db_reset import drop_case_schema
-from eval.schema_slots import release_schema_slot
 
 try:  # Optional dependency for LangChain Gemini integration.
     from langchain_google_genai import ChatGoogleGenerativeAI as _ChatGoogleGenerativeAI
@@ -1575,7 +1572,7 @@ async def eval_rooms_outcome_and_invariants(
     """Evaluate rooms tool outcomes and DB invariants for rooms turns.
 
     Args:
-        run: LangSmith run object containing tool summaries and final schema.
+        run: LangSmith run object containing tool summaries.
         example: LangSmith example with per-turn ``expected_success`` flags.
 
     Returns:
@@ -1583,26 +1580,27 @@ async def eval_rooms_outcome_and_invariants(
 
     """
     outputs = run.outputs or {}
-    schema = outputs.get("final_db_schema")
-    slot_id = outputs.get("schema_slot_id")
-    if not schema:
+    turn_outputs = outputs.get("turn_outputs") or []
+    has_rooms = any(
+        t.get("route_pred") == "rooms"
+        for t in turn_outputs
+        if isinstance(t, dict)
+    )
+    if not has_rooms:
         return [
             {
                 "key": "rooms_invariants_skipped",
                 "score": 1.0,
-                "comment": "No rooms turns; final_db_schema is None.",
+                "comment": "No rooms turns detected.",
             },
         ]
 
-    try:
-        outcome_metrics = _score_rooms_tool_outcomes(run, example)
-        invariants_results = await _check_rooms_db_invariants(schema=str(schema))
-        return [
-            *outcome_metrics,
-            *invariants_results,
-        ]
-    finally:
-        await _drop_rooms_schema(schema=str(schema), slot_id=slot_id)
+    outcome_metrics = _score_rooms_tool_outcomes(run, example)
+    invariants_results = await _check_rooms_db_invariants()
+    return [
+        *outcome_metrics,
+        *invariants_results,
+    ]
 
 
 def _score_rooms_tool_outcomes(
@@ -2075,32 +2073,8 @@ async def _ensure_eval_pool() -> AsyncConnectionPool[Any]:
         return pool
 
 
-async def _drop_rooms_schema(schema: str, slot_id: int | None) -> None:
-    """Drop the rooms evaluation schema and release its slot if needed.
-
-    Args:
-        schema: Schema name to drop.
-        slot_id: Slot identifier to release when non-null.
-
-    """
-    pool = await _ensure_eval_pool()
-    try:
-        await drop_case_schema(pool=pool, schema=schema)
-    except Exception:
-        logger.exception("Failed to drop rooms eval schema %s", schema)
-    if slot_id is None:
-        return
-    try:
-        await release_schema_slot(pool=pool, slot_id=int(slot_id))
-    except Exception:
-        logger.exception("Failed to release rooms eval slot %s", slot_id)
-
-
-async def _check_rooms_db_invariants(schema: str) -> list[dict[str, Any]]:
-    """Check rooms DB invariants within a schema.
-
-    Args:
-        schema: Schema name to target for invariant checks.
+async def _check_rooms_db_invariants() -> list[dict[str, Any]]:
+    """Check rooms DB invariants in the public schema.
 
     Returns:
         List of LangSmith metric dicts for DB invariants.
@@ -2111,9 +2085,7 @@ async def _check_rooms_db_invariants(schema: str) -> list[dict[str, Any]]:
     null_status_count = 0
 
     async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute(
-            sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)),
-        )
+        await cur.execute("SET search_path TO public;")
 
         await cur.execute(
             """

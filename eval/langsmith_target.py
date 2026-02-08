@@ -1,9 +1,9 @@
 """LangSmith evaluation target for multi-turn Blue Horizon orchestration runs.
 
 This module provides an async target function compatible with LangSmith
-evaluate/aevaluate APIs. It runs a full multi-turn case through the shared
-OrchestrationManager, lazily provisioning an isolated Postgres schema only when
-the router sends a turn to the "rooms" path.
+evaluate/aevaluate APIs.  It runs a full multi-turn case through the shared
+OrchestrationManager, capturing per-turn routing decisions, tool summaries,
+and RAG context snippets for downstream evaluators.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import json
 import logging
 import re
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from uuid import UUID, uuid4
 
 from langchain_core.callbacks import AsyncCallbackHandler
@@ -24,7 +24,6 @@ from langchain_core.messages import (
     HumanMessage,
     ToolMessage,
 )
-from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from blue_horizon.agents.information import (
@@ -34,15 +33,7 @@ from blue_horizon.agents.information import (
     set_eval_info_tool_log,
 )
 from blue_horizon.agents.orchestration import OrchestrationManager
-from blue_horizon.agents.rooms import reset_eval_schema, set_eval_schema
-from blue_horizon.load_data.rooms_pgsql import get_pgsql_conn_string
 from eval.config import load_eval_config
-from eval.db_reset import create_case_schema, drop_case_schema
-from eval.schema_slots import acquire_schema_slot, release_schema_slot
-
-if TYPE_CHECKING:
-    from contextvars import Token
-    from pathlib import Path
 
 
 class RunSqlOutput(BaseModel):
@@ -94,53 +85,8 @@ logger = logging.getLogger(__name__)
 
 _ORCHESTRATION_LOCK = asyncio.Lock()
 _ORCHESTRATION: OrchestrationManager | None = None
-_RESET_POOL_LOCK = asyncio.Lock()
-_RESET_POOL: AsyncConnectionPool[Any] | None = None
 
-_MAX_SCHEMA_NAME_LEN = 63
 _ROUTE_KEY = "route"  # key from orchestration.py
-
-
-def _sanitize_identifier(raw: str) -> str:
-    """Sanitize a string to a safe Postgres identifier fragment.
-
-    Args:
-        raw: Raw identifier string.
-
-    Returns:
-        Sanitized identifier containing only letters, numbers, and underscores.
-
-    """
-    cleaned = re.sub(r"[^a-zA-Z0-9_]+", "_", raw.strip())
-    cleaned = cleaned.strip("_")
-    return cleaned or "case"
-
-
-def _get_rooms_data_path() -> Path:
-    """Resolve the rooms baseline data path.
-
-    Returns:
-        Path to the pickled rooms datasets.
-
-    """
-    cfg = load_eval_config()
-    return cfg.rooms.data_path
-
-
-def _get_schema_slot_config() -> tuple[int, int, float, float]:
-    """Load configuration for distributed schema slot limiting.
-
-    Returns:
-        Tuple of (max_slots, stale_after_s, wait_timeout_s, poll_interval_s).
-
-    """
-    cfg = load_eval_config().schema_slots
-    return (
-        cfg.max_active_schemas,
-        cfg.stale_after_s,
-        cfg.wait_timeout_s,
-        cfg.poll_interval_s,
-    )
 
 
 def _coerce_float(value: object) -> float | None:
@@ -593,191 +539,24 @@ async def ensure_orchestration_ready() -> OrchestrationManager:
     return _ORCHESTRATION
 
 
-async def ensure_reset_pool() -> AsyncConnectionPool[Any]:
-    """Lazily initialize and return the async reset connection pool.
-
-    Returns:
-        An open AsyncConnectionPool for schema reset operations.
-
-    """
-    global _RESET_POOL  # noqa: PLW0603
-    if _RESET_POOL is not None:
-        return _RESET_POOL
-
-    async with _RESET_POOL_LOCK:
-        if _RESET_POOL is not None:
-            return _RESET_POOL
-
-        cfg = load_eval_config().reset_pool
-        max_size = cfg.max_size
-        min_size = cfg.min_size
-
-        pool = AsyncConnectionPool(
-            conninfo=get_pgsql_conn_string(),
-            min_size=min_size,
-            max_size=max_size,
-            timeout=30,
-            open=False,
-        )
-        await pool.open()
-        _RESET_POOL = pool
-        return pool
-
-
-class SchemaManager:
-    """Track and manage the lifecycle of a case schema for evaluation runs.
-
-    Attributes:
-        case_id: Case identifier used to name the schema.
-        run_id: Unique run identifier used in schema naming.
-        data_path: Path to baseline rooms data for schema initialization.
-        schema: Schema name once created, otherwise ``None``.
-        schema_created: Whether the schema has been created for this case.
-        schema_token: ContextVar token for resetting the eval schema.
-        slot_id: Acquired schema slot identifier, if slot limiting is enabled.
-
-    """
-
-    case_id: str
-    run_id: str
-    data_path: Path
-    schema: str | None
-    schema_created: bool
-    schema_token: Token[str | None] | None
-    slot_id: int | None
-    _lock: asyncio.Lock
-
-    def __init__(self, *, case_id: str, run_id: str, data_path: Path) -> None:
-        """Initialize the schema manager.
-
-        Args:
-            case_id: Case identifier used to name the schema.
-            run_id: Unique run identifier used in schema naming.
-            data_path: Path to baseline rooms data for schema initialization.
-
-        """
-        self.case_id = case_id
-        self.run_id = run_id
-        self.data_path = data_path
-        self.schema = None
-        self.schema_created = False
-        self.schema_token = None
-        self.slot_id = None
-        self._lock = asyncio.Lock()
-
-    async def ensure_schema(self) -> None:
-        """Create the case schema and set the eval ContextVar if needed."""
-        if self.schema_created:
-            return
-        async with self._lock:
-            if self.schema_created:
-                return
-
-            schema = self._build_schema_name()
-            pool = await ensure_reset_pool()
-            max_slots, stale_after_s, wait_timeout_s, poll_interval_s = (
-                _get_schema_slot_config()
-            )
-            if max_slots > 0:
-                self.slot_id = await acquire_schema_slot(
-                    pool=pool,
-                    run_id=self.run_id,
-                    case_id=self.case_id,
-                    max_slots=max_slots,
-                    stale_after_s=stale_after_s,
-                    wait_timeout_s=wait_timeout_s,
-                    poll_interval_s=poll_interval_s,
-                )
-
-            try:
-                await create_case_schema(
-                    pool=pool,
-                    schema=schema,
-                    data_path=self.data_path,
-                )
-            except Exception:
-                if self.slot_id is not None:
-                    await self._release_slot(pool=pool)
-                raise
-
-            self.schema = schema
-            self.schema_token = set_eval_schema(schema)
-            self.schema_created = True
-
-    def reset_context(self) -> None:
-        """Reset the evaluation ContextVar if it was set."""
-        if self.schema_token is None:
-            return
-        reset_eval_schema(self.schema_token)
-        self.schema_token = None
-
-    async def drop_schema(self) -> None:
-        """Drop the case schema if it was created."""
-        if not self.schema_created or self.schema is None:
-            return
-        pool = await ensure_reset_pool()
-        try:
-            await drop_case_schema(pool=pool, schema=self.schema)
-        finally:
-            if self.slot_id is not None:
-                await self._release_slot(pool=pool)
-
-    async def release_slot(self) -> None:
-        """Release the schema slot if one is held."""
-        if self.slot_id is None:
-            return
-        pool = await ensure_reset_pool()
-        await self._release_slot(pool=pool)
-
-    async def _release_slot(self, *, pool: AsyncConnectionPool[Any]) -> None:
-        """Release the schema slot using the provided pool."""
-        if self.slot_id is None:
-            return
-        await release_schema_slot(pool=pool, slot_id=self.slot_id)
-        self.slot_id = None
-
-    def _build_schema_name(self) -> str:
-        """Construct a safe, unique schema name for the case.
-
-        Returns:
-            Schema name string limited to Postgres identifier length.
-
-        """
-        safe_case = _sanitize_identifier(self.case_id)
-        prefix = f"eval_{self.run_id}_"
-        max_case_len = max(0, _MAX_SCHEMA_NAME_LEN - len(prefix))
-        case_part = safe_case[:max_case_len] if max_case_len else ""
-        if not case_part:
-            case_part = "case"
-        return f"{prefix}{case_part}"
-
-
 class EvalCaptureCallback(AsyncCallbackHandler):
     """Capture routing decisions and tool artifacts for a single turn.
 
     Attributes:
-        schema_manager: Schema manager used to provision the rooms schema on demand.
         route_pred: Router decision captured for the turn.
         tool_summary: Compact summaries of tools executed in this turn.
         contexts_used: Truncated context snippets captured from hydrate_items output.
 
     """
 
-    schema_manager: SchemaManager
     route_pred: str | None
     tool_summary: list[dict[str, Any]]
     contexts_used: list[str]
     _pending_tool_entries: dict[UUID, dict[str, Any]]
 
-    def __init__(self, *, schema_manager: SchemaManager) -> None:
-        """Initialize the callback handler.
-
-        Args:
-            schema_manager: Schema manager responsible for lazy schema creation.
-
-        """
+    def __init__(self) -> None:
+        """Initialize the callback handler."""
         super().__init__()
-        self.schema_manager = schema_manager
         self.route_pred = None
         self.tool_summary = []
         self.contexts_used = []
@@ -792,7 +571,7 @@ class EvalCaptureCallback(AsyncCallbackHandler):
         tags: list[str] | None = None,
         **kwargs: Any,  # noqa: ANN401
     ) -> None:
-        """Capture router outputs and provision schemas before rooms tools run.
+        """Capture router outputs for the current turn.
 
         Args:
             outputs: Chain outputs from LangChain/LangGraph.
@@ -807,8 +586,6 @@ class EvalCaptureCallback(AsyncCallbackHandler):
             route_val = outputs.get(_ROUTE_KEY)
             if isinstance(route_val, str):
                 self.route_pred = route_val
-                if route_val == "rooms" and not self.schema_manager.schema_created:
-                    await self.schema_manager.ensure_schema()
 
     async def on_tool_start(  # noqa: PLR0913
         self,
@@ -1161,7 +938,7 @@ async def run_example(  # noqa: C901, PLR0912, PLR0915
         example: LangSmith dataset example input containing case_id, turns, and tags.
 
     Returns:
-        Dict containing turn outputs, final schema, and case tags.
+        Dict containing turn outputs and case tags.
 
     Raises:
         KeyError: If required keys are missing from the example.
@@ -1175,63 +952,80 @@ async def run_example(  # noqa: C901, PLR0912, PLR0915
     orchestration_mgr = await ensure_orchestration_ready()
 
     thread_id = uuid4().hex
-    run_id = uuid4().hex
-    schema_manager = SchemaManager(
-        case_id=case_id,
-        run_id=run_id,
-        data_path=_get_rooms_data_path(),
-    )
 
     turn_outputs: list[dict[str, Any]] = []
 
-    try:
-        for turn_index, turn in enumerate(turns):
-            user_text = str(turn["user"])
-            callback = EvalCaptureCallback(schema_manager=schema_manager)
-            tags = ["eval", f"case:{case_id}", f"turn:{turn_index}", *case_tags]
-            metadata = {
-                "case_id": case_id,
-                "turn_index": turn_index,
-                "db_schema": schema_manager.schema,
-            }
+    for turn_index, turn in enumerate(turns):
+        user_text = str(turn["user"])
+        callback = EvalCaptureCallback()
+        tags = ["eval", f"case:{case_id}", f"turn:{turn_index}", *case_tags]
+        metadata = {
+            "case_id": case_id,
+            "turn_index": turn_index,
+        }
 
-            token = set_eval_info_tool_log(
-                EvalInfoToolLog(tool_summary=[], contexts_used=[]),
+        token = set_eval_info_tool_log(
+            EvalInfoToolLog(tool_summary=[], contexts_used=[]),
+        )
+        try:
+            result = await orchestration_mgr.ainvoke(
+                thread_id=thread_id,
+                user_text=user_text,
+                callbacks=[callback],
+                tags=tags,
+                metadata=metadata,
             )
-            try:
-                result = await orchestration_mgr.ainvoke(
-                    thread_id=thread_id,
-                    user_text=user_text,
-                    callbacks=[callback],
-                    tags=tags,
-                    metadata=metadata,
-                )
-            finally:
-                log = get_eval_info_tool_log()
-                reset_eval_info_tool_log(token)
+        finally:
+            log = get_eval_info_tool_log()
+            reset_eval_info_tool_log(token)
 
-            messages_raw = result.get("messages", [])
-            messages = messages_raw if isinstance(messages_raw, list) else []
-            assistant_text = _extract_assistant_text(messages)
+        messages_raw = result.get("messages", [])
+        messages = messages_raw if isinstance(messages_raw, list) else []
+        assistant_text = _extract_assistant_text(messages)
 
-            route_pred = callback.route_pred
-            if route_pred is None:
-                fallback_route = result.get(_ROUTE_KEY)
-                if isinstance(fallback_route, str):
-                    route_pred = fallback_route
+        route_pred = callback.route_pred
+        if route_pred is None:
+            fallback_route = result.get(_ROUTE_KEY)
+            if isinstance(fallback_route, str):
+                route_pred = fallback_route
 
-            tool_summary = callback.tool_summary
-            contexts_used = callback.contexts_used
-            if not contexts_used:
-                contexts_used = _extract_hydrate_contexts_from_messages(messages)
-            if log is not None:
-                if not tool_summary and log.tool_summary:
-                    tool_summary = list(log.tool_summary)
-                    # Normalize filters for query_amenities/query_services from log
-                    for entry in tool_summary:
+        tool_summary = callback.tool_summary
+        contexts_used = callback.contexts_used
+        if not contexts_used:
+            contexts_used = _extract_hydrate_contexts_from_messages(messages)
+        if log is not None:
+            if not tool_summary and log.tool_summary:
+                tool_summary = list(log.tool_summary)
+                # Normalize filters for query_amenities/query_services from log
+                for entry in tool_summary:
+                    if (
+                        isinstance(entry, dict)
+                        and entry.get("tool")
+                        in {"query_amenities", "query_services"}
+                        and "filters" in entry
+                        and "filters_norm" not in entry
+                    ):
+                        normalized, unknown = _normalize_info_filters_strict(
+                            entry.get("filters"),
+                        )
+                        entry["filters_norm"] = normalized
+                        if unknown:
+                            entry["filters_unknown_keys"] = unknown
+            if not contexts_used and log.contexts_used:
+                contexts_used = list(log.contexts_used)
+            if log.tool_summary and tool_summary:
+                logged_names = {
+                    entry.get("tool")
+                    for entry in tool_summary
+                    if isinstance(entry, dict)
+                }
+                for entry in log.tool_summary:
+                    if (
+                        isinstance(entry, dict)
+                        and entry.get("tool") not in logged_names
+                    ):
                         if (
-                            isinstance(entry, dict)
-                            and entry.get("tool")
+                            entry.get("tool")
                             in {"query_amenities", "query_services"}
                             and "filters" in entry
                             and "filters_norm" not in entry
@@ -1242,70 +1036,36 @@ async def run_example(  # noqa: C901, PLR0912, PLR0915
                             entry["filters_norm"] = normalized
                             if unknown:
                                 entry["filters_unknown_keys"] = unknown
-                if not contexts_used and log.contexts_used:
-                    contexts_used = list(log.contexts_used)
-                if log.tool_summary and tool_summary:
-                    logged_names = {
-                        entry.get("tool")
-                        for entry in tool_summary
-                        if isinstance(entry, dict)
-                    }
-                    for entry in log.tool_summary:
-                        if (
-                            isinstance(entry, dict)
-                            and entry.get("tool") not in logged_names
-                        ):
-                            if (
-                                entry.get("tool")
-                                in {"query_amenities", "query_services"}
-                                and "filters" in entry
-                                and "filters_norm" not in entry
-                            ):
-                                normalized, unknown = _normalize_info_filters_strict(
-                                    entry.get("filters"),
-                                )
-                                entry["filters_norm"] = normalized
-                                if unknown:
-                                    entry["filters_unknown_keys"] = unknown
-                            tool_summary.append(entry)
+                        tool_summary.append(entry)
 
-            turn_outputs.append(
+        turn_outputs.append(
+            {
+                "assistant_text": assistant_text,
+                "route_pred": route_pred,
+                "tool_summary": tool_summary,
+                "contexts_used": contexts_used,
+            },
+        )
+        if (
+            contexts_used
+            and not any(
+                entry.get("tool") == "hydrate_items"
+                for entry in tool_summary
+                if isinstance(entry, dict)
+            )
+        ):
+            tool_summary.append(
                 {
-                    "assistant_text": assistant_text,
-                    "route_pred": route_pred,
-                    "tool_summary": tool_summary,
-                    "contexts_used": contexts_used,
+                    "tool": "hydrate_items",
+                    "status": "ok",
+                    "input_keys": ["num_items"],
+                    "input_preview": _preview(
+                        {"num_items": len(contexts_used)},
+                    ),
                 },
             )
-            if (
-                contexts_used
-                and not any(
-                    entry.get("tool") == "hydrate_items"
-                    for entry in tool_summary
-                    if isinstance(entry, dict)
-                )
-            ):
-                tool_summary.append(
-                    {
-                        "tool": "hydrate_items",
-                        "status": "ok",
-                        "input_keys": ["num_items"],
-                        "input_preview": _preview(
-                            {"num_items": len(contexts_used)},
-                        ),
-                    },
-                )
-
-    finally:
-        if schema_manager.schema_created:
-            try:
-                schema_manager.reset_context()
-            except Exception:
-                logger.exception("Failed to reset eval schema ContextVar")
 
     return {
         "turn_outputs": turn_outputs,
-        "final_db_schema": schema_manager.schema,
-        "schema_slot_id": schema_manager.slot_id,
         "case_tags": case_tags,
     }

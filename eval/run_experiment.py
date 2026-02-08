@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 from langsmith import Client
 from langsmith.evaluation import aevaluate
 
+from blue_horizon.load_data.rooms_pgsql import reload_sql_tables
 from eval.config import MetadataConfig, load_eval_config
 from eval.evaluators import (
     eval_info_expected_filters,
@@ -34,6 +35,8 @@ if TYPE_CHECKING:
     from langsmith.schemas import Example
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class RunArtifacts:
@@ -170,12 +173,13 @@ async def main() -> None:
     elif "experiment_prefix" in signature.parameters:
         aevaluate_kwargs["experiment_prefix"] = experiment_name
 
-    data: str | list[Example] = dataset_name
-    if limit is not None:
-        data = _load_dataset_examples(dataset_name, limit)
+    examples = _load_dataset_examples(dataset_name, limit)
+    if _has_rooms_cases(examples):
+        logger.info("Dataset contains rooms-path cases; resetting SQL tables.")
+        reload_sql_tables()
 
     try:
-        results = await aevaluate(run_example, data, **aevaluate_kwargs)
+        results = await aevaluate(run_example, examples, **aevaluate_kwargs)
         results_list: list[Any] = []
         if results is not None:
             results_list.extend([item async for item in results])
@@ -239,6 +243,7 @@ def _configure_logging(experiment_name: str) -> None:
     )
 
     root = logging.getLogger()
+    root.handlers.clear()
     root.setLevel(logging.INFO)
     root.addHandler(file_handler)
     root.addHandler(console_handler)
@@ -336,12 +341,15 @@ def _build_metadata(metadata_cfg: MetadataConfig) -> dict[str, object]:
     return {key: value for key, value in metadata.items() if value}
 
 
-def _load_dataset_examples(dataset_name: str, limit: int) -> list[Example]:
-    """Load a limited set of examples from a LangSmith dataset.
+def _load_dataset_examples(
+    dataset_name: str,
+    limit: int | None,
+) -> list[Example]:
+    """Load examples from a LangSmith dataset with an optional limit.
 
     Args:
         dataset_name: Name of the dataset in LangSmith.
-        limit: Maximum number of examples to load.
+        limit: Maximum number of examples to load, or ``None`` for all.
 
     Returns:
         List of dataset examples in stable order.
@@ -349,12 +357,33 @@ def _load_dataset_examples(dataset_name: str, limit: int) -> list[Example]:
     """
     client = Client()
     examples = client.list_examples(dataset_name=dataset_name)
-    limited: list[Example] = []
+    loaded: list[Example] = []
     for example in examples:
-        limited.append(example)
-        if len(limited) >= limit:
+        loaded.append(example)
+        if limit is not None and len(loaded) >= limit:
             break
-    return limited
+    return loaded
+
+
+_ROOMS_TAGS: frozenset[str] = frozenset({"rooms", "mixed"})
+
+
+def _has_rooms_cases(examples: Iterable[Example]) -> bool:
+    """Return ``True`` if any example carries a rooms-path tag.
+
+    Args:
+        examples: Loaded LangSmith examples.
+
+    Returns:
+        Whether at least one example has a ``"rooms"`` or ``"mixed"`` tag.
+
+    """
+    for ex in examples:
+        inputs = getattr(ex, "inputs", None) or {}
+        tags = inputs.get("tags") or []
+        if _ROOMS_TAGS.intersection(tags):
+            return True
+    return False
 
 
 def _write_summary(path: Path, summary: Mapping[str, object]) -> None:

@@ -24,7 +24,6 @@ import asyncio
 import logging
 import os
 import re
-from contextvars import ContextVar, Token
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Final, LiteralString, cast
 
@@ -47,38 +46,6 @@ if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
 logger = logging.getLogger(__name__)
-
-# Schemas for evaluating the agent
-EVAL_SCHEMA: ContextVar[str | None] = ContextVar("EVAL_SCHEMA", default=None)
-
-def set_eval_schema(schema: str | None) -> Token[str | None]:
-    """Assign a schema to the evaluation ContextVar.
-
-    Args:
-        schema: Schema name to apply, or ``None`` to unset.
-
-    Returns:
-        Token used to reset the ContextVar to its prior state.
-
-    """
-    return EVAL_SCHEMA.set(schema)
-
-def reset_eval_schema(token: Token[str | None]) -> None:
-    """Restore the evaluation schema ContextVar to a previous value.
-
-    Args:
-        token: Token returned from :func:`set_eval_schema` representing the
-            previous value.
-
-    """
-    try:
-        EVAL_SCHEMA.reset(token)
-    except ValueError:
-        logger.warning(
-            "Eval schema ContextVar reset failed due to context mismatch; "
-            "clearing schema instead.",
-        )
-        EVAL_SCHEMA.set(None)
 
 # Enums used in SQL
 ENUM_TYPES: Final[tuple[str, ...]] = (
@@ -688,15 +655,7 @@ class RoomsSqlResources:
                     self.pool.connection(timeout=self.config.db.pool.timeout_s) as conn,
                     conn.cursor(row_factory=dict_row) as cur,
                 ):
-                    schema = EVAL_SCHEMA.get()
-                    if schema:
-                        await cur.execute(
-                            sql.SQL("SET search_path TO {}").format(
-                                sql.Identifier(schema),
-                            ),
-                        )
-                    else:
-                        await cur.execute("SET search_path TO public;")
+                    await cur.execute("SET search_path TO public;")
 
                     # NOTE: psycopg's type stubs expect a LiteralString for `execute()`.
                     # This cast is only to satisfy static type checkers. Runtime safety

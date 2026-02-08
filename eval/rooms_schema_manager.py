@@ -6,7 +6,11 @@ import argparse
 import asyncio
 import logging
 import platform
+import random
+import string
 import uuid
+from contextlib import suppress
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -14,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 from psycopg import sql
 from psycopg_pool import AsyncConnectionPool
 
+from blue_horizon.agents.rooms import reset_eval_schema
 from blue_horizon.load_data.rooms_pgsql import (
     ROOM_AVAIL_COLUMNS,
     ROOMS_COLUMNS,
@@ -25,6 +30,8 @@ from blue_horizon.load_data.rooms_pgsql import (
 )
 
 if TYPE_CHECKING:
+    from contextvars import Token
+
     import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -264,6 +271,84 @@ async def drop_case_schema(
         await conn.execute(
             sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(schema_ident),
         )
+
+
+def generate_schema_name(prefix: str) -> str:
+    """Build a unique schema name with a timestamp and random suffix.
+
+    The returned name has the form ``<prefix>_<YYYYMMDD_HHMMSS>_<rand6>``.
+
+    Args:
+        prefix: A short label such as ``"eval"`` or ``"stress"``.
+
+    Returns:
+        A schema name safe for use as a PostgreSQL identifier.
+
+    """
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    alphabet = string.ascii_lowercase + string.digits
+    suffix = "".join(random.choice(alphabet) for _ in range(6))  # noqa: S311
+    return f"{prefix}_{ts}_{suffix}"
+
+
+async def open_schema_pool(
+    db_url: str,
+    *,
+    min_size: int = 1,
+    max_size: int = 2,
+) -> AsyncConnectionPool[Any]:
+    """Create and open an async Postgres connection pool.
+
+    Args:
+        db_url: The Postgres connection URL.
+        min_size: The minimum number of connections in the pool.
+        max_size: The maximum number of connections in the pool.
+
+    Returns:
+        An open ``AsyncConnectionPool``.
+
+    """
+    pool: AsyncConnectionPool[Any] = AsyncConnectionPool(
+        conninfo=db_url,
+        min_size=min_size,
+        max_size=max_size,
+        open=False,
+    )
+    await pool.open()
+    return pool
+
+
+async def teardown_schema(
+    token: Token[str | None] | None,
+    pool: AsyncConnectionPool[Any] | None,
+    schema: str,
+) -> str | None:
+    """Best-effort cleanup: reset the ContextVar, drop the schema, close the pool.
+
+    Args:
+        token: The token returned by ``set_eval_schema``, or ``None``.
+        pool: The open database pool, or ``None``.
+        schema: The schema name to drop.
+
+    Returns:
+        A schema-drop error message if one occurred, otherwise ``None``.
+
+    """
+    schema_drop_error: str | None = None
+
+    if token is not None:
+        with suppress(Exception):
+            reset_eval_schema(token)
+
+    if pool is not None:
+        try:
+            await drop_case_schema(pool=pool, schema=schema)
+        except Exception as exc:  # noqa: BLE001
+            schema_drop_error = f"{type(exc).__name__}: {exc}"
+        with suppress(Exception):
+            await pool.close()
+
+    return schema_drop_error
 
 
 async def _main() -> None:

@@ -22,10 +22,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import re
 from contextvars import ContextVar, Token
-from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Final, LiteralString, cast
 
 import psycopg
@@ -111,26 +109,8 @@ def load_rooms_config(config_path: Path | str | None = None) -> RoomsSqlConfig:
 
 
 # ============================
-# Environment and user-facing messages
+# User-facing messages
 # ============================
-
-
-@lru_cache(maxsize=1)
-def get_pgsql_db_url() -> str:
-    """Get the PostgreSQL connection URL from the environment.
-
-    Returns:
-        PostgreSQL connection URL.
-
-    Raises:
-        RuntimeError: If PGSQL_DB_URL is not set.
-
-    """
-    url = os.getenv("PGSQL_DB_URL")
-    if not url:
-        msg = "PGSQL_DB_URL is not set"
-        raise RuntimeError(msg)
-    return url
 
 
 def _user_facing_db_message() -> str:

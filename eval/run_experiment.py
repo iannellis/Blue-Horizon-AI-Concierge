@@ -11,8 +11,8 @@ import re
 from collections.abc import Iterable, Mapping, MutableMapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from pathlib import Path  # noqa: TC003
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from dotenv import load_dotenv
 from langsmith import Client
@@ -20,6 +20,7 @@ from langsmith.evaluation import aevaluate
 
 from blue_horizon.agents.rooms import set_eval_schema
 from blue_horizon.config import load_app_config
+from eval._utils import json_safe
 from eval.config import MetadataConfig, load_eval_config
 from eval.evaluators import (
     eval_info_expected_filters,
@@ -154,11 +155,12 @@ async def main() -> None:
     )
     max_concurrency = cfg.experiment.max_concurrency
     output_root = cfg.experiment.output_dir
+    log_dir = cfg.experiment.log_dir
     artifacts = _build_output_paths(output_root, experiment_name)
     upload_results = cfg.experiment.upload_results
     limit = cfg.experiment.limit
 
-    _configure_logging(experiment_name)
+    _configure_logging(experiment_name, log_dir)
 
     # Setting LANGSMITH_TEST_CACHE enables caching of example runs to reduce cost/time.
     metadata = _build_metadata(cfg.metadata)
@@ -229,18 +231,18 @@ async def main() -> None:
                 logger.warning("Schema teardown error: %s", drop_err)
 
 
-def _configure_logging(experiment_name: str) -> None:
+def _configure_logging(experiment_name: str, log_dir: Path) -> None:
     """Configure file-based logging for the evaluation run.
 
-    Writes logs to ``eval/logs/<experiment_name>.log`` using a file handler.
+    Writes logs to ``<log_dir>/<experiment_name>.log`` using a file handler.
     Preserves any existing console handlers for color-coded terminal output.
 
     Args:
         experiment_name: Name of the current experiment, used as the log
             filename stem.
+        log_dir: Directory where log files should be written.
 
     """
-    log_dir = Path("eval/logs")
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"{experiment_name}.log"
 
@@ -449,7 +451,7 @@ def _write_jsonl(path: Path, rows: Iterable[Mapping[str, object]]) -> None:
     with path.open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(
-                json.dumps(row, ensure_ascii=True, default=_json_default) + "\n",
+                json.dumps(row, ensure_ascii=True, default=json_safe) + "\n",
             )
 
 
@@ -619,9 +621,9 @@ def _collect_feedback(
     if isinstance(raw_feedback, Mapping):
         for key, payload in raw_feedback.items():
             if isinstance(payload, Mapping):
-                feedback[key] = _serialize_mapping(payload)
+                feedback[key] = cast("dict[str, object]", json_safe(payload))
             else:
-                feedback[key] = {"value": _json_default(payload)}
+                feedback[key] = {"value": json_safe(payload)}
         return feedback
     if isinstance(raw_feedback, Iterable):
         for item in raw_feedback:
@@ -631,9 +633,9 @@ def _collect_feedback(
             if not key:
                 continue
             payload = {
-                "score": _json_default(_get_attr(item, "score")),
-                "value": _json_default(_get_attr(item, "value")),
-                "comment": _json_default(_get_attr(item, "comment")),
+                "score": json_safe(_get_attr(item, "score")),
+                "value": json_safe(_get_attr(item, "value")),
+                "comment": json_safe(_get_attr(item, "comment")),
             }
             feedback[str(key)] = {k: v for k, v in payload.items() if v is not None}
     return feedback
@@ -847,51 +849,6 @@ def _build_error_summary(
         "upload_results": context.upload_results,
         "error": str(error),
     }
-
-
-def _serialize_mapping(payload: Mapping[str, object]) -> dict[str, object]:
-    """Serialize a mapping payload into JSON-safe primitives.
-
-    Args:
-        payload: Mapping payload from evaluation feedback.
-
-    Returns:
-        JSON-serializable dictionary.
-
-    """
-    return {key: _json_default(value) for key, value in payload.items()}
-
-
-def _json_default(value: object) -> object:
-    """Serialize unsupported types into JSON-safe structures.
-
-    Args:
-        value: Value to serialize.
-
-    Returns:
-        JSON-serializable representation.
-
-    """
-    if value is None:
-        serialized: object = None
-    elif isinstance(value, (str, int, float, bool)):
-        serialized = value
-    elif isinstance(value, Mapping):
-        serialized = _serialize_mapping(value)
-    elif isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
-        serialized = [_json_default(item) for item in value]
-    else:
-        model_dump = getattr(value, "model_dump", None)
-        dict_dump = getattr(value, "dict", None)
-        if callable(model_dump):
-            serialized = _json_default(model_dump())
-        elif callable(dict_dump):
-            serialized = _json_default(dict_dump())
-        elif hasattr(value, "__dict__"):
-            serialized = _json_default(vars(value))
-        else:
-            serialized = str(value)
-    return serialized
 
 
 def _get_attr(

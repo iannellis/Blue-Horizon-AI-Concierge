@@ -28,16 +28,13 @@ import heapq
 import json
 import logging
 import math
-import os
 from collections import OrderedDict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from enum import StrEnum
-from functools import lru_cache
 from typing import TYPE_CHECKING, Any, cast
 
-from dotenv import load_dotenv
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, MessagesState, StateGraph
@@ -201,33 +198,6 @@ def build_system_prompt(*, top_k: int, prompt_resource: str) -> str:
     """
     template = load_prompt_template(prompt_resource)
     return template.safe_substitute(top_k=top_k)
-
-
-# ============================
-# Environment
-# ============================
-
-
-@lru_cache(maxsize=1)
-def get_redis_url() -> str:
-    """Return the Redis connection URL from environment.
-
-    This function loads environment variables via ``python-dotenv`` and returns the
-    ``REDIS_URL`` value.
-
-    Returns:
-        str: Redis connection URL.
-
-    Raises:
-        RuntimeError: If ``REDIS_URL`` is not set.
-
-    """
-    load_dotenv()
-    url = os.getenv("REDIS_URL")
-    if not url:
-        msg = "REDIS_URL is not set"
-        raise RuntimeError(msg)
-    return url
 
 
 # ============================
@@ -1509,6 +1479,75 @@ class InfoAgentFactory:
             """Log a node failure with traceback."""
             logger.exception("Info DAG node %s failed: %s", node_name, exc)
 
+        def _make_catalog_query_node(
+            source: Source,
+            state_key: str,
+        ) -> Callable[..., Awaitable[dict[str, Any]]]:
+            """Create a query node for a filtered catalog source.
+
+            Args:
+                source: Which catalog source to query (AMENITIES or SERVICES).
+                state_key: State dict key for the results (e.g. "amenities_results").
+
+            Returns:
+                Async node function suitable for LangGraph.
+
+            """
+            tool_name = f"query_{source.value}"
+
+            async def _node(state: ParsedState) -> dict[str, Any]:
+                parsed = state["parsed"]
+                filters_payload = _build_eval_filter_payload(parsed)
+                filters = build_filters(
+                    booking_required=parsed.booking_required,
+                    min_price=parsed.min_price,
+                    max_price=parsed.max_price,
+                    min_notice_hours=parsed.min_notice_hours,
+                    max_notice_hours=parsed.max_notice_hours,
+                    min_duration_minutes=parsed.min_duration_minutes,
+                    max_duration_minutes=parsed.max_duration_minutes,
+                )
+                try:
+                    results = await resources.retrieve_filtered_catalog_items(
+                        source=source,
+                        query=parsed.query,
+                        filters=filters,
+                    )
+                except OperationalError as exc:
+                    logger.warning("%s operational failure: %s", tool_name, exc)
+                    summary: dict[str, Any] = {
+                        "tool": tool_name,
+                        "status": "error",
+                        "error": str(exc),
+                        "filters": filters_payload or {},
+                    }
+                    _log_eval_tool_summary(summary)
+                    return {state_key: []}
+                except Exception as exc:  # noqa: BLE001
+                    _log_node_failure(tool_name, exc)
+                    summary: dict[str, Any] = {
+                        "tool": tool_name,
+                        "status": "error",
+                        "error": str(exc),
+                        "filters": filters_payload or {},
+                    }
+                    _log_eval_tool_summary(summary)
+                    return {state_key: []}
+                summary: dict[str, Any] = {
+                    "tool": tool_name,
+                    "status": "ok",
+                    "count": len(results),
+                    "filters": filters_payload or {},
+                }
+                _log_eval_tool_summary(summary)
+                return {state_key: results}
+
+            _node.__name__ = _node.__qualname__ = tool_name + "_node"
+            _node.__doc__ = (
+                f"Retrieve {source.value} for the parsed query and constraints."
+            )
+            return _node
+
         async def parse_node(state: InfoState) -> dict[str, Any]:
             """Parse the user request into a structured query and constraints."""
             try:
@@ -1577,117 +1616,12 @@ class InfoAgentFactory:
             )
             return {"faq_results": results}
 
-        async def query_amenities_node(state: ParsedState) -> dict[str, Any]:
-            """Retrieve amenities for the parsed query and constraints.
-
-            Args:
-                state: Parsed state containing query text and constraints.
-
-            Returns:
-                State patch with ``amenities_results`` populated.
-
-            """
-            parsed = state["parsed"]
-            filters_payload = _build_eval_filter_payload(parsed)
-            filters = build_filters(
-                booking_required=parsed.booking_required,
-                min_price=parsed.min_price,
-                max_price=parsed.max_price,
-                min_notice_hours=parsed.min_notice_hours,
-                max_notice_hours=parsed.max_notice_hours,
-                min_duration_minutes=parsed.min_duration_minutes,
-                max_duration_minutes=parsed.max_duration_minutes,
-            )
-            try:
-                results = await resources.retrieve_filtered_catalog_items(
-                    source=Source.AMENITIES,
-                    query=parsed.query,
-                    filters=filters,
-                )
-            except OperationalError as exc:
-                logger.warning("query_amenities operational failure: %s", exc)
-                summary: dict[str, Any] = {
-                    "tool": "query_amenities",
-                    "status": "error",
-                    "error": str(exc),
-                    "filters": filters_payload or {},
-                }
-                _log_eval_tool_summary(summary)
-                return {"amenities_results": []}
-            except Exception as exc:  # noqa: BLE001
-                _log_node_failure("query_amenities", exc)
-                summary: dict[str, Any] = {
-                    "tool": "query_amenities",
-                    "status": "error",
-                    "error": str(exc),
-                    "filters": filters_payload or {},
-                }
-                _log_eval_tool_summary(summary)
-                return {"amenities_results": []}
-            summary: dict[str, Any] = {
-                "tool": "query_amenities",
-                "status": "ok",
-                "count": len(results),
-                "filters": filters_payload or {},
-            }
-            _log_eval_tool_summary(summary)
-            return {"amenities_results": results}
-
-        async def query_services_node(state: ParsedState) -> dict[str, Any]:
-            """Retrieve services for the parsed query and constraints.
-
-            Args:
-                state: Parsed state containing query text and constraints.
-
-            Returns:
-                State patch with ``services_results`` populated.
-
-            """
-            parsed = state["parsed"]
-            filters_payload = _build_eval_filter_payload(parsed)
-            filters = build_filters(
-                booking_required=parsed.booking_required,
-                min_price=parsed.min_price,
-                max_price=parsed.max_price,
-                min_notice_hours=parsed.min_notice_hours,
-                max_notice_hours=parsed.max_notice_hours,
-                min_duration_minutes=parsed.min_duration_minutes,
-                max_duration_minutes=parsed.max_duration_minutes,
-            )
-            try:
-                results = await resources.retrieve_filtered_catalog_items(
-                    source=Source.SERVICES,
-                    query=parsed.query,
-                    filters=filters,
-                )
-            except OperationalError as exc:
-                logger.warning("query_services operational failure: %s", exc)
-                summary: dict[str, Any] = {
-                    "tool": "query_services",
-                    "status": "error",
-                    "error": str(exc),
-                    "filters": filters_payload or {},
-                }
-                _log_eval_tool_summary(summary)
-                return {"services_results": []}
-            except Exception as exc:  # noqa: BLE001
-                _log_node_failure("query_services", exc)
-                summary: dict[str, Any] = {
-                    "tool": "query_services",
-                    "status": "error",
-                    "error": str(exc),
-                    "filters": filters_payload or {},
-                }
-                _log_eval_tool_summary(summary)
-                return {"services_results": []}
-            summary: dict[str, Any] = {
-                "tool": "query_services",
-                "status": "ok",
-                "count": len(results),
-                "filters": filters_payload or {},
-            }
-            _log_eval_tool_summary(summary)
-            return {"services_results": results}
+        query_amenities_node = _make_catalog_query_node(
+            Source.AMENITIES, "amenities_results",
+        )
+        query_services_node = _make_catalog_query_node(
+            Source.SERVICES, "services_results",
+        )
 
         def rerank_node(state: InfoState) -> dict[str, Any]:
             """Select the top-k results across FAQ, amenities, and services.

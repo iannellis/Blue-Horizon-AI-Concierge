@@ -57,11 +57,11 @@ except Exception as _exc:  # noqa: BLE001
     _GENAI_IMPORT_ERROR = _exc
 
 try:  # Optional app import for DB URL lookup.
-    from blue_horizon.agents.rooms import get_pgsql_db_url as _get_pgsql_db_url
+    from blue_horizon.config import load_app_config as _load_app_config
 
     _PGSQL_IMPORT_ERROR: Exception | None = None
 except Exception as _exc:  # noqa: BLE001
-    _get_pgsql_db_url = None
+    _load_app_config = None
     _PGSQL_IMPORT_ERROR = _exc
 
 if TYPE_CHECKING:
@@ -2041,11 +2041,11 @@ async def _get_eval_db_url() -> str:
     if env_url:
         return env_url
 
-    if _get_pgsql_db_url is None:
-        msg = "Unable to import get_pgsql_db_url for evaluator DB access."
+    if _load_app_config is None:
+        msg = "Unable to import load_app_config for evaluator DB access."
         raise RuntimeError(msg) from _PGSQL_IMPORT_ERROR
 
-    return _get_pgsql_db_url()
+    return _load_app_config().pgsql_db_url
 
 
 async def _ensure_eval_pool() -> AsyncConnectionPool[Any]:

@@ -25,7 +25,8 @@ from uuid import uuid4
 
 from dotenv import load_dotenv
 
-from blue_horizon.agents.rooms import get_pgsql_db_url, set_eval_schema
+from blue_horizon.agents.rooms import set_eval_schema
+from blue_horizon.config import load_app_config
 from eval.config import load_eval_config
 from eval.langsmith_target import OrchestrationManager
 from eval.rooms_schema_manager import (
@@ -161,7 +162,7 @@ def _load_config() -> StressConfig:
     horizon_days = cfg.horizon_days
     pool_max = cfg.pool_max
 
-    db_url = os.getenv("EVAL_DB_URL") or get_pgsql_db_url()
+    db_url = os.getenv("EVAL_DB_URL") or load_app_config().pgsql_db_url
     if not db_url:
         msg = "Database URL is required but was not found"
         raise RuntimeError(msg)

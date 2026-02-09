@@ -18,7 +18,8 @@ from dotenv import load_dotenv
 from langsmith import Client
 from langsmith.evaluation import aevaluate
 
-from blue_horizon.agents.rooms import get_pgsql_db_url, set_eval_schema
+from blue_horizon.agents.rooms import set_eval_schema
+from blue_horizon.config import load_app_config
 from eval.config import MetadataConfig, load_eval_config
 from eval.evaluators import (
     eval_info_expected_filters,
@@ -420,7 +421,7 @@ async def _setup_eval_schema(
     """
     schema = generate_schema_name("eval")
     pool = await open_schema_pool(
-        get_pgsql_db_url(),
+        load_app_config().pgsql_db_url,
         max_size=cfg.reset_pool.max_size,
     )
     await create_case_schema(

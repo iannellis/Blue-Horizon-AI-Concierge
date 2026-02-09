@@ -11,7 +11,6 @@ import re
 from collections.abc import Iterable, Mapping, MutableMapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path  # noqa: TC003
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from dotenv import load_dotenv
@@ -41,6 +40,7 @@ from eval.rooms_schema_manager import (
 
 if TYPE_CHECKING:
     from contextvars import Token
+    from pathlib import Path
 
     from langsmith.schemas import Example
     from psycopg_pool import AsyncConnectionPool
@@ -414,6 +414,7 @@ async def _setup_eval_schema(
 
     """
     schema = generate_schema_name("eval")
+    logger.info("Setting up eval schema: %s", schema)
     pool = await open_schema_pool(
         load_app_config().pgsql_db_url,
         max_size=cfg.reset_pool.max_size,

@@ -49,13 +49,11 @@ from blue_horizon.agents.exceptions import OperationalError
 from blue_horizon.agents.information import (
     InfoAgentFactory,
     InfoRagResources,
-    get_redis_url,
 )
 from blue_horizon.agents.prompt_utils import load_packaged_text
 from blue_horizon.agents.rooms import (
     RoomsAgentFactory,
     RoomsSqlResources,
-    get_pgsql_db_url,
 )
 from blue_horizon.config import (
     InfoRagConfig,
@@ -65,6 +63,8 @@ from blue_horizon.config import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from langgraph.graph.state import CompiledStateGraph
 
 logger = logging.getLogger(__name__)
@@ -207,14 +207,14 @@ class OrchestrationResources:
 
         self._info_config = app_config.info
         self._info_resources = InfoRagResources(
-            redis_url=get_redis_url(),
+            redis_url=app_config.redis_url,
             config=self._info_config,
         )
         self._info_agent = None
 
         self._rooms_config = app_config.rooms
         self._rooms_resources = RoomsSqlResources(
-            pgsql_db_url=get_pgsql_db_url(),
+            pgsql_db_url=app_config.pgsql_db_url,
             config=self._rooms_config,
         )
         self._rooms_agent = None
@@ -402,6 +402,59 @@ class OrchestrationAgentFactory:
         resources = self._resources
         cfg = resources.get_config()
 
+        def _make_dispatch_node(
+            agent_name: str,
+            get_agent: Callable[[], CompiledStateGraph],
+            timeout_s: float,
+        ) -> Callable[..., Awaitable[dict[str, Any]]]:
+            """Create a dispatch node for a sub-agent.
+
+            Args:
+                agent_name: Human-readable name for logging.
+                get_agent: Callable returning the compiled sub-agent.
+                timeout_s: Wall-clock timeout in seconds.
+
+            Returns:
+                Async node function suitable for LangGraph.
+
+            """
+            async def _node(
+                state: ConversationState,
+                config: RunnableConfig,
+            ) -> dict[str, Any]:
+                logger.info("Dispatching to %s agent", agent_name)
+                try:
+                    result = await asyncio.wait_for(
+                        get_agent().ainvoke(state, config=config),
+                        timeout=timeout_s,
+                    )
+                except asyncio.TimeoutError:  # noqa: UP041
+                    logger.warning(
+                        "%s agent timed out after %s s",
+                        agent_name,
+                        timeout_s,
+                    )
+                    return {
+                        "messages": [
+                            AIMessage(
+                                content=[{"type": "text", "text": cfg.messages.error}],
+                            ),
+                        ],
+                    }
+                except Exception:
+                    logger.exception("%s agent failed", agent_name)
+                    return {
+                        "messages": [
+                            AIMessage(
+                                content=[{"type": "text", "text": cfg.messages.error}],
+                            ),
+                        ],
+                    }
+                return cast("dict[str, Any]", result)
+
+            _node.__name__ = _node.__qualname__ = f"{agent_name}_node"
+            return _node
+
         async def router_node(state: ConversationState) -> dict[str, Any]:
             """Route the conversation to the appropriate sub-agent.
 
@@ -456,95 +509,16 @@ class OrchestrationAgentFactory:
             logger.info("Router decision: %s", step)
             return {"route": step}
 
-        async def info_node(
-            state: ConversationState,
-            config: RunnableConfig,
-        ) -> dict[str, Any]:
-            """Invoke the compiled info agent.
-
-            Args:
-                state: Current conversation state.
-                config: Runnable config with callbacks, tags, metadata.
-
-            Returns:
-                State patch from the info agent.
-
-            """
-            logger.info("Dispatching to info agent")
-
-            try:
-                result = await asyncio.wait_for(
-                    resources.get_info_agent().ainvoke(state, config=config),
-                    timeout=cfg.orchestration.info_timeout_s,
-                )
-            except asyncio.TimeoutError:  # noqa: UP041
-                logger.warning(
-                    "Info agent timed out after %s s",
-                    cfg.orchestration.info_timeout_s,
-                )
-                return {
-                    "messages": [
-                        AIMessage(
-                            content=[{"type": "text", "text": cfg.messages.error}],
-                        ),
-                    ],
-                }
-            except Exception:
-                logger.exception("Info agent failed")
-                return {
-                    "messages": [
-                        AIMessage(
-                            content=[{"type": "text", "text": cfg.messages.error}],
-                        ),
-                    ],
-                }
-
-            return cast("dict[str, Any]", result)
-
-        async def rooms_node(
-            state: ConversationState,
-            config: RunnableConfig,
-        ) -> dict[str, Any]:
-            """Invoke the compiled rooms agent.
-
-            Args:
-                state: Current conversation state.
-                config: Runnable config with callbacks, tags, metadata.
-
-            Returns:
-                State patch from the rooms agent.
-
-            """
-            logger.info("Dispatching to rooms agent")
-
-            try:
-                result = await asyncio.wait_for(
-                    resources.get_rooms_agent().ainvoke(state, config=config),
-                    timeout=cfg.orchestration.rooms_timeout_s,
-                )
-            except asyncio.TimeoutError:  # noqa: UP041
-                logger.warning(
-                    "Rooms agent timed out after %s s",
-                    cfg.orchestration.rooms_timeout_s,
-                )
-                return {
-                    "messages": [
-                        AIMessage(
-                            content=[{"type": "text", "text": cfg.messages.error}],
-                        ),
-                    ],
-                }
-            except Exception:
-                logger.exception("Rooms agent failed")
-                return {
-                    "messages": [
-                        AIMessage(
-                            content=[{"type": "text", "text": cfg.messages.error}],
-                        ),
-                    ],
-                }
-
-            return cast("dict[str, Any]", result)
+        info_node = _make_dispatch_node(
+            "info",
+            resources.get_info_agent,
+            cfg.orchestration.info_timeout_s,
+        )
+        rooms_node = _make_dispatch_node(
+            "rooms",
+            resources.get_rooms_agent,
+            cfg.orchestration.rooms_timeout_s,
+        )
 
         def refuse_node(_: ConversationState) -> dict[str, Any]:
             """Return an out-of-scope refusal response."""

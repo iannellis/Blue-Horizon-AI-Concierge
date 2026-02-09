@@ -5,7 +5,7 @@ import importlib.resources as importlib_resources
 import tomllib
 from pathlib import Path
 
-from blue_horizon.config import parse_app_config
+from blue_horizon.config import AppConfig
 
 EXPECTED_BATCH_SIZE = 64
 EXPECTED_MAX_ROWS = 50
@@ -72,13 +72,16 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
             "connect_timeout_s": 2.0,
             "socket_timeout_s": 4.0,
             "health_check_interval_s": EXPECTED_HEALTH_CHECK_INTERVAL_S,
+            "retry_max_retries": 2,
+            "retry_backoff_base_s": 0.1,
+            "retry_backoff_max_s": 1.0,
         },
         "prompts": {
             "folder": "system_prompts",
             "system_prompt_filename": "information_prompt.txt",
         },
     },
-    "rooms_sql": {
+    "rooms": {
         "llm": {
             "model": "gpt-5-mini",
             "temperature": 0.0,
@@ -90,7 +93,7 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
             "folder": "system_prompts",
             "system_prompt_filename": "rooms_sql_prompt.txt",
         },
-        "agent": {"dialect": "PostgreSQL", "top_k": EXPECTED_ROOMS_TOP_K},
+        "agent": {"top_k": EXPECTED_ROOMS_TOP_K},
         "db": {
             "pool": {"min_size": 1, "max_size": 10, "timeout_s": 10.0},
             "guardrails": {
@@ -114,11 +117,11 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
 
 def test_parse_app_config_from_dict() -> None:
     """Verify dict-based parsing returns the expected values."""
-    cfg = parse_app_config(SAMPLE_APP_CONFIG)
+    cfg = AppConfig.model_validate(SAMPLE_APP_CONFIG)
     assert cfg.orchestration.llm.model == "gpt-5-nano"
     assert cfg.info.embeddings.batch_size == EXPECTED_BATCH_SIZE
-    assert cfg.rooms_sql.db.guardrails.max_rows == EXPECTED_MAX_ROWS
-    assert cfg.rooms_sql.agent.top_k == EXPECTED_ROOMS_TOP_K
+    assert cfg.rooms.db.guardrails.max_rows == EXPECTED_MAX_ROWS
+    assert cfg.rooms.agent.top_k == EXPECTED_ROOMS_TOP_K
     assert cfg.load_data.information_redis.data_path == EXPECTED_DATA_PATH
 
 
@@ -129,8 +132,8 @@ def test_load_packaged_app_config() -> None:
         .joinpath("app_config.toml")
         .read_text(encoding="utf-8"),
     )
-    cfg = parse_app_config(data)
+    cfg = AppConfig.model_validate(data)
     assert cfg.orchestration.messages.unavailable.startswith("Sorry")
     assert cfg.info.redis.health_check_interval_s == EXPECTED_HEALTH_CHECK_INTERVAL_S
-    assert cfg.rooms_sql.agent.top_k == EXPECTED_ROOMS_TOP_K
+    assert cfg.rooms.agent.top_k == EXPECTED_ROOMS_TOP_K
     assert cfg.load_data.rooms_pgsql.data_path == EXPECTED_DATA_PATH

@@ -232,8 +232,8 @@ async def main() -> None:
 def _configure_logging(experiment_name: str) -> None:
     """Configure file-based logging for the evaluation run.
 
-    Writes logs to ``eval/logs/<experiment_name>.log`` and also emits to
-    stderr so that console output is preserved.
+    Writes logs to ``eval/logs/<experiment_name>.log`` using a file handler.
+    Preserves any existing console handlers for color-coded terminal output.
 
     Args:
         experiment_name: Name of the current experiment, used as the log
@@ -253,17 +253,9 @@ def _configure_logging(experiment_name: str) -> None:
         ),
     )
 
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(
-        logging.Formatter("%(levelname)-8s [%(name)s] %(message)s"),
-    )
-
     root = logging.getLogger()
-    root.handlers.clear()
     root.setLevel(logging.INFO)
     root.addHandler(file_handler)
-    root.addHandler(console_handler)
 
 
 def _build_experiment_name(

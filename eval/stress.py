@@ -27,6 +27,7 @@ from dotenv import load_dotenv
 
 from blue_horizon.agents.rooms import set_eval_schema
 from blue_horizon.config import load_app_config
+from eval._utils import truncate as _truncate
 from eval.config import load_eval_config
 from eval.langsmith_target import OrchestrationManager
 from eval.rooms_schema_manager import (
@@ -35,8 +36,6 @@ from eval.rooms_schema_manager import (
     open_schema_pool,
     teardown_schema,
 )
-
-HOT_TARGET_PROBABILITY = 0.8
 
 if TYPE_CHECKING:
     from contextvars import Token
@@ -47,7 +46,7 @@ if TYPE_CHECKING:
 load_dotenv()
 
 @dataclass(frozen=True)
-class StressConfig:
+class StressRunConfig:
     """Configuration for a single stress run.
 
     Attributes:
@@ -60,6 +59,7 @@ class StressConfig:
         stay_nights: The length of stay in nights for generated targets.
         num_targets: The number of available targets to precompute.
         hot_target_count: The size of the hot contention target subset.
+        hot_target_probability: Probability of selecting a hot target vs any target.
         start_date: The search start date for available targets.
         horizon_days: The search horizon, in days, for available targets.
         pool_max: The maximum connection pool size.
@@ -76,6 +76,7 @@ class StressConfig:
     stay_nights: int
     num_targets: int
     hot_target_count: int
+    hot_target_probability: float
     start_date: date
     horizon_days: int
     pool_max: int
@@ -138,11 +139,11 @@ async def run_stress() -> None:
     )
 
 
-def _load_config() -> StressConfig:
+def _load_config() -> StressRunConfig:
     """Load stress configuration from eval_config.toml.
 
     Returns:
-        A fully populated ``StressConfig`` instance.
+        A fully populated ``StressRunConfig`` instance.
 
     Raises:
         RuntimeError: If a database URL cannot be determined.
@@ -158,6 +159,7 @@ def _load_config() -> StressConfig:
     stay_nights = cfg.stay_nights
     num_targets = cfg.num_targets
     hot_target_count = cfg.hot_target_count
+    hot_target_probability = cfg.hot_target_probability
     start_date = cfg.start_date
     horizon_days = cfg.horizon_days
     pool_max = cfg.pool_max
@@ -167,7 +169,7 @@ def _load_config() -> StressConfig:
         msg = "Database URL is required but was not found"
         raise RuntimeError(msg)
 
-    return StressConfig(
+    return StressRunConfig(
         schema=schema,
         users=users,
         ops_per_user=ops_per_user,
@@ -177,6 +179,7 @@ def _load_config() -> StressConfig:
         stay_nights=stay_nights,
         num_targets=num_targets,
         hot_target_count=hot_target_count,
+        hot_target_probability=hot_target_probability,
         start_date=start_date,
         horizon_days=horizon_days,
         pool_max=pool_max,
@@ -209,7 +212,7 @@ async def _start_orchestration() -> OrchestrationManager:
 
 async def _init_schema_and_targets(
     pool: AsyncConnectionPool,
-    cfg: StressConfig,
+    cfg: StressRunConfig,
 ) -> tuple[Token[str | None], list[dict[str, object]], list[dict[str, object]]]:
     """Create the stress schema, set search path, and find targets.
 
@@ -399,7 +402,7 @@ class OperationBuildResult:
 
 async def _run_workload(
     orchestration: OrchestrationManager,
-    cfg: StressConfig,
+    cfg: StressRunConfig,
     targets: list[dict[str, object]],
     hot_targets: list[dict[str, object]],
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
@@ -441,6 +444,7 @@ async def _run_workload(
                     state,
                     targets=targets,
                     hot_targets=hot_targets,
+                    hot_target_probability=cfg.hot_target_probability,
                 )
                 tags, metadata = _build_trace_context(
                     cfg=cfg,
@@ -527,6 +531,7 @@ def _build_operation_request(
     *,
     targets: list[dict[str, object]],
     hot_targets: list[dict[str, object]],
+    hot_target_probability: float,
 ) -> OperationBuildResult:
     """Build a prompt for the given operation and update user state.
 
@@ -535,6 +540,7 @@ def _build_operation_request(
         state: The mutable per-user state to update.
         targets: The full target pool.
         hot_targets: The hot contention target subset.
+        hot_target_probability: Probability of selecting hot vs any target.
 
     Returns:
         A structured operation build result.
@@ -545,7 +551,7 @@ def _build_operation_request(
     old_check_out = state.last_check_out
 
     if op_type == "BOOK" or not state.last_room_number:
-        target_used = _choose_target(targets, hot_targets)
+        target_used = _choose_target(targets, hot_targets, hot_target_probability)
         book_room = cast("int", target_used["room_number"])
         book_check_in = target_used["check_in"]
         book_check_out = target_used["check_out"]
@@ -619,18 +625,20 @@ def _build_operation_request(
 def _choose_target(
     targets: list[dict[str, object]],
     hot_targets: list[dict[str, object]],
+    hot_target_probability: float,
 ) -> dict[str, object]:
-    """Choose a contention target with an 80/20 hot-to-cold split.
+    """Choose a contention target with hot-to-cold probability split.
 
     Args:
         targets: The full candidate target pool.
         hot_targets: The high-contention subset.
+        hot_target_probability: Probability of selecting hot vs any target.
 
     Returns:
         A chosen target dictionary.
 
     """
-    use_hot = bool(hot_targets) and random.random() < HOT_TARGET_PROBABILITY  # noqa: S311
+    use_hot = bool(hot_targets) and random.random() < hot_target_probability  # noqa: S311
     pool = hot_targets if use_hot else targets
     return random.choice(pool)  # noqa: S311
 
@@ -670,7 +678,7 @@ def _choose_new_target(
 
 def _build_trace_context(
     *,
-    cfg: StressConfig,
+    cfg: StressRunConfig,
     user_idx: int,
     op_idx: int,
     op_type: str,
@@ -868,7 +876,7 @@ def _build_op_entry(  # noqa: PLR0913
         "prompt": prompt,
         "latency_ms": round(latency_ms, 2),
         "outcome": outcome,
-        "assistant_text_trunc": _truncate(assistant_text or ""),
+        "assistant_text_trunc": _truncate(assistant_text or "", 300),
     }
 
     if op_type == "MODIFY":
@@ -897,20 +905,6 @@ def _build_op_entry(  # noqa: PLR0913
     return op_entry
 
 
-def _truncate(text: str, limit: int = 300) -> str:
-    """Truncate a string to a maximum length with ellipsis.
-
-    Args:
-        text: The input string to truncate.
-        limit: The maximum output length, including ellipsis.
-
-    Returns:
-        The original string if it fits, otherwise a truncated version.
-
-    """
-    if len(text) <= limit:
-        return text
-    return text[: limit - 3] + "..."
 
 
 def _summarize_user_ops(
@@ -1001,7 +995,7 @@ async def _check_invariants(
 
 
 def _build_summary(  # noqa: PLR0913
-    cfg: StressConfig,
+    cfg: StressRunConfig,
     *,
     op_logs: list[dict[str, object]],
     invariants: dict[str, object],
@@ -1107,7 +1101,7 @@ def _percentile(sorted_vals: list[float], p: float) -> float:
 
 
 def _write_artifacts(
-    cfg: StressConfig,
+    cfg: StressRunConfig,
     *,
     op_logs: list[dict[str, object]],
     user_logs: list[dict[str, object]],

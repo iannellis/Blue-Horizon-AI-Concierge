@@ -3,22 +3,21 @@
 from __future__ import annotations
 
 import logging
-import os
 import sys
 from enum import Enum
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pandas as pd
 import psycopg
-from dotenv import load_dotenv
 from psycopg.sql import SQL, Composed, Identifier, Literal
 from psycopg.types.enum import EnumInfo, register_enum
 
 from blue_horizon.config import load_app_config
+from blue_horizon.load_data import _repo_root
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
+    from pathlib import Path
 
 
 def get_data_path() -> Path:
@@ -29,8 +28,7 @@ def get_data_path() -> Path:
 
     """
     app_config = load_app_config()
-    repo_root = Path(__file__).parents[2]
-    return (repo_root / app_config.load_data.rooms_pgsql.data_path).resolve()
+    return (_repo_root() / app_config.load_data.rooms_pgsql.data_path).resolve()
 
 
 logging.basicConfig(
@@ -133,12 +131,7 @@ def get_pgsql_conn_string() -> str:
         RuntimeError: If PGSQL_DB_URL is unset.
 
     """
-    load_dotenv()
-    conn_string = os.getenv("PGSQL_DB_URL")
-    if not conn_string:
-        error_msg = "PGSQL_DB_URL is not set in the environment"
-        raise RuntimeError(error_msg)
-    return conn_string
+    return load_app_config().pgsql_db_url
 
 
 def build_enum_definition(values: Iterable[str]) -> Composed:

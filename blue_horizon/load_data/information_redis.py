@@ -9,13 +9,10 @@ validated before indices are created.
 from __future__ import annotations
 
 import logging
-import os
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pandas as pd
-from dotenv import load_dotenv
 from llama_index.core import Settings, StorageContext, VectorStoreIndex
 from llama_index.core.schema import TextNode
 from llama_index.embeddings.openai import OpenAIEmbedding
@@ -23,11 +20,11 @@ from llama_index.vector_stores.redis import RedisVectorStore
 from redisvl.schema import IndexSchema
 
 from blue_horizon.config import load_app_config
+from blue_horizon.load_data import _repo_root
 
 if TYPE_CHECKING:
     from collections.abc import Hashable
-
-load_dotenv()
+    from pathlib import Path
 
 
 logging.basicConfig(
@@ -46,28 +43,7 @@ def get_data_path() -> Path:
 
     """
     app_config = load_app_config()
-    repo_root = Path(__file__).parents[2]
-    return (repo_root / app_config.load_data.information_redis.data_path).resolve()
-
-
-def require_env_var(name: str) -> str:
-    """Return a required environment variable or exit.
-
-    Args:
-        name: Environment variable name.
-
-    Returns:
-        The value associated with `name`.
-
-    Raises:
-        SystemExit: If the variable is unset or empty.
-
-    """
-    value = os.getenv(name)
-    if not value:
-        logger.error("Missing required environment variable %s", name)
-        sys.exit(1)
-    return value
+    return (_repo_root() / app_config.load_data.information_redis.data_path).resolve()
 
 
 def load_dataframe(name: str, path: Path, required_columns: list[str]) -> pd.DataFrame:
@@ -194,7 +170,7 @@ def build_index(
         sys.exit(1)
 
 
-redis_conn_string = require_env_var("REDIS_URL")
+redis_conn_string = load_app_config().redis_url
 Settings.embed_model = OpenAIEmbedding(model="text-embedding-3-small")
 
 FAQ_REQUIRED_COLUMNS = [

@@ -1,14 +1,16 @@
 [experiment]
 # LangSmith dataset name to evaluate (required).
-dataset_name = "BlueHorizonEval_case2"
+dataset_name = "BlueHorizonEval_20"
 # Prefix used when generating experiment names.
-experiment_prefix = "hotel-agent-eval-case2"
+experiment_prefix = "hotel-agent-eval-20"
 # Optional run notes appended to experiment names.
-run_notes = "Small dataset with just case 2"
+run_notes = "Small dataset with just 20 cases"
 # Maximum concurrent example evaluations.
 max_concurrency = 10
 # Base output directory for local evaluation artifacts.
 output_dir = "eval/outputs"
+# Directory for evaluation logs.
+log_dir = "eval/logs"
 # Whether to upload results to LangSmith.
 upload_results = true
 # Optional limit on dataset examples (empty runs full dataset).
@@ -65,9 +67,9 @@ poll_interval_s = 1.0
 
 [reset_pool]
 # Maximum number of connections in the schema reset pool.
-max_size = 4
+max_size = 12
 # Minimum number of connections in the schema reset pool.
-min_size = 1
+min_size = 2
 
 [judge]
 # Judge model name used for rubric grading (Gemini model unless code edited).
@@ -94,8 +96,8 @@ llm_max_tokens = 2048
 embedding_model = "gemini-embedding-001"
 
 [stress]
-# Optional schema name override for stress runs (empty uses timestamp default).
-schema = ""
+# Optional database schema name override for stress runs (empty uses timestamp default).
+db_schema = ""
 # Number of concurrent simulated users.
 users = 50
 # Number of operations per user.
@@ -112,6 +114,8 @@ stay_nights = 2
 num_targets = 10
 # Size of the hot contention target subset.
 hot_target_count = 5
+# Probability of selecting a hot target vs any target (0.0-1.0).
+hot_target_probability = 0.8
 # Search start date for availability targets (YYYY-MM-DD).
 start_date = "2025-02-01"
 # Search horizon in days from the start date.

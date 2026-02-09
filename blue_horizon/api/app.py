@@ -26,20 +26,21 @@ class ChatPayload(BaseModel):
     thread_id: str
     text: str
 
+
 orchestrator = OrchestrationManager()
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None]:  # noqa: ARG001
+async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """Manage the lifespan of the FastAPI app.
 
     Starts the agent orchestrator when the app is launched and stops it when the app
     is shutdown.
 
     Arguments:
-        app: The FastAPI application (required by FastAPI lifespan signature)
+        _app: The FastAPI application (unused, required by FastAPI signature).
 
     Yields:
-        None
+        None: Control to the application lifespan.
 
     """
     await orchestrator.start()
@@ -57,7 +58,7 @@ async def chat(payload: ChatPayload) -> dict[str, Any]:
             and the text of the user's query.
 
     Returns:
-        A dictionary containing the agent's response.
+        Response dict from the orchestrator containing the agent's response.
 
     """
     return await orchestrator.ainvoke(

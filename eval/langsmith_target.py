@@ -33,6 +33,15 @@ from blue_horizon.agents.information import (
     set_eval_info_tool_log,
 )
 from blue_horizon.agents.orchestration import OrchestrationManager
+from eval._utils import (
+    coerce_float as _coerce_float,
+)
+from eval._utils import (
+    coerce_int as _coerce_int,
+)
+from eval._utils import (
+    coerce_strict_bool as _coerce_strict_bool,
+)
 from eval.config import load_eval_config
 
 
@@ -89,52 +98,6 @@ _ORCHESTRATION: OrchestrationManager | None = None
 _ROUTE_KEY = "route"  # key from orchestration.py
 
 
-def _coerce_float(value: object) -> float | None:
-    """Coerce a value to float when possible.
-
-    Args:
-        value: Raw value to coerce.
-
-    Returns:
-        Float value when coercible, otherwise None.
-
-    """
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value.strip())
-        except ValueError:
-            return None
-    return None
-
-
-def _coerce_int(value: object) -> int | None:
-    """Coerce a value to int when possible.
-
-    Args:
-        value: Raw value to coerce.
-
-    Returns:
-        Integer value when coercible, otherwise None.
-
-    """
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value)
-    if isinstance(value, str):
-        try:
-            return int(float(value.strip()))
-        except ValueError:
-            return None
-    return None
-
-
 def _canonicalize_filter_key(key: str) -> str:
     """Normalize filter keys for strict comparisons.
 
@@ -150,27 +113,6 @@ def _canonicalize_filter_key(key: str) -> str:
     if normalized == "duration_mintues":
         return "duration_minutes"
     return normalized
-
-
-def _coerce_strict_bool(value: object) -> bool | None:
-    """Coerce a value to bool using strict, string-only rules.
-
-    Args:
-        value: Raw value to coerce.
-
-    Returns:
-        Boolean value when coercible, otherwise None.
-
-    """
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"true", "yes", "y", "1"}:
-            return True
-        if normalized in {"false", "no", "n", "0"}:
-            return False
-    return None
 
 
 def _coerce_strict_filter_value(

@@ -297,7 +297,7 @@ class StressConfig(BaseModel):
     """Configuration for stress-test runs.
 
     Attributes:
-        schema: Optional schema name override for the stress run.
+        db_schema: Optional database schema name override for the stress run.
         users: Number of concurrent simulated users.
         ops_per_user: Number of operations per user.
         max_concurrency: Maximum concurrent users.
@@ -315,7 +315,7 @@ class StressConfig(BaseModel):
 
     model_config = {"frozen": True}
 
-    schema: str | None = None
+    db_schema: str | None = None
     users: Annotated[int, Field(ge=1)]
     ops_per_user: Annotated[int, Field(ge=1)]
     max_concurrency: Annotated[int, Field(ge=1)]
@@ -329,10 +329,10 @@ class StressConfig(BaseModel):
     horizon_days: Annotated[int, Field(ge=1)]
     pool_max: Annotated[int, Field(ge=1)]
 
-    @field_validator("schema", mode="before")
+    @field_validator("db_schema", mode="before")
     @classmethod
     def _empty_str_to_none(cls, value: object) -> object:
-        """Convert empty strings to None for optional schema."""
+        """Convert empty strings to None for optional db_schema."""
         if isinstance(value, str) and not value.strip():
             return None
         return value

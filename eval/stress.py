@@ -150,7 +150,7 @@ def _load_config() -> StressRunConfig:
 
     """
     cfg = load_eval_config().stress
-    schema = cfg.schema or generate_schema_name("stress")
+    schema = cfg.db_schema or generate_schema_name("stress")
     users = cfg.users
     ops_per_user = cfg.ops_per_user
     max_concurrency = cfg.max_concurrency

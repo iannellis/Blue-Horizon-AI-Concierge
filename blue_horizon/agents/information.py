@@ -232,7 +232,8 @@ class RetrievalItem(BaseModel):
 
     source: Source = Field(..., description="Which retriever produced this item")
     metadata: dict[str, Any] = Field(
-        ..., description="Metadata associated with the text",
+        ...,
+        description="Metadata associated with the text",
     )
     text: str = Field(..., description="The item name and description")
     score: float = Field(..., description="Similarity score; higher is more relevant")
@@ -249,7 +250,8 @@ class RerankInput(BaseModel):
     """
 
     faq_results: list[RetrievalItem] = Field(
-        ..., description="Output from query_faq",
+        ...,
+        description="Output from query_faq",
     )
     amenities_results: list[RetrievalItem] = Field(
         ...,
@@ -351,6 +353,7 @@ class ParsedState(InfoState):
 
     parsed: ParsedQuery
 
+
 INFO_AGENT_ENDING = (
     "Is there any other information I can provide about the hotel? "
     "I can also help finding and booking a room."
@@ -403,13 +406,17 @@ def build_filters(  # noqa: PLR0913
     if min_price is not None:
         filters.append(
             MetadataFilter(
-                key="price", operator=FilterOperator.GTE, value=float(min_price),
+                key="price",
+                operator=FilterOperator.GTE,
+                value=float(min_price),
             ),
         )
     if max_price is not None:
         filters.append(
             MetadataFilter(
-                key="price", operator=FilterOperator.LTE, value=float(max_price),
+                key="price",
+                operator=FilterOperator.LTE,
+                value=float(max_price),
             ),
         )
 
@@ -809,7 +816,8 @@ class InfoRagResources:
         if isinstance(reply, Mapping):
             return {str(k).lower(): v for k, v in reply.items()}
         if not isinstance(reply, Sequence) or isinstance(
-            reply, (str, bytes, bytearray),
+            reply,
+            (str, bytes, bytearray),
         ):
             return {}
 
@@ -1139,7 +1147,6 @@ class InfoRagResources:
         ]
 
 
-
 # ============================
 # Agent construction
 # ============================
@@ -1386,10 +1393,12 @@ class InfoAgentFactory:
             return {"faq_results": results}
 
         query_amenities_node = _make_catalog_query_node(
-            Source.AMENITIES, "amenities_results",
+            Source.AMENITIES,
+            "amenities_results",
         )
         query_services_node = _make_catalog_query_node(
-            Source.SERVICES, "services_results",
+            Source.SERVICES,
+            "services_results",
         )
 
         def rerank_node(state: InfoState) -> dict[str, Any]:
@@ -1433,9 +1442,7 @@ class InfoAgentFactory:
                 context = item.text
                 if item.metadata:
                     metadata_str = ", ".join(
-                        f"{k}: {v}"
-                        for k, v in item.metadata.items()
-                        if v is not None
+                        f"{k}: {v}" for k, v in item.metadata.items() if v is not None
                     )
                     if metadata_str:
                         context = f"{context}\n[Metadata: {metadata_str}]"

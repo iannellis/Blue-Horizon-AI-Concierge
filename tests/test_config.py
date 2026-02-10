@@ -40,8 +40,7 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
                 "help with room bookings."
             ),
             "error": (
-                "Sorry - there was a problem processing your request. "
-                "Please try again."
+                "Sorry - there was a problem processing your request. Please try again."
             ),
             "unavailable": (
                 "Sorry - the system isn't available at the moment. "

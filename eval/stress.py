@@ -46,6 +46,7 @@ if TYPE_CHECKING:
 
 load_dotenv()
 
+
 @dataclass(frozen=True)
 class StressRunConfig:
     """Configuration for a single stress run.
@@ -605,8 +606,7 @@ def _build_operation_request(
         )
 
     cancel_text = (
-        f"Cancel my booking for room {old_room} "
-        f"from {old_check_in} to {old_check_out}."
+        f"Cancel my booking for room {old_room} from {old_check_in} to {old_check_out}."
     )
     target_used = {
         "room_number": old_room,
@@ -926,9 +926,7 @@ def _summarize_user_ops(
 
     """
     latencies = [
-        float(cast("float", op["latency_ms"]))
-        for op in local_ops
-        if "latency_ms" in op
+        float(cast("float", op["latency_ms"])) for op in local_ops if "latency_ms" in op
     ]
     successes = sum(1 for op in local_ops if op.get("outcome") == "success")
     conflicts = sum(1 for op in local_ops if op.get("outcome") == "conflict")

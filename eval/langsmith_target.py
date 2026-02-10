@@ -579,7 +579,7 @@ class EvalCaptureCallback(AsyncCallbackHandler):
                             r"datetime\.date\((\d+),\s*(\d+),\s*(\d+)\)",
                             lambda m: (
                                 f'"{m.group(1)}-'
-                                f'{int(m.group(2)):02d}-'
+                                f"{int(m.group(2)):02d}-"
                                 f'{int(m.group(3)):02d}"'
                             ),
                             cleaned,
@@ -827,8 +827,7 @@ async def run_example(  # noqa: C901, PLR0912
                 for entry in tool_summary:
                     if (
                         isinstance(entry, dict)
-                        and entry.get("tool")
-                        in {"query_amenities", "query_services"}
+                        and entry.get("tool") in {"query_amenities", "query_services"}
                         and "filters" in entry
                         and "filters_norm" not in entry
                     ):
@@ -852,8 +851,7 @@ async def run_example(  # noqa: C901, PLR0912
                         and entry.get("tool") not in logged_names
                     ):
                         if (
-                            entry.get("tool")
-                            in {"query_amenities", "query_services"}
+                            entry.get("tool") in {"query_amenities", "query_services"}
                             and "filters" in entry
                             and "filters_norm" not in entry
                         ):

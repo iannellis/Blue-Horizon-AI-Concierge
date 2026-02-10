@@ -73,7 +73,7 @@ def _normalize_enum_columns(
     return normalized
 
 
-async def create_case_schema(   # noqa: PLR0915
+async def create_case_schema(  # noqa: PLR0915
     *,
     pool: AsyncConnectionPool[Any],
     schema: str,
@@ -127,30 +127,28 @@ async def create_case_schema(   # noqa: PLR0915
     # Which causes a problem when re-uploading to a schema with the same name
     run_token = uuid.uuid4().hex
 
-    rooms_insert_sql = (
-        sql.SQL("/* reset-run: {} */ ").format(sql.Literal(run_token))
-        + sql.SQL(
-            "INSERT INTO rooms ("
-            "room_id, room_number, floor, type, square_feet, "
-            "basic_amenities, additional_amenities, max_occupancy, "
-            "bed_type, view_type, accessibility, status, last_renovation, "
-            "base_rate, max_rate"
-            ") VALUES ("
-            "%s, %s, %s, %s::room_type, %s, %s, %s, %s, %s::room_bed_type, "
-            "%s, %s, %s::room_status_type, %s, %s, %s"
-            ");",
-        )
+    rooms_insert_sql = sql.SQL("/* reset-run: {} */ ").format(
+        sql.Literal(run_token),
+    ) + sql.SQL(
+        "INSERT INTO rooms ("
+        "room_id, room_number, floor, type, square_feet, "
+        "basic_amenities, additional_amenities, max_occupancy, "
+        "bed_type, view_type, accessibility, status, last_renovation, "
+        "base_rate, max_rate"
+        ") VALUES ("
+        "%s, %s, %s, %s::room_type, %s, %s, %s, %s, %s::room_bed_type, "
+        "%s, %s, %s::room_status_type, %s, %s, %s"
+        ");",
     )
 
-    avail_insert_sql = (
-        sql.SQL("/* reset-run: {} */ ").format(sql.Literal(run_token))
-        + sql.SQL(
-            "INSERT INTO room_availability ("
-            "room_id, room_number, date, status, price, max_occupancy"
-            ") VALUES ("
-            "%s, %s, %s, %s::availability_status_type, %s, %s"
-            ");",
-        )
+    avail_insert_sql = sql.SQL("/* reset-run: {} */ ").format(
+        sql.Literal(run_token),
+    ) + sql.SQL(
+        "INSERT INTO room_availability ("
+        "room_id, room_number, date, status, price, max_occupancy"
+        ") VALUES ("
+        "%s, %s, %s, %s::availability_status_type, %s, %s"
+        ");",
     )
 
     try:
@@ -380,7 +378,9 @@ async def _main() -> None:
     await pool.open()
     try:
         await create_case_schema(
-            pool=pool, schema=args.schema, data_path=args.data_path,
+            pool=pool,
+            schema=args.schema,
+            data_path=args.data_path,
         )
     finally:
         await pool.close()

@@ -53,9 +53,7 @@ async def eval_rooms_outcome_and_invariants(
     outputs = run.outputs or {}
     turn_outputs = outputs.get("turn_outputs") or []
     has_rooms = any(
-        t.get("route_pred") == "rooms"
-        for t in turn_outputs
-        if isinstance(t, dict)
+        t.get("route_pred") == "rooms" for t in turn_outputs if isinstance(t, dict)
     )
     if not has_rooms:
         return [

@@ -241,11 +241,10 @@ def _format_transcript(
         context_items = [
             truncate(str(c), limits.context_max_chars) for c in contexts_used
         ]
-        context_items = context_items[:limits.context_max_items]
+        context_items = context_items[: limits.context_max_items]
 
         assistant_line = (
-            "Assistant: "
-            f"{truncate(assistant_text, limits.assistant_max_chars)}"
+            f"Assistant: {truncate(assistant_text, limits.assistant_max_chars)}"
         )
         lines.extend(
             [

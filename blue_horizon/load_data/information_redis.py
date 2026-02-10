@@ -105,7 +105,10 @@ def safe_value(row: pd.Series, key: str, row_id: Hashable, default: str = "") ->
 
 
 def safe_numeric(
-    row: pd.Series, key: str, row_id: Hashable, default: float = 0,
+    row: pd.Series,
+    key: str,
+    row_id: Hashable,
+    default: float = 0,
 ) -> float:
     """Return a numeric value, coercing to float or falling back.
 

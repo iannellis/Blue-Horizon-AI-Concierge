@@ -270,9 +270,7 @@ def _is_truthy_bool(value: object) -> bool:
         True for literal True or case-insensitive "true", otherwise False.
 
     """
-    return value is True or (
-        isinstance(value, str) and value.strip().lower() == "true"
-    )
+    return value is True or (isinstance(value, str) and value.strip().lower() == "true")
 
 
 def _iter_tripwire_text_sources(turn_output: dict[str, Any]) -> list[tuple[str, str]]:

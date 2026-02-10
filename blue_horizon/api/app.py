@@ -48,6 +48,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     yield
     await orchestrator.stop()
 
+
 app = FastAPI(lifespan=lifespan)
 
 

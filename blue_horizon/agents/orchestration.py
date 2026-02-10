@@ -418,6 +418,7 @@ class OrchestrationAgentFactory:
                 Async node function suitable for LangGraph.
 
             """
+
             async def _node(
                 state: ConversationState,
                 config: RunnableConfig,

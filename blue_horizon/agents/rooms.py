@@ -397,8 +397,7 @@ def _extract_cte_names(query: str) -> set[str]:
         re.IGNORECASE,
     )
     return {
-        _normalize_identifier(match.group(1))
-        for match in cte_pattern.finditer(query)
+        _normalize_identifier(match.group(1)) for match in cte_pattern.finditer(query)
     }
 
 

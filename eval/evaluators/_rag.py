@@ -41,12 +41,15 @@ except Exception as _exc:  # noqa: BLE001
     _GENAI_IMPORT_ERROR = _exc
 
 _RAGAS_LOCK = asyncio.Lock()
-_RAGAS_METRICS: tuple[
-    Faithfulness,
-    AnswerRelevancy,
-    ContextPrecision,
-    ContextRecall,
-] | None = None
+_RAGAS_METRICS: (
+    tuple[
+        Faithfulness,
+        AnswerRelevancy,
+        ContextPrecision,
+        ContextRecall,
+    ]
+    | None
+) = None
 
 InstructorTypeVar = TypeVar("InstructorTypeVar", bound=BaseModel)
 
@@ -304,8 +307,9 @@ def _rag_extract_turn_inputs(
     return turn_outputs, example_turns, reference_answers
 
 
-async def _get_ragas_metrics(
-) -> tuple[Faithfulness, AnswerRelevancy, ContextPrecision, ContextRecall]:
+async def _get_ragas_metrics() -> tuple[
+    Faithfulness, AnswerRelevancy, ContextPrecision, ContextRecall,
+]:
     """Lazily initialize and return Ragas metrics with configured models.
 
     Returns:

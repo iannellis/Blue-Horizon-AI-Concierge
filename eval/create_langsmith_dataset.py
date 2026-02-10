@@ -184,10 +184,15 @@ def main() -> None:
     )
     parser.add_argument("--description", default=None, help="Dataset description.")
     parser.add_argument(
-        "--append", action="store_true", help="Append if dataset exists.",
+        "--append",
+        action="store_true",
+        help="Append if dataset exists.",
     )
     parser.add_argument(
-        "--batch-size", type=int, default=50, help="Examples per batch.",
+        "--batch-size",
+        type=int,
+        default=50,
+        help="Examples per batch.",
     )
     args = parser.parse_args()
 

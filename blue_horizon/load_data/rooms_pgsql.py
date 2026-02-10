@@ -304,7 +304,8 @@ def insert_rooms_data(conn: psycopg.Connection, df_rooms: pd.DataFrame) -> None:
 
 
 def setup_room_availability_schema(
-    conn: psycopg.Connection, status_def: Composed,
+    conn: psycopg.Connection,
+    status_def: Composed,
 ) -> None:
     """Reset availability enums and recreate the `room_availability` table.
 

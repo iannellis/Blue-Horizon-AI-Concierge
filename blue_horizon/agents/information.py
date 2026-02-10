@@ -115,16 +115,6 @@ def reset_eval_info_tool_log(token: Token[EvalInfoToolLog | None]) -> None:
     _EVAL_INFO_TOOL_LOG.reset(token)
 
 
-def get_eval_info_tool_log() -> EvalInfoToolLog | None:
-    """Return the active evaluation tool log container, if any.
-
-    Returns:
-        EvalInfoToolLog when set, otherwise ``None``.
-
-    """
-    return _EVAL_INFO_TOOL_LOG.get()
-
-
 def _log_eval_tool_summary(summary: dict[str, Any]) -> None:
     """Append a tool summary entry when evaluation logging is enabled.
 
@@ -151,6 +141,16 @@ def _log_eval_contexts(contexts: Iterable[str]) -> None:
     for context in contexts:
         if context:
             log.contexts_used.append(str(context))
+
+
+def get_eval_info_tool_log() -> EvalInfoToolLog | None:
+    """Return the active evaluation tool log container, if any.
+
+    Returns:
+        EvalInfoToolLog when set, otherwise ``None``.
+
+    """
+    return _EVAL_INFO_TOOL_LOG.get()
 
 
 # ============================
@@ -851,117 +851,6 @@ class InfoRagResources:
         )
 
     @staticmethod
-    def _coerce_score(node: Any) -> float:  # noqa: ANN401
-        """Convert a retrieved node score to a safe float.
-
-        Args:
-            node: Retrieved node object (may or may not define a score).
-
-        Returns:
-            float: A finite float score; returns 0.0 for missing, invalid, NaN, or
-            infinite scores.
-
-        """
-        raw = getattr(node, "score", None)
-        if raw is None:
-            return 0.0
-        try:
-            score = float(raw)
-        except (TypeError, ValueError):
-            return 0.0
-        if math.isnan(score) or math.isinf(score):
-            return 0.0
-        return score
-
-    @staticmethod
-    def _filters_signature(
-        filters: MetadataFilters | None,
-    ) -> tuple[tuple[str, str, str], ...]:
-        """Create a stable cache key for metadata filters.
-
-        Args:
-            filters: Optional metadata filters.
-
-        Returns:
-            tuple[tuple[str, str, str], ...]: Order-independent signature for caching.
-
-        """
-        if not filters:
-            return ()
-
-        signature: list[tuple[str, str, str]] = []
-        for f in getattr(filters, "filters", []) or []:
-            key = str(getattr(f, "key", ""))
-            op = str(getattr(f, "operator", ""))
-            val = str(getattr(f, "value", ""))
-            signature.append((key, op, val))
-
-        signature.sort()
-        return tuple(signature)
-
-    def _cache_retriever(
-        self,
-        cache_key: tuple[Source, tuple[tuple[str, str, str], ...]],
-        retriever: VectorIndexRetriever,
-    ) -> None:
-        """Insert a retriever into the bounded LRU cache.
-
-        Args:
-            cache_key: Cache key (source, filter signature).
-            retriever: Retriever instance to cache.
-
-        """
-        self._catalog_retrievers[cache_key] = retriever
-        self._catalog_retrievers.move_to_end(cache_key)
-        while len(self._catalog_retrievers) > self._retriever_cache_max:
-            self._catalog_retrievers.popitem(last=False)
-
-    def _get_catalog_retriever(
-        self,
-        *,
-        source: Source,
-        filters: MetadataFilters | None,
-    ) -> VectorIndexRetriever:
-        """Return a cached VectorIndexRetriever for amenities/services.
-
-        Args:
-            source: Source.AMENITIES or Source.SERVICES.
-            filters: Optional metadata filters.
-
-        Returns:
-            VectorIndexRetriever: Cached or newly-created retriever.
-
-        Raises:
-            OperationalError: If the retriever does not support async retrieval.
-
-        """
-        sig = self._filters_signature(filters)
-        cache_key = (source, sig)
-
-        existing = self._catalog_retrievers.get(cache_key)
-        if existing is not None:
-            self._catalog_retrievers.move_to_end(cache_key)
-            return existing
-
-        index = {
-            Source.AMENITIES: self.indexes.amenities,
-            Source.SERVICES: self.indexes.services,
-        }[source]
-
-        retriever = VectorIndexRetriever(
-            index=index,
-            similarity_top_k=self._top_k,
-            filters=filters,
-        )
-
-        if not hasattr(retriever, "aretrieve"):
-            msg = "VectorIndexRetriever does not support aretrieve()"
-            raise OperationalError(msg)
-
-        self._cache_retriever(cache_key, retriever)
-        return retriever
-
-    @staticmethod
     def _build_indexes(
         redis_client_async: AsyncRedis,
         *,
@@ -1145,6 +1034,117 @@ class InfoRagResources:
             )
             for n in nodes
         ]
+
+    def _get_catalog_retriever(
+        self,
+        *,
+        source: Source,
+        filters: MetadataFilters | None,
+    ) -> VectorIndexRetriever:
+        """Return a cached VectorIndexRetriever for amenities/services.
+
+        Args:
+            source: Source.AMENITIES or Source.SERVICES.
+            filters: Optional metadata filters.
+
+        Returns:
+            VectorIndexRetriever: Cached or newly-created retriever.
+
+        Raises:
+            OperationalError: If the retriever does not support async retrieval.
+
+        """
+        sig = self._filters_signature(filters)
+        cache_key = (source, sig)
+
+        existing = self._catalog_retrievers.get(cache_key)
+        if existing is not None:
+            self._catalog_retrievers.move_to_end(cache_key)
+            return existing
+
+        index = {
+            Source.AMENITIES: self.indexes.amenities,
+            Source.SERVICES: self.indexes.services,
+        }[source]
+
+        retriever = VectorIndexRetriever(
+            index=index,
+            similarity_top_k=self._top_k,
+            filters=filters,
+        )
+
+        if not hasattr(retriever, "aretrieve"):
+            msg = "VectorIndexRetriever does not support aretrieve()"
+            raise OperationalError(msg)
+
+        self._cache_retriever(cache_key, retriever)
+        return retriever
+
+    @staticmethod
+    def _filters_signature(
+        filters: MetadataFilters | None,
+    ) -> tuple[tuple[str, str, str], ...]:
+        """Create a stable cache key for metadata filters.
+
+        Args:
+            filters: Optional metadata filters.
+
+        Returns:
+            tuple[tuple[str, str, str], ...]: Order-independent signature for caching.
+
+        """
+        if not filters:
+            return ()
+
+        signature: list[tuple[str, str, str]] = []
+        for f in getattr(filters, "filters", []) or []:
+            key = str(getattr(f, "key", ""))
+            op = str(getattr(f, "operator", ""))
+            val = str(getattr(f, "value", ""))
+            signature.append((key, op, val))
+
+        signature.sort()
+        return tuple(signature)
+
+    def _cache_retriever(
+        self,
+        cache_key: tuple[Source, tuple[tuple[str, str, str], ...]],
+        retriever: VectorIndexRetriever,
+    ) -> None:
+        """Insert a retriever into the bounded LRU cache.
+
+        Args:
+            cache_key: Cache key (source, filter signature).
+            retriever: Retriever instance to cache.
+
+        """
+        self._catalog_retrievers[cache_key] = retriever
+        self._catalog_retrievers.move_to_end(cache_key)
+        while len(self._catalog_retrievers) > self._retriever_cache_max:
+            self._catalog_retrievers.popitem(last=False)
+
+    @staticmethod
+    def _coerce_score(node: Any) -> float:  # noqa: ANN401
+        """Convert a retrieved node score to a safe float.
+
+        Args:
+            node: Retrieved node object (may or may not define a score).
+
+        Returns:
+            float: A finite float score; returns 0.0 for missing, invalid, NaN, or
+            infinite scores.
+
+        """
+        raw = getattr(node, "score", None)
+        if raw is None:
+            return 0.0
+        try:
+            score = float(raw)
+        except (TypeError, ValueError):
+            return 0.0
+        if math.isnan(score) or math.isinf(score):
+            return 0.0
+        return score
 
 
 # ============================

@@ -78,6 +78,176 @@ _ORCHESTRATION: OrchestrationManager | None = None
 _ROUTE_KEY = "route"  # key from orchestration.py
 
 
+async def run_example(  # noqa: C901, PLR0912
+    example: dict[str, Any],
+) -> dict[str, Any]:
+    """Run a single LangSmith example through the orchestration pipeline.
+
+    Args:
+        example: LangSmith dataset example input containing case_id, turns, and tags.
+
+    Returns:
+        Dict containing turn outputs and case tags.
+
+    Raises:
+        KeyError: If required keys are missing from the example.
+
+    """
+    case_id = str(example["case_id"])
+    turns = example["turns"]
+    case_tags_raw = example.get("tags") or []
+    case_tags = list(case_tags_raw)
+
+    orchestration_mgr = await ensure_orchestration_ready()
+
+    thread_id = uuid4().hex
+
+    turn_outputs: list[dict[str, Any]] = []
+
+    for turn_index, turn in enumerate(turns):
+        user_text = str(turn["user"])
+        callback = EvalCaptureCallback()
+        tags = ["eval", f"case:{case_id}", f"turn:{turn_index}", *case_tags]
+        metadata = {
+            "case_id": case_id,
+            "turn_index": turn_index,
+        }
+
+        token = set_eval_info_tool_log(
+            EvalInfoToolLog(tool_summary=[], contexts_used=[]),
+        )
+        try:
+            result = await orchestration_mgr.ainvoke(
+                thread_id=thread_id,
+                user_text=user_text,
+                callbacks=[callback],
+                tags=tags,
+                metadata=metadata,
+            )
+        finally:
+            log = get_eval_info_tool_log()
+            reset_eval_info_tool_log(token)
+
+        messages_raw = result.get("messages", [])
+        messages = messages_raw if isinstance(messages_raw, list) else []
+        assistant_text = _extract_assistant_text(messages)
+
+        route_pred = callback.route_pred
+        if route_pred is None:
+            fallback_route = result.get(_ROUTE_KEY)
+            if isinstance(fallback_route, str):
+                route_pred = fallback_route
+
+        tool_summary = callback.tool_summary
+        contexts_used = callback.contexts_used
+        if log is not None:
+            if not tool_summary and log.tool_summary:
+                tool_summary = list(log.tool_summary)
+                # Normalize filters for query_amenities/query_services from log
+                for entry in tool_summary:
+                    if (
+                        isinstance(entry, dict)
+                        and entry.get("tool") in {"query_amenities", "query_services"}
+                        and "filters" in entry
+                        and "filters_norm" not in entry
+                    ):
+                        normalized, unknown = _normalize_info_filters_strict(
+                            entry.get("filters"),
+                        )
+                        entry["filters_norm"] = normalized
+                        if unknown:
+                            entry["filters_unknown_keys"] = unknown
+            if not contexts_used and log.contexts_used:
+                contexts_used = list(log.contexts_used)
+            if log.tool_summary and tool_summary:
+                logged_names = {
+                    entry.get("tool")
+                    for entry in tool_summary
+                    if isinstance(entry, dict)
+                }
+                for entry in log.tool_summary:
+                    if (
+                        isinstance(entry, dict)
+                        and entry.get("tool") not in logged_names
+                    ):
+                        if (
+                            entry.get("tool") in {"query_amenities", "query_services"}
+                            and "filters" in entry
+                            and "filters_norm" not in entry
+                        ):
+                            normalized, unknown = _normalize_info_filters_strict(
+                                entry.get("filters"),
+                            )
+                            entry["filters_norm"] = normalized
+                            if unknown:
+                                entry["filters_unknown_keys"] = unknown
+                        tool_summary.append(entry)
+
+        turn_outputs.append(
+            {
+                "assistant_text": assistant_text,
+                "route_pred": route_pred,
+                "tool_summary": tool_summary,
+                "contexts_used": contexts_used,
+            },
+        )
+
+    return {
+        "turn_outputs": turn_outputs,
+        "case_tags": case_tags,
+    }
+
+
+def _normalize_info_filters_strict(
+    filters: Mapping[str, object] | None,
+) -> tuple[dict[str, object] | None, list[str]]:
+    """Normalize amenity/service filters using strict canonical keys.
+
+    Args:
+        filters: Raw filters dict passed to an info tool, if any.
+
+    Returns:
+        Tuple of (normalized filters or None, unknown key list).
+
+    """
+    # Evaluators rely on these canonical keys to compare expected filters.
+    if not filters:
+        return None, []
+    if not isinstance(filters, dict):
+        return None, ["<non_dict_filters>"]
+
+    canonical_keys = {
+        "booking_required",
+        "min_price",
+        "max_price",
+        "min_notice_hours",
+        "max_notice_hours",
+        "min_duration_minutes",
+        "max_duration_minutes",
+    }
+
+    norm: dict[str, object] = {}
+    unknown_keys: list[str] = []
+
+    for key, value in filters.items():
+        canonical = _canonicalize_filter_key(str(key))
+        if canonical not in canonical_keys:
+            unknown_keys.append(str(key))
+            continue
+
+        coerced = _coerce_strict_filter_value(canonical, value)
+        if coerced is None:
+            unknown_keys.append(f"{key}:<bad_value>")
+            continue
+        norm[canonical] = coerced
+
+    _swap_range_if_needed(norm, "min_price", "max_price")
+    _swap_range_if_needed(norm, "min_notice_hours", "max_notice_hours")
+    _swap_range_if_needed(norm, "min_duration_minutes", "max_duration_minutes")
+
+    return (norm or None), unknown_keys
+
+
 def _canonicalize_filter_key(key: str) -> str:
     """Normalize filter keys for strict comparisons.
 
@@ -141,56 +311,6 @@ def _swap_range_if_needed(
         norm[min_key], norm[max_key] = norm[max_key], norm[min_key]
 
 
-def _normalize_info_filters_strict(
-    filters: Mapping[str, object] | None,
-) -> tuple[dict[str, object] | None, list[str]]:
-    """Normalize amenity/service filters using strict canonical keys.
-
-    Args:
-        filters: Raw filters dict passed to an info tool, if any.
-
-    Returns:
-        Tuple of (normalized filters or None, unknown key list).
-
-    """
-    # Evaluators rely on these canonical keys to compare expected filters.
-    if not filters:
-        return None, []
-    if not isinstance(filters, dict):
-        return None, ["<non_dict_filters>"]
-
-    canonical_keys = {
-        "booking_required",
-        "min_price",
-        "max_price",
-        "min_notice_hours",
-        "max_notice_hours",
-        "min_duration_minutes",
-        "max_duration_minutes",
-    }
-
-    norm: dict[str, object] = {}
-    unknown_keys: list[str] = []
-
-    for key, value in filters.items():
-        canonical = _canonicalize_filter_key(str(key))
-        if canonical not in canonical_keys:
-            unknown_keys.append(str(key))
-            continue
-
-        coerced = _coerce_strict_filter_value(canonical, value)
-        if coerced is None:
-            unknown_keys.append(f"{key}:<bad_value>")
-            continue
-        norm[canonical] = coerced
-
-    _swap_range_if_needed(norm, "min_price", "max_price")
-    _swap_range_if_needed(norm, "min_notice_hours", "max_notice_hours")
-    _swap_range_if_needed(norm, "min_duration_minutes", "max_duration_minutes")
-
-    return (norm or None), unknown_keys
-
-
 def _extract_filters_from_tool_inputs(inputs: object) -> dict[str, object] | None:
     """Extract a filters dict from tool inputs payloads.
 
@@ -214,6 +334,27 @@ def _extract_filters_from_tool_inputs(inputs: object) -> dict[str, object] | Non
         if str(key) not in excluded_keys
     }
     return extracted or None
+
+
+def _preview(obj: object, max_len: int = 200) -> str:
+    """Create a short, redacted preview of a value.
+
+    Args:
+        obj: Value to preview.
+        max_len: Maximum preview length.
+
+    Returns:
+        Sanitized preview string.
+
+    """
+    if max_len <= 0:
+        return ""
+    text = _safe_str(obj)
+    text = _redact_secrets(text)
+    text = " ".join(text.split())
+    if len(text) <= max_len:
+        return text
+    return f"{text[: max_len - 1]}…"
 
 
 def _safe_str(obj: object) -> str:
@@ -260,27 +401,6 @@ def _redact_secrets(text: str) -> str:
         if key in redacted:
             redacted = redacted.replace(key, "[REDACTED]")
     return redacted
-
-
-def _preview(obj: object, max_len: int = 200) -> str:
-    """Create a short, redacted preview of a value.
-
-    Args:
-        obj: Value to preview.
-        max_len: Maximum preview length.
-
-    Returns:
-        Sanitized preview string.
-
-    """
-    if max_len <= 0:
-        return ""
-    text = _safe_str(obj)
-    text = _redact_secrets(text)
-    text = " ".join(text.split())
-    if len(text) <= max_len:
-        return text
-    return f"{text[: max_len - 1]}…"
 
 
 def _input_keys(obj: object, max_keys: int = 20) -> list[str]:
@@ -689,24 +809,6 @@ class EvalCaptureCallback(AsyncCallbackHandler):
                         self.contexts_used.append(f"SQL result: {row_str}")
 
     @staticmethod
-    def _json_safe(value: object) -> object:
-        """Convert values to JSON-serializable structures.
-
-        Args:
-            value: Value to normalize for JSON serialization.
-
-        Returns:
-            A JSON-safe value, recursively normalized.
-
-        """
-        if value is None or isinstance(value, (str, int, float, bool)):
-            return value
-        if isinstance(value, Mapping):
-            return {str(k): EvalCaptureCallback._json_safe(v) for k, v in value.items()}
-        if isinstance(value, (list, tuple, set)):
-            return [EvalCaptureCallback._json_safe(item) for item in value]
-        return str(value)
-
     @staticmethod
     def _compact_rows(
         rows: list[dict[str, Any]],
@@ -736,6 +838,25 @@ class EvalCaptureCallback(AsyncCallbackHandler):
             )
         return safe_rows
 
+    @staticmethod
+    def _json_safe(value: object) -> object:
+        """Convert values to JSON-serializable structures.
+
+        Args:
+            value: Value to normalize for JSON serialization.
+
+        Returns:
+            A JSON-safe value, recursively normalized.
+
+        """
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, Mapping):
+            return {str(k): EvalCaptureCallback._json_safe(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            return [EvalCaptureCallback._json_safe(item) for item in value]
+        return str(value)
+
 
 def _get_tool_name(metadata: dict[str, Any]) -> str | None:
     """Extract the tool name from callback metadata.
@@ -756,123 +877,3 @@ def _get_tool_name(metadata: dict[str, Any]) -> str | None:
         if isinstance(serialized_name, str):
             return serialized_name
     return None
-
-
-async def run_example(  # noqa: C901, PLR0912
-    example: dict[str, Any],
-) -> dict[str, Any]:
-    """Run a single LangSmith example through the orchestration pipeline.
-
-    Args:
-        example: LangSmith dataset example input containing case_id, turns, and tags.
-
-    Returns:
-        Dict containing turn outputs and case tags.
-
-    Raises:
-        KeyError: If required keys are missing from the example.
-
-    """
-    case_id = str(example["case_id"])
-    turns = example["turns"]
-    case_tags_raw = example.get("tags") or []
-    case_tags = list(case_tags_raw)
-
-    orchestration_mgr = await ensure_orchestration_ready()
-
-    thread_id = uuid4().hex
-
-    turn_outputs: list[dict[str, Any]] = []
-
-    for turn_index, turn in enumerate(turns):
-        user_text = str(turn["user"])
-        callback = EvalCaptureCallback()
-        tags = ["eval", f"case:{case_id}", f"turn:{turn_index}", *case_tags]
-        metadata = {
-            "case_id": case_id,
-            "turn_index": turn_index,
-        }
-
-        token = set_eval_info_tool_log(
-            EvalInfoToolLog(tool_summary=[], contexts_used=[]),
-        )
-        try:
-            result = await orchestration_mgr.ainvoke(
-                thread_id=thread_id,
-                user_text=user_text,
-                callbacks=[callback],
-                tags=tags,
-                metadata=metadata,
-            )
-        finally:
-            log = get_eval_info_tool_log()
-            reset_eval_info_tool_log(token)
-
-        messages_raw = result.get("messages", [])
-        messages = messages_raw if isinstance(messages_raw, list) else []
-        assistant_text = _extract_assistant_text(messages)
-
-        route_pred = callback.route_pred
-        if route_pred is None:
-            fallback_route = result.get(_ROUTE_KEY)
-            if isinstance(fallback_route, str):
-                route_pred = fallback_route
-
-        tool_summary = callback.tool_summary
-        contexts_used = callback.contexts_used
-        if log is not None:
-            if not tool_summary and log.tool_summary:
-                tool_summary = list(log.tool_summary)
-                # Normalize filters for query_amenities/query_services from log
-                for entry in tool_summary:
-                    if (
-                        isinstance(entry, dict)
-                        and entry.get("tool") in {"query_amenities", "query_services"}
-                        and "filters" in entry
-                        and "filters_norm" not in entry
-                    ):
-                        normalized, unknown = _normalize_info_filters_strict(
-                            entry.get("filters"),
-                        )
-                        entry["filters_norm"] = normalized
-                        if unknown:
-                            entry["filters_unknown_keys"] = unknown
-            if not contexts_used and log.contexts_used:
-                contexts_used = list(log.contexts_used)
-            if log.tool_summary and tool_summary:
-                logged_names = {
-                    entry.get("tool")
-                    for entry in tool_summary
-                    if isinstance(entry, dict)
-                }
-                for entry in log.tool_summary:
-                    if (
-                        isinstance(entry, dict)
-                        and entry.get("tool") not in logged_names
-                    ):
-                        if (
-                            entry.get("tool") in {"query_amenities", "query_services"}
-                            and "filters" in entry
-                            and "filters_norm" not in entry
-                        ):
-                            normalized, unknown = _normalize_info_filters_strict(
-                                entry.get("filters"),
-                            )
-                            entry["filters_norm"] = normalized
-                            if unknown:
-                                entry["filters_unknown_keys"] = unknown
-                        tool_summary.append(entry)
-
-        turn_outputs.append(
-            {
-                "assistant_text": assistant_text,
-                "route_pred": route_pred,
-                "tool_summary": tool_summary,
-                "contexts_used": contexts_used,
-            },
-        )
-
-    return {
-        "turn_outputs": turn_outputs,
-        "case_tags": case_tags,
-    }

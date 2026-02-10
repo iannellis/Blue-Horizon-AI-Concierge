@@ -125,62 +125,6 @@ class OperationBuildResult:
     old_check_out: str | None
 
 
-async def run_stress() -> None:
-    """Execute a full stress run against a shared evaluation schema.
-
-    This routine initializes the orchestrator and database pool once, creates
-    and loads a shared stress schema, discovers bookable contention targets,
-    runs concurrent user workloads, asserts database invariants, writes JSON
-    artifacts, and performs best-effort cleanup.
-
-    Raises:
-        TimeoutError: If the orchestrator does not become ready within 30s.
-        RuntimeError: If no bookable targets can be found.
-
-    """
-    cfg = _load_config()
-    pool: AsyncConnectionPool | None = None
-    token: Token[str | None] | None = None
-    targets: list[dict[str, object]] = []
-    hot_targets: list[dict[str, object]] = []
-    op_logs: list[dict[str, object]] = []
-    user_logs: list[dict[str, object]] = []
-    invariants: dict[str, object] = {}
-    schema_drop_error: str | None = None
-
-    start_time = time.perf_counter()
-    try:
-        orchestration = await _start_orchestration()
-        pool = await open_schema_pool(cfg.db_url, max_size=cfg.pool_max)
-        token, targets, hot_targets = await _init_schema_and_targets(pool, cfg)
-        op_logs, user_logs = await _run_workload(
-            orchestration,
-            cfg,
-            targets,
-            hot_targets,
-        )
-        invariants = await _check_invariants(pool, cfg.schema)
-    finally:
-        schema_drop_error = await teardown_schema(token, pool, cfg.schema)
-
-    elapsed_s = max(0.0, time.perf_counter() - start_time)
-    summary = _build_summary(
-        cfg,
-        op_logs=op_logs,
-        invariants=invariants,
-        targets=targets,
-        hot_targets=hot_targets,
-        elapsed_s=elapsed_s,
-        schema_drop_error=schema_drop_error,
-    )
-    _write_artifacts(
-        cfg,
-        op_logs=op_logs,
-        user_logs=user_logs,
-        summary=summary,
-    )
-
-
 def _load_config() -> StressRunConfig:
     """Load stress configuration from eval_config.toml.
 
@@ -252,46 +196,20 @@ async def _start_orchestration() -> OrchestrationManager:
     return orchestration
 
 
-async def _init_schema_and_targets(
-    pool: AsyncConnectionPool,
-    cfg: StressRunConfig,
-) -> tuple[Token[str | None], list[dict[str, object]], list[dict[str, object]]]:
-    """Create the stress schema, set search path, and find targets.
+async def _set_search_path(conn: object, schema: str) -> None:
+    """Set the connection's search path to the target schema safely.
 
     Args:
-        pool: The open database connection pool.
-        cfg: The stress run configuration.
-
-    Returns:
-        A tuple of ``(token, targets, hot_targets)``.
-
-    Raises:
-        RuntimeError: If no bookable targets can be found.
+        conn: An async psycopg connection-like object.
+        schema: The schema name to place at the front of ``search_path``.
 
     """
-    await create_case_schema(
-        pool=pool,
-        schema=cfg.schema,
-        data_path=cfg.baseline_data_path,
+    # Use set_config to avoid interpolating identifiers in SQL text.
+    conn_obj = cast("object", conn)
+    await cast("object", conn_obj).execute(  # type: ignore[attr-defined]
+        "SELECT set_config('search_path', %s, false)",
+        (schema,),
     )
-    token = set_eval_schema(cfg.schema)
-
-    async with pool.connection() as conn:
-        await _set_search_path(conn, cfg.schema)
-        targets = await find_available_targets(
-            conn,
-            num_targets=cfg.num_targets,
-            stay_nights=cfg.stay_nights,
-            start_date=cfg.start_date,
-            horizon_days=cfg.horizon_days,
-        )
-
-    if not targets:
-        msg = "No bookable targets found"
-        raise RuntimeError(msg)
-
-    hot_targets = targets[: max(0, min(cfg.hot_target_count, len(targets)))]
-    return token, targets, hot_targets
 
 
 async def find_available_targets(
@@ -386,115 +304,46 @@ async def find_available_targets(
     return targets
 
 
-async def _run_workload(
-    orchestration: OrchestrationManager,
+async def _init_schema_and_targets(
+    pool: AsyncConnectionPool,
     cfg: StressRunConfig,
-    targets: list[dict[str, object]],
-    hot_targets: list[dict[str, object]],
-) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
-    """Execute concurrent user workloads and collect operation logs.
+) -> tuple[Token[str | None], list[dict[str, object]], list[dict[str, object]]]:
+    """Create the stress schema, set search path, and find targets.
 
     Args:
-        orchestration: The ready orchestrator.
+        pool: The open database connection pool.
         cfg: The stress run configuration.
-        targets: The full target pool.
-        hot_targets: The hot contention target subset.
 
     Returns:
-        A tuple of ``(op_logs, user_logs)``.
+        A tuple of ``(token, targets, hot_targets)``.
+
+    Raises:
+        RuntimeError: If no bookable targets can be found.
 
     """
-    op_logs: list[dict[str, object]] = []
-    user_logs: list[dict[str, object]] = []
-    semaphore = asyncio.Semaphore(cfg.max_concurrency)
+    await create_case_schema(
+        pool=pool,
+        schema=cfg.schema,
+        data_path=cfg.baseline_data_path,
+    )
+    token = set_eval_schema(cfg.schema)
 
-    async def user_task(user_idx: int) -> dict[str, object]:
-        """Run a single simulated user's workload under a semaphore.
-
-        Args:
-            user_idx: The integer user index for tagging and metadata.
-
-        Returns:
-            A per-user summary dictionary with counts and latency stats.
-
-        """
-        thread_id = uuid4().hex
-        state = UserState()
-        local_ops: list[dict[str, object]] = []
-
-        async with semaphore:
-            for op_idx in range(cfg.ops_per_user):
-                op_type = _pick_op_type()
-                build = _build_operation_request(
-                    op_type,
-                    state,
-                    targets=targets,
-                    hot_targets=hot_targets,
-                    hot_target_probability=cfg.hot_target_probability,
-                )
-                tags, metadata = _build_trace_context(
-                    cfg=cfg,
-                    user_idx=user_idx,
-                    op_idx=op_idx,
-                    op_type=build.op_type,
-                )
-                t0 = time.perf_counter()
-                assistant_text, outcome, err_text = await _invoke_orchestration(
-                    orchestration=orchestration,
-                    thread_id=thread_id,
-                    prompt=build.prompt,
-                    tags=tags,
-                    metadata=metadata,
-                )
-
-                latency_ms = (time.perf_counter() - t0) * 1000.0
-
-                _update_booking_state(state, op_type=build.op_type, outcome=outcome)
-                op_entry = _build_op_entry(
-                    op_type=build.op_type,
-                    user_idx=user_idx,
-                    op_idx=op_idx,
-                    thread_id=thread_id,
-                    prompt=build.prompt,
-                    latency_ms=latency_ms,
-                    outcome=outcome,
-                    assistant_text=assistant_text,
-                    err_text=err_text,
-                    target_used=build.target_used,
-                    old_room=build.old_room,
-                    old_check_in=build.old_check_in,
-                    old_check_out=build.old_check_out,
-                    state=state,
-                )
-
-                local_ops.append(op_entry)
-                op_logs.append(op_entry)
-
-        return _summarize_user_ops(
-            user_idx=user_idx,
-            thread_id=thread_id,
-            state=state,
-            local_ops=local_ops,
+    async with pool.connection() as conn:
+        await _set_search_path(conn, cfg.schema)
+        targets = await find_available_targets(
+            conn,
+            num_targets=cfg.num_targets,
+            stay_nights=cfg.stay_nights,
+            start_date=cfg.start_date,
+            horizon_days=cfg.horizon_days,
         )
 
-    tasks = [user_task(i) for i in range(cfg.users)]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    for i, res in enumerate(results):
-        if isinstance(res, BaseException):
-            user_logs.append(
-                {
-                    "user_idx": i,
-                    "error": f"{type(res).__name__}: {res}",
-                    "ops": 0,
-                    "successes": 0,
-                    "conflicts": 0,
-                    "errors": 1,
-                },
-            )
-        else:
-            user_logs.append(cast("dict[str, object]", res))
+    if not targets:
+        msg = "No bookable targets found"
+        raise RuntimeError(msg)
 
-    return op_logs, user_logs
+    hot_targets = targets[: max(0, min(cfg.hot_target_count, len(targets)))]
+    return token, targets, hot_targets
 
 
 def _pick_op_type() -> str:
@@ -509,6 +358,60 @@ def _pick_op_type() -> str:
         weights=[0.5, 0.25, 0.25],
         k=1,
     )[0]
+
+
+def _choose_target(
+    targets: list[dict[str, object]],
+    hot_targets: list[dict[str, object]],
+    hot_target_probability: float,
+) -> dict[str, object]:
+    """Choose a contention target with hot-to-cold probability split.
+
+    Args:
+        targets: The full candidate target pool.
+        hot_targets: The high-contention subset.
+        hot_target_probability: Probability of selecting hot vs any target.
+
+    Returns:
+        A chosen target dictionary.
+
+    """
+    use_hot = bool(hot_targets) and random.random() < hot_target_probability  # noqa: S311
+    pool = hot_targets if use_hot else targets
+    return random.choice(pool)  # noqa: S311
+
+
+def _choose_new_target(
+    *,
+    targets: list[dict[str, object]],
+    hot_targets: list[dict[str, object]],
+    old_room: int | None,
+    old_check_in: str | None,
+    old_check_out: str | None,
+) -> dict[str, object]:
+    """Choose a new target that differs from the previous booking if possible.
+
+    Args:
+        targets: The full candidate target pool.
+        hot_targets: The high-contention subset.
+        old_room: The prior room number, if known.
+        old_check_in: The prior check-in date, if known.
+        old_check_out: The prior check-out date, if known.
+
+    Returns:
+        A chosen target dictionary, preferring a different triplet.
+
+    """
+    candidates = list(hot_targets) if hot_targets else list(targets)
+    random.shuffle(candidates)
+    for cand in candidates:
+        if (
+            cand.get("room_number") != old_room
+            or cand.get("check_in") != old_check_in
+            or cand.get("check_out") != old_check_out
+        ):
+            return cand
+    return random.choice(targets)  # noqa: S311
 
 
 def _build_operation_request(
@@ -607,60 +510,6 @@ def _build_operation_request(
     )
 
 
-def _choose_target(
-    targets: list[dict[str, object]],
-    hot_targets: list[dict[str, object]],
-    hot_target_probability: float,
-) -> dict[str, object]:
-    """Choose a contention target with hot-to-cold probability split.
-
-    Args:
-        targets: The full candidate target pool.
-        hot_targets: The high-contention subset.
-        hot_target_probability: Probability of selecting hot vs any target.
-
-    Returns:
-        A chosen target dictionary.
-
-    """
-    use_hot = bool(hot_targets) and random.random() < hot_target_probability  # noqa: S311
-    pool = hot_targets if use_hot else targets
-    return random.choice(pool)  # noqa: S311
-
-
-def _choose_new_target(
-    *,
-    targets: list[dict[str, object]],
-    hot_targets: list[dict[str, object]],
-    old_room: int | None,
-    old_check_in: str | None,
-    old_check_out: str | None,
-) -> dict[str, object]:
-    """Choose a new target that differs from the previous booking if possible.
-
-    Args:
-        targets: The full candidate target pool.
-        hot_targets: The high-contention subset.
-        old_room: The prior room number, if known.
-        old_check_in: The prior check-in date, if known.
-        old_check_out: The prior check-out date, if known.
-
-    Returns:
-        A chosen target dictionary, preferring a different triplet.
-
-    """
-    candidates = list(hot_targets) if hot_targets else list(targets)
-    random.shuffle(candidates)
-    for cand in candidates:
-        if (
-            cand.get("room_number") != old_room
-            or cand.get("check_in") != old_check_in
-            or cand.get("check_out") != old_check_out
-        ):
-            return cand
-    return random.choice(targets)  # noqa: S311
-
-
 def _build_trace_context(
     *,
     cfg: StressRunConfig,
@@ -694,42 +543,6 @@ def _build_trace_context(
         "op_type": op_type,
     }
     return tags, metadata
-
-
-async def _invoke_orchestration(
-    *,
-    orchestration: OrchestrationManager,
-    thread_id: str,
-    prompt: str,
-    tags: list[str],
-    metadata: dict[str, object],
-) -> tuple[str, str, str | None]:
-    """Invoke the orchestrator and classify the assistant response.
-
-    Args:
-        orchestration: The ready orchestrator.
-        thread_id: The thread identifier for the user.
-        prompt: The user prompt.
-        tags: LangSmith tags to attach to the trace.
-        metadata: LangSmith metadata for the trace.
-
-    Returns:
-        A tuple of ``(assistant_text, outcome, error_text)``.
-
-    """
-    try:
-        result = await orchestration.ainvoke(
-            thread_id=thread_id,
-            user_text=prompt,
-            tags=tags,
-            metadata=metadata,
-        )
-        assistant_text = await _extract_last_assistant_text(result)
-        outcome = _classify_outcome(assistant_text or "")
-    except Exception as exc:  # noqa: BLE001
-        err_text = f"{type(exc).__name__}: {exc}"
-        return err_text, "error", err_text
-    return assistant_text, outcome, None
 
 
 async def _extract_last_assistant_text(result: object) -> str:
@@ -796,6 +609,42 @@ def _classify_outcome(text: str) -> str:
     if any(m in lower for m in ["error", "failed", "exception"]):
         return "error"
     return "success"
+
+
+async def _invoke_orchestration(
+    *,
+    orchestration: OrchestrationManager,
+    thread_id: str,
+    prompt: str,
+    tags: list[str],
+    metadata: dict[str, object],
+) -> tuple[str, str, str | None]:
+    """Invoke the orchestrator and classify the assistant response.
+
+    Args:
+        orchestration: The ready orchestrator.
+        thread_id: The thread identifier for the user.
+        prompt: The user prompt.
+        tags: LangSmith tags to attach to the trace.
+        metadata: LangSmith metadata for the trace.
+
+    Returns:
+        A tuple of ``(assistant_text, outcome, error_text)``.
+
+    """
+    try:
+        result = await orchestration.ainvoke(
+            thread_id=thread_id,
+            user_text=prompt,
+            tags=tags,
+            metadata=metadata,
+        )
+        assistant_text = await _extract_last_assistant_text(result)
+        outcome = _classify_outcome(assistant_text or "")
+    except Exception as exc:  # noqa: BLE001
+        err_text = f"{type(exc).__name__}: {exc}"
+        return err_text, "error", err_text
+    return assistant_text, outcome, None
 
 
 def _update_booking_state(state: UserState, *, op_type: str, outcome: str) -> None:
@@ -931,6 +780,117 @@ def _summarize_user_ops(
     }
 
 
+async def _run_workload(
+    orchestration: OrchestrationManager,
+    cfg: StressRunConfig,
+    targets: list[dict[str, object]],
+    hot_targets: list[dict[str, object]],
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Execute concurrent user workloads and collect operation logs.
+
+    Args:
+        orchestration: The ready orchestrator.
+        cfg: The stress run configuration.
+        targets: The full target pool.
+        hot_targets: The hot contention target subset.
+
+    Returns:
+        A tuple of ``(op_logs, user_logs)``.
+
+    """
+    op_logs: list[dict[str, object]] = []
+    user_logs: list[dict[str, object]] = []
+    semaphore = asyncio.Semaphore(cfg.max_concurrency)
+
+    async def user_task(user_idx: int) -> dict[str, object]:
+        """Run a single simulated user's workload under a semaphore.
+
+        Args:
+            user_idx: The integer user index for tagging and metadata.
+
+        Returns:
+            A per-user summary dictionary with counts and latency stats.
+
+        """
+        thread_id = uuid4().hex
+        state = UserState()
+        local_ops: list[dict[str, object]] = []
+
+        async with semaphore:
+            for op_idx in range(cfg.ops_per_user):
+                op_type = _pick_op_type()
+                build = _build_operation_request(
+                    op_type,
+                    state,
+                    targets=targets,
+                    hot_targets=hot_targets,
+                    hot_target_probability=cfg.hot_target_probability,
+                )
+                tags, metadata = _build_trace_context(
+                    cfg=cfg,
+                    user_idx=user_idx,
+                    op_idx=op_idx,
+                    op_type=build.op_type,
+                )
+                t0 = time.perf_counter()
+                assistant_text, outcome, err_text = await _invoke_orchestration(
+                    orchestration=orchestration,
+                    thread_id=thread_id,
+                    prompt=build.prompt,
+                    tags=tags,
+                    metadata=metadata,
+                )
+
+                latency_ms = (time.perf_counter() - t0) * 1000.0
+
+                _update_booking_state(state, op_type=build.op_type, outcome=outcome)
+                op_entry = _build_op_entry(
+                    op_type=build.op_type,
+                    user_idx=user_idx,
+                    op_idx=op_idx,
+                    thread_id=thread_id,
+                    prompt=build.prompt,
+                    latency_ms=latency_ms,
+                    outcome=outcome,
+                    assistant_text=assistant_text,
+                    err_text=err_text,
+                    target_used=build.target_used,
+                    old_room=build.old_room,
+                    old_check_in=build.old_check_in,
+                    old_check_out=build.old_check_out,
+                    state=state,
+                )
+
+                local_ops.append(op_entry)
+                op_logs.append(op_entry)
+
+        return _summarize_user_ops(
+            user_idx=user_idx,
+            thread_id=thread_id,
+            state=state,
+            local_ops=local_ops,
+        )
+
+    tasks = [user_task(i) for i in range(cfg.users)]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    for i, res in enumerate(results):
+        if isinstance(res, BaseException):
+            user_logs.append(
+                {
+                    "user_idx": i,
+                    "error": f"{type(res).__name__}: {res}",
+                    "ops": 0,
+                    "successes": 0,
+                    "conflicts": 0,
+                    "errors": 1,
+                },
+            )
+        else:
+            user_logs.append(cast("dict[str, object]", res))
+
+    return op_logs, user_logs
+
+
 async def _check_invariants(
     pool: AsyncConnectionPool,
     schema: str,
@@ -975,20 +935,21 @@ async def _check_invariants(
     }
 
 
-async def _set_search_path(conn: object, schema: str) -> None:
-    """Set the connection's search path to the target schema safely.
+def _percentile(sorted_vals: list[float], p: float) -> float:
+    """Compute a percentile from a pre-sorted list without numpy.
 
     Args:
-        conn: An async psycopg connection-like object.
-        schema: The schema name to place at the front of ``search_path``.
+        sorted_vals: A list of numeric values sorted in ascending order.
+        p: The percentile as a fraction in the inclusive range ``[0, 1]``.
+
+    Returns:
+        The value at index ``int(p * (n - 1))``, or ``0.0`` if empty.
 
     """
-    # Use set_config to avoid interpolating identifiers in SQL text.
-    conn_obj = cast("object", conn)
-    await cast("object", conn_obj).execute(  # type: ignore[attr-defined]
-        "SELECT set_config('search_path', %s, false)",
-        (schema,),
-    )
+    if not sorted_vals:
+        return 0.0
+    idx = int(p * (len(sorted_vals) - 1))
+    return float(sorted_vals[idx])
 
 
 def _build_summary(  # noqa: PLR0913
@@ -1080,23 +1041,6 @@ def _build_summary(  # noqa: PLR0913
     return summary
 
 
-def _percentile(sorted_vals: list[float], p: float) -> float:
-    """Compute a percentile from a pre-sorted list without numpy.
-
-    Args:
-        sorted_vals: A list of numeric values sorted in ascending order.
-        p: The percentile as a fraction in the inclusive range ``[0, 1]``.
-
-    Returns:
-        The value at index ``int(p * (n - 1))``, or ``0.0`` if empty.
-
-    """
-    if not sorted_vals:
-        return 0.0
-    idx = int(p * (len(sorted_vals) - 1))
-    return float(sorted_vals[idx])
-
-
 def _write_artifacts(
     cfg: StressRunConfig,
     *,
@@ -1130,6 +1074,62 @@ def _write_artifacts(
     summary_path = run_dir / "stress_summary.json"
     with summary_path.open("w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=True, indent=2)
+
+
+async def run_stress() -> None:
+    """Execute a full stress run against a shared evaluation schema.
+
+    This routine initializes the orchestrator and database pool once, creates
+    and loads a shared stress schema, discovers bookable contention targets,
+    runs concurrent user workloads, asserts database invariants, writes JSON
+    artifacts, and performs best-effort cleanup.
+
+    Raises:
+        TimeoutError: If the orchestrator does not become ready within 30s.
+        RuntimeError: If no bookable targets can be found.
+
+    """
+    cfg = _load_config()
+    pool: AsyncConnectionPool | None = None
+    token: Token[str | None] | None = None
+    targets: list[dict[str, object]] = []
+    hot_targets: list[dict[str, object]] = []
+    op_logs: list[dict[str, object]] = []
+    user_logs: list[dict[str, object]] = []
+    invariants: dict[str, object] = {}
+    schema_drop_error: str | None = None
+
+    start_time = time.perf_counter()
+    try:
+        orchestration = await _start_orchestration()
+        pool = await open_schema_pool(cfg.db_url, max_size=cfg.pool_max)
+        token, targets, hot_targets = await _init_schema_and_targets(pool, cfg)
+        op_logs, user_logs = await _run_workload(
+            orchestration,
+            cfg,
+            targets,
+            hot_targets,
+        )
+        invariants = await _check_invariants(pool, cfg.schema)
+    finally:
+        schema_drop_error = await teardown_schema(token, pool, cfg.schema)
+
+    elapsed_s = max(0.0, time.perf_counter() - start_time)
+    summary = _build_summary(
+        cfg,
+        op_logs=op_logs,
+        invariants=invariants,
+        targets=targets,
+        hot_targets=hot_targets,
+        elapsed_s=elapsed_s,
+        schema_drop_error=schema_drop_error,
+    )
+    _write_artifacts(
+        cfg,
+        op_logs=op_logs,
+        user_logs=user_logs,
+        summary=summary,
+    )
 
 
 if __name__ == "__main__":

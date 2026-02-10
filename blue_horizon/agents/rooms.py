@@ -260,6 +260,89 @@ _TABLE_REF = re.compile(
 )
 
 
+def validate_sql(query: str, *, allow_only_hotel_tables: bool) -> None:
+    """Validate a SQL statement against conservative guardrails.
+
+    Guardrails enforced:
+      - Exactly one statement per call (no statement separators).
+      - Blocks common catalog/extension escape hatches.
+      - Blocks DDL and privileged commands.
+      - Optionally restricts table references to an allowlist (CTEs are allowed).
+
+    Args:
+        query: SQL statement to validate.
+        allow_only_hotel_tables: Whether to enforce a table allowlist.
+
+    Raises:
+        ValueError: If the SQL violates any guardrail.
+
+    """
+    if _contains_statement_separator(query):
+        msg = (
+            "Only a single SQL statement is allowed per call (no semicolons). "
+            "For multi-step workflows, call the tool multiple times."
+        )
+        raise ValueError(msg)
+
+    q = _normalize_sql(query)
+    q_lower = q.lower()
+
+    for token in _FORBIDDEN_TOKENS:
+        if token in q_lower:
+            msg = f"Forbidden SQL token detected: {token}"
+            raise ValueError(msg)
+
+    if _FORBIDDEN_KEYWORDS.search(q):
+        msg = "DDL/privileged SQL statements are not allowed."
+        raise ValueError(msg)
+
+    if allow_only_hotel_tables:
+        # Extract CTE names from the query - these are allowed references
+        cte_names = _extract_cte_names(query)
+        allowed = _ALLOWED_TABLES | cte_names
+
+        for _, part1, part2 in _TABLE_REF.findall(q):
+            table_token = part2 or part1
+            table = _normalize_identifier(table_token)
+            if table not in allowed:
+                msg = f"Table not allowed: {table_token}"
+                raise ValueError(msg)
+
+
+def _is_write_sql(query: str) -> bool:
+    """Determine whether the SQL statement looks like a write (DML).
+
+    Args:
+        query: SQL statement.
+
+    Returns:
+        True if the statement contains INSERT, UPDATE, or DELETE.
+
+    """
+    q = _normalize_sql(query).lower()
+    return bool(re.search(r"\b(insert|update|delete)\b", q))
+
+
+def _extract_cte_names(query: str) -> set[str]:
+    """Extract CTE names from WITH clauses in a SQL query.
+
+    Args:
+        query: SQL query string.
+
+    Returns:
+        Set of normalized CTE names found in the query.
+
+    """
+    # Match CTE definitions: WITH [RECURSIVE] name AS ( or , name AS (
+    cte_pattern = re.compile(
+        r"(?:\bWITH\s+(?:RECURSIVE\s+)?|,\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s+AS\s*\(",
+        re.IGNORECASE,
+    )
+    return {
+        _normalize_identifier(match.group(1)) for match in cte_pattern.finditer(query)
+    }
+
+
 def _normalize_sql(query: str) -> str:
     """Normalize SQL text for lightweight validation.
 
@@ -381,75 +464,6 @@ def _contains_statement_separator(query: str) -> bool:  # noqa: C901, PLR0912, P
     return False
 
 
-def _extract_cte_names(query: str) -> set[str]:
-    """Extract CTE names from WITH clauses in a SQL query.
-
-    Args:
-        query: SQL query string.
-
-    Returns:
-        Set of normalized CTE names found in the query.
-
-    """
-    # Match CTE definitions: WITH [RECURSIVE] name AS ( or , name AS (
-    cte_pattern = re.compile(
-        r"(?:\bWITH\s+(?:RECURSIVE\s+)?|,\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s+AS\s*\(",
-        re.IGNORECASE,
-    )
-    return {
-        _normalize_identifier(match.group(1)) for match in cte_pattern.finditer(query)
-    }
-
-
-def validate_sql(query: str, *, allow_only_hotel_tables: bool) -> None:
-    """Validate a SQL statement against conservative guardrails.
-
-    Guardrails enforced:
-      - Exactly one statement per call (no statement separators).
-      - Blocks common catalog/extension escape hatches.
-      - Blocks DDL and privileged commands.
-      - Optionally restricts table references to an allowlist (CTEs are allowed).
-
-    Args:
-        query: SQL statement to validate.
-        allow_only_hotel_tables: Whether to enforce a table allowlist.
-
-    Raises:
-        ValueError: If the SQL violates any guardrail.
-
-    """
-    if _contains_statement_separator(query):
-        msg = (
-            "Only a single SQL statement is allowed per call (no semicolons). "
-            "For multi-step workflows, call the tool multiple times."
-        )
-        raise ValueError(msg)
-
-    q = _normalize_sql(query)
-    q_lower = q.lower()
-
-    for token in _FORBIDDEN_TOKENS:
-        if token in q_lower:
-            msg = f"Forbidden SQL token detected: {token}"
-            raise ValueError(msg)
-
-    if _FORBIDDEN_KEYWORDS.search(q):
-        msg = "DDL/privileged SQL statements are not allowed."
-        raise ValueError(msg)
-
-    if allow_only_hotel_tables:
-        # Extract CTE names from the query - these are allowed references
-        cte_names = _extract_cte_names(query)
-        allowed = _ALLOWED_TABLES | cte_names
-
-        for _, part1, part2 in _TABLE_REF.findall(q):
-            table_token = part2 or part1
-            table = _normalize_identifier(table_token)
-            if table not in allowed:
-                msg = f"Table not allowed: {table_token}"
-                raise ValueError(msg)
-
-
 # ============================
 # Resources (long-lived dependencies)
 # ============================
@@ -464,20 +478,6 @@ async def _sleep_backoff(base_s: float, attempt: int) -> None:
 
     """
     await asyncio.sleep(base_s * (2**attempt))
-
-
-def _is_write_sql(query: str) -> bool:
-    """Determine whether the SQL statement looks like a write (DML).
-
-    Args:
-        query: SQL statement.
-
-    Returns:
-        True if the statement contains INSERT, UPDATE, or DELETE.
-
-    """
-    q = _normalize_sql(query).lower()
-    return bool(re.search(r"\b(insert|update|delete)\b", q))
 
 
 def _is_transient_conn_error(exc: BaseException) -> bool:

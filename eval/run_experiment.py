@@ -142,96 +142,6 @@ class ResultLike(SupportsAttrs, Protocol):
     exception: object | None
 
 
-async def main() -> None:
-    """Run the LangSmith experiment and persist local artifacts."""
-    cfg = load_eval_config()
-    started_at = datetime.now(UTC)
-    dataset_name = cfg.experiment.dataset_name
-    experiment_prefix = cfg.experiment.experiment_prefix
-    run_notes = cfg.experiment.run_notes
-    experiment_name = _build_experiment_name(
-        experiment_prefix,
-        run_notes,
-        started_at,
-    )
-    max_concurrency = cfg.experiment.max_concurrency
-    output_root = cfg.experiment.output_dir
-    log_dir = cfg.experiment.log_dir
-    artifacts = _build_output_paths(output_root, experiment_name)
-    upload_results = cfg.experiment.upload_results
-    limit = cfg.experiment.limit
-
-    _configure_logging(experiment_name, log_dir)
-
-    # Setting LANGSMITH_TEST_CACHE enables caching of example runs to reduce cost/time.
-    metadata = _build_metadata(cfg.metadata)
-
-    evaluators = [
-        eval_routing_accuracy,
-        eval_injection_tripwires,
-        eval_rooms_outcome_and_invariants,
-        eval_llm_rubrics,
-        eval_rag_metrics_info_turns,
-        eval_info_reference_subset,
-        eval_info_expected_filters,
-    ]
-
-    aevaluate_kwargs: MutableMapping[str, Any] = {
-        "evaluators": evaluators,
-        "max_concurrency": max_concurrency,
-        "upload_results": upload_results,
-        "metadata": metadata,
-    }
-    signature = inspect.signature(aevaluate)
-    if "experiment_name" in signature.parameters:
-        aevaluate_kwargs["experiment_name"] = experiment_name
-    elif "experiment_prefix" in signature.parameters:
-        aevaluate_kwargs["experiment_prefix"] = experiment_name
-
-    examples = _load_dataset_examples(dataset_name, limit)
-    has_rooms = _has_rooms_cases(examples)
-    schema_resources = await _setup_eval_schema(cfg) if has_rooms else None
-
-    try:
-        results = await aevaluate(run_example, examples, **aevaluate_kwargs)
-        results_list: list[Any] = []
-        if results is not None:
-            results_list.extend([item async for item in results])
-
-        result_rows = [_build_results_row(result) for result in results_list]
-        _write_jsonl(artifacts.results_path, result_rows)
-        finished_at = datetime.now(UTC)
-        context = SummaryContext(
-            dataset_name=dataset_name,
-            experiment_name=experiment_name,
-            max_concurrency=max_concurrency,
-            started_at=started_at,
-            finished_at=finished_at,
-            upload_results=upload_results,
-        )
-        summary = _summarize_results(result_rows, context)
-        _write_summary(artifacts.summary_path, summary)
-    except Exception as exc:
-        finished_at = datetime.now(UTC)
-        context = SummaryContext(
-            dataset_name=dataset_name,
-            experiment_name=experiment_name,
-            max_concurrency=max_concurrency,
-            started_at=started_at,
-            finished_at=finished_at,
-            upload_results=upload_results,
-        )
-        summary = _build_error_summary(context, exc)
-        _write_summary(artifacts.summary_path, summary)
-        raise
-    finally:
-        if schema_resources is not None:
-            pool, schema, token = schema_resources
-            drop_err = await teardown_schema(token, pool, schema)
-            if drop_err:
-                logger.warning("Schema teardown error: %s", drop_err)
-
-
 def _configure_logging(experiment_name: str, log_dir: Path) -> None:
     """Configure file-based logging for the evaluation run.
 
@@ -261,31 +171,6 @@ def _configure_logging(experiment_name: str, log_dir: Path) -> None:
     root.addHandler(file_handler)
 
 
-def _build_experiment_name(
-    prefix: str,
-    run_notes: str | None,
-    started_at: datetime,
-) -> str:
-    """Build the experiment name using the prefix, timestamp, and notes.
-
-    Args:
-        prefix: Base prefix for the experiment name.
-        run_notes: Optional run notes to append.
-        started_at: Timestamp for the experiment start.
-
-    Returns:
-        The formatted experiment name.
-
-    """
-    timestamp = _format_timestamp(started_at)
-    name = f"{prefix}_{timestamp}"
-    if run_notes:
-        notes_token = _sanitize_notes(run_notes)
-        if notes_token:
-            name = f"{name}_{notes_token}"
-    return name
-
-
 def _sanitize_notes(notes: str) -> str:
     """Sanitize notes into a filesystem-friendly token.
 
@@ -312,6 +197,31 @@ def _format_timestamp(timestamp: datetime) -> str:
 
     """
     return timestamp.strftime("%Y%m%d_%H%M%S")
+
+
+def _build_experiment_name(
+    prefix: str,
+    run_notes: str | None,
+    started_at: datetime,
+) -> str:
+    """Build the experiment name using the prefix, timestamp, and notes.
+
+    Args:
+        prefix: Base prefix for the experiment name.
+        run_notes: Optional run notes to append.
+        started_at: Timestamp for the experiment start.
+
+    Returns:
+        The formatted experiment name.
+
+    """
+    timestamp = _format_timestamp(started_at)
+    name = f"{prefix}_{timestamp}"
+    if run_notes:
+        notes_token = _sanitize_notes(run_notes)
+        if notes_token:
+            name = f"{name}_{notes_token}"
+    return name
 
 
 def _build_output_paths(base_dir: Path, experiment_name: str) -> RunArtifacts:
@@ -457,23 +367,82 @@ def _write_jsonl(path: Path, rows: Iterable[Mapping[str, object]]) -> None:
             )
 
 
-def _build_results_row(result: ResultLike | Mapping[str, object]) -> dict[str, object]:
-    """Build a JSON row containing outputs and evaluator feedback.
+def _get_attr(
+    mapping_or_obj: Mapping[str, object] | SupportsAttrs | None,
+    key: str,
+) -> object | None:
+    """Read a key from a mapping or attribute from an object.
 
     Args:
-        result: Evaluation result item from LangSmith.
+        mapping_or_obj: Mapping or object to read from.
+        key: Key or attribute name.
 
     Returns:
-        Serialized row for experiment results.
+        The retrieved value or None.
 
     """
-    outputs = _extract_run_outputs(result)
+    if mapping_or_obj is None:
+        return None
+    if isinstance(mapping_or_obj, Mapping):
+        return mapping_or_obj.get(key)
+    return getattr(mapping_or_obj, key, None)
+
+
+def _as_attr_source(
+    value: object | None,
+) -> Mapping[str, object] | SupportsAttrs | None:
+    """Narrow a value to a supported attribute source if possible.
+
+    Args:
+        value: Value to narrow.
+
+    Returns:
+        The value if it supports mapping or attribute access; otherwise None.
+
+    """
+    if value is None:
+        return None
+    if isinstance(value, Mapping):
+        return value
+    if hasattr(value, "__getattr__"):
+        return value  # type: ignore[return-value]
+    return None
+
+
+def _summarize_outputs(outputs: Mapping[str, object]) -> dict[str, object]:
+    """Summarize outputs without including full transcripts.
+
+    Args:
+        outputs: Output payload from the target run.
+
+    Returns:
+        Summary containing turn counts and final routes.
+
+    """
+    turns: list[object] | None = None
+    for key in ("turn_outputs", "turns", "messages"):
+        candidate = outputs.get(key)
+        if isinstance(candidate, list):
+            turns = candidate
+            break
+    final_routes: list[object] = []
+    if turns:
+        for turn in turns:
+            if isinstance(turn, Mapping):
+                route = (
+                    turn.get("final_route")
+                    or turn.get("route")
+                    or turn.get("routed_to")
+                )
+                response = turn.get("response")
+                if route is None and isinstance(response, Mapping):
+                    route = response.get("route")
+                final_routes.append(route)
+            else:
+                final_routes.append(None)
     return {
-        "case_id": _extract_case_id(result),
-        "example_id": _extract_example_id(result),
-        "outputs_summary": _summarize_outputs(outputs),
-        "evaluators": _collect_feedback(result),
-        "error": _extract_error(result),
+        "num_turns": len(turns) if turns is not None else None,
+        "final_routes": final_routes or None,
     }
 
 
@@ -526,43 +495,6 @@ def _extract_case_id(result: ResultLike | Mapping[str, object]) -> str | None:
     if value is not None:
         return str(value)
     return None
-
-
-def _summarize_outputs(outputs: Mapping[str, object]) -> dict[str, object]:
-    """Summarize outputs without including full transcripts.
-
-    Args:
-        outputs: Output payload from the target run.
-
-    Returns:
-        Summary containing turn counts and final routes.
-
-    """
-    turns: list[object] | None = None
-    for key in ("turn_outputs", "turns", "messages"):
-        candidate = outputs.get(key)
-        if isinstance(candidate, list):
-            turns = candidate
-            break
-    final_routes: list[object] = []
-    if turns:
-        for turn in turns:
-            if isinstance(turn, Mapping):
-                route = (
-                    turn.get("final_route")
-                    or turn.get("route")
-                    or turn.get("routed_to")
-                )
-                response = turn.get("response")
-                if route is None and isinstance(response, Mapping):
-                    route = response.get("route")
-                final_routes.append(route)
-            else:
-                final_routes.append(None)
-    return {
-        "num_turns": len(turns) if turns is not None else None,
-        "final_routes": final_routes or None,
-    }
 
 
 def _extract_run_outputs(
@@ -643,34 +575,24 @@ def _collect_feedback(
     return feedback
 
 
-def _summarize_results(
-    result_rows: Iterable[Mapping[str, object]],
-    context: SummaryContext,
-) -> dict[str, object]:
-    """Aggregate summary statistics from evaluation rows.
+def _build_results_row(result: ResultLike | Mapping[str, object]) -> dict[str, object]:
+    """Build a JSON row containing outputs and evaluator feedback.
 
     Args:
-        result_rows: Iterable of evaluation result rows.
-        context: Metadata for the summary output.
+        result: Evaluation result item from LangSmith.
 
     Returns:
-        Summary dictionary with aggregate metrics.
+        Serialized row for experiment results.
 
     """
-    metric_values = _init_metric_values()
-    num_examples = 0
-    num_failed_runs = 0
-
-    for row in result_rows:
-        num_examples += 1
-        if row.get("error"):
-            num_failed_runs += 1
-        feedback = row.get("evaluators", {})
-        if isinstance(feedback, Mapping):
-            _update_metric_values(metric_values, feedback)
-
-    summary = _build_summary_base(context, num_examples, num_failed_runs)
-    return summary | _mean_metrics(metric_values)
+    outputs = _extract_run_outputs(result)
+    return {
+        "case_id": _extract_case_id(result),
+        "example_id": _extract_example_id(result),
+        "outputs_summary": _summarize_outputs(outputs),
+        "evaluators": _collect_feedback(result),
+        "error": _extract_error(result),
+    }
 
 
 def _init_metric_values() -> dict[str, list[float]]:
@@ -693,6 +615,28 @@ def _init_metric_values() -> dict[str, list[float]]:
         "info_reference_subset_pass_rate": [],
         "info_expected_filters_pass_rate": [],
     }
+
+
+def _extract_numeric(value: object) -> float | None:
+    """Extract a float value from an arbitrary object.
+
+    Args:
+        value: Value to parse.
+
+    Returns:
+        Float value when possible, otherwise None.
+
+    """
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
 
 
 def _update_metric_values(
@@ -753,6 +697,19 @@ def _build_summary_base(
     }
 
 
+def _mean(values: list[float]) -> float | None:
+    """Compute the arithmetic mean for a list of values.
+
+    Args:
+        values: List of numeric values.
+
+    Returns:
+        The mean value, or None if the list is empty.
+
+    """
+    return sum(values) / len(values) if values else None
+
+
 def _mean_metrics(metric_values: Mapping[str, list[float]]) -> dict[str, object]:
     """Compute mean metrics, skipping missing values.
 
@@ -793,39 +750,34 @@ def _mean_metrics(metric_values: Mapping[str, list[float]]) -> dict[str, object]
     return {key: value for key, value in mean_values.items() if value is not None}
 
 
-def _extract_numeric(value: object) -> float | None:
-    """Extract a float value from an arbitrary object.
+def _summarize_results(
+    result_rows: Iterable[Mapping[str, object]],
+    context: SummaryContext,
+) -> dict[str, object]:
+    """Aggregate summary statistics from evaluation rows.
 
     Args:
-        value: Value to parse.
+        result_rows: Iterable of evaluation result rows.
+        context: Metadata for the summary output.
 
     Returns:
-        Float value when possible, otherwise None.
+        Summary dictionary with aggregate metrics.
 
     """
-    if isinstance(value, bool):
-        return float(value)
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value)
-        except ValueError:
-            return None
-    return None
+    metric_values = _init_metric_values()
+    num_examples = 0
+    num_failed_runs = 0
 
+    for row in result_rows:
+        num_examples += 1
+        if row.get("error"):
+            num_failed_runs += 1
+        feedback = row.get("evaluators", {})
+        if isinstance(feedback, Mapping):
+            _update_metric_values(metric_values, feedback)
 
-def _mean(values: list[float]) -> float | None:
-    """Compute the arithmetic mean for a list of values.
-
-    Args:
-        values: List of numeric values.
-
-    Returns:
-        The mean value, or None if the list is empty.
-
-    """
-    return sum(values) / len(values) if values else None
+    summary = _build_summary_base(context, num_examples, num_failed_runs)
+    return summary | _mean_metrics(metric_values)
 
 
 def _build_error_summary(
@@ -853,46 +805,94 @@ def _build_error_summary(
     }
 
 
-def _get_attr(
-    mapping_or_obj: Mapping[str, object] | SupportsAttrs | None,
-    key: str,
-) -> object | None:
-    """Read a key from a mapping or attribute from an object.
+async def main() -> None:
+    """Run the LangSmith experiment and persist local artifacts."""
+    cfg = load_eval_config()
+    started_at = datetime.now(UTC)
+    dataset_name = cfg.experiment.dataset_name
+    experiment_prefix = cfg.experiment.experiment_prefix
+    run_notes = cfg.experiment.run_notes
+    experiment_name = _build_experiment_name(
+        experiment_prefix,
+        run_notes,
+        started_at,
+    )
+    max_concurrency = cfg.experiment.max_concurrency
+    output_root = cfg.experiment.output_dir
+    log_dir = cfg.experiment.log_dir
+    artifacts = _build_output_paths(output_root, experiment_name)
+    upload_results = cfg.experiment.upload_results
+    limit = cfg.experiment.limit
 
-    Args:
-        mapping_or_obj: Mapping or object to read from.
-        key: Key or attribute name.
+    _configure_logging(experiment_name, log_dir)
 
-    Returns:
-        The retrieved value or None.
+    # Setting LANGSMITH_TEST_CACHE enables caching of example runs to reduce cost/time.
+    metadata = _build_metadata(cfg.metadata)
 
-    """
-    if mapping_or_obj is None:
-        return None
-    if isinstance(mapping_or_obj, Mapping):
-        return mapping_or_obj.get(key)
-    return getattr(mapping_or_obj, key, None)
+    evaluators = [
+        eval_routing_accuracy,
+        eval_injection_tripwires,
+        eval_rooms_outcome_and_invariants,
+        eval_llm_rubrics,
+        eval_rag_metrics_info_turns,
+        eval_info_reference_subset,
+        eval_info_expected_filters,
+    ]
 
+    aevaluate_kwargs: MutableMapping[str, Any] = {
+        "evaluators": evaluators,
+        "max_concurrency": max_concurrency,
+        "upload_results": upload_results,
+        "metadata": metadata,
+    }
+    signature = inspect.signature(aevaluate)
+    if "experiment_name" in signature.parameters:
+        aevaluate_kwargs["experiment_name"] = experiment_name
+    elif "experiment_prefix" in signature.parameters:
+        aevaluate_kwargs["experiment_prefix"] = experiment_name
 
-def _as_attr_source(
-    value: object | None,
-) -> Mapping[str, object] | SupportsAttrs | None:
-    """Narrow a value to a supported attribute source if possible.
+    examples = _load_dataset_examples(dataset_name, limit)
+    has_rooms = _has_rooms_cases(examples)
+    schema_resources = await _setup_eval_schema(cfg) if has_rooms else None
 
-    Args:
-        value: Value to narrow.
+    try:
+        results = await aevaluate(run_example, examples, **aevaluate_kwargs)
+        results_list: list[Any] = []
+        if results is not None:
+            results_list.extend([item async for item in results])
 
-    Returns:
-        The value if it supports mapping or attribute access; otherwise None.
-
-    """
-    if value is None:
-        return None
-    if isinstance(value, Mapping):
-        return value
-    if hasattr(value, "__getattr__"):
-        return value  # type: ignore[return-value]
-    return None
+        result_rows = [_build_results_row(result) for result in results_list]
+        _write_jsonl(artifacts.results_path, result_rows)
+        finished_at = datetime.now(UTC)
+        context = SummaryContext(
+            dataset_name=dataset_name,
+            experiment_name=experiment_name,
+            max_concurrency=max_concurrency,
+            started_at=started_at,
+            finished_at=finished_at,
+            upload_results=upload_results,
+        )
+        summary = _summarize_results(result_rows, context)
+        _write_summary(artifacts.summary_path, summary)
+    except Exception as exc:
+        finished_at = datetime.now(UTC)
+        context = SummaryContext(
+            dataset_name=dataset_name,
+            experiment_name=experiment_name,
+            max_concurrency=max_concurrency,
+            started_at=started_at,
+            finished_at=finished_at,
+            upload_results=upload_results,
+        )
+        summary = _build_error_summary(context, exc)
+        _write_summary(artifacts.summary_path, summary)
+        raise
+    finally:
+        if schema_resources is not None:
+            pool, schema, token = schema_resources
+            drop_err = await teardown_schema(token, pool, schema)
+            if drop_err:
+                logger.warning("Schema teardown error: %s", drop_err)
 
 
 if __name__ == "__main__":

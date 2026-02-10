@@ -706,15 +706,6 @@ class OrchestrationManager:
         """
         return self._agent is not None
 
-    def get_unavailable_message(self) -> str:
-        """Return the configured "unavailable" message.
-
-        Returns:
-            User-facing message to return when the system is not initialized.
-
-        """
-        return self._resources.get_config().messages.unavailable
-
     async def start(self) -> None:
         """Start background initialization with retries."""
         if self._init_task is not None:
@@ -797,45 +788,14 @@ class OrchestrationManager:
                 ),
             )
 
-    async def _sleep_or_stop(self, *, timeout_s: float) -> bool:
-        """Wait for either a stop signal or a timeout.
-
-        Args:
-            timeout_s: Maximum wait duration in seconds.
+    def get_unavailable_message(self) -> str:
+        """Return the configured "unavailable" message.
 
         Returns:
-            True if a stop signal was received, otherwise False.
+            User-facing message to return when the system is not initialized.
 
         """
-        if self._stop_event.is_set():
-            return True
-
-        try:
-            await asyncio.wait_for(self._stop_event.wait(), timeout=timeout_s)
-        except asyncio.TimeoutError:  # noqa: UP041
-            return False
-        else:
-            return True
-
-    async def _reset_and_backoff(self, *, backoff: float, max_backoff: float) -> float:
-        """Reset runtime state and sleep for the current backoff.
-
-        Args:
-            backoff: Current backoff duration in seconds.
-            max_backoff: Maximum backoff duration in seconds.
-
-        Returns:
-            Next backoff duration in seconds.
-
-        """
-        self._resources.reset_runtime_state()
-        self._agent = None
-
-        stopped = await self._sleep_or_stop(timeout_s=backoff)
-        if stopped:
-            return backoff
-
-        return min(backoff * 2.0, max_backoff)
+        return self._resources.get_config().messages.unavailable
 
     async def _init_loop(self) -> None:
         """Background loop that initializes and retries on failure.
@@ -881,6 +841,46 @@ class OrchestrationManager:
                     backoff=backoff,
                     max_backoff=cfg.init_retry_max_s,
                 )
+
+    async def _reset_and_backoff(self, *, backoff: float, max_backoff: float) -> float:
+        """Reset runtime state and sleep for the current backoff.
+
+        Args:
+            backoff: Current backoff duration in seconds.
+            max_backoff: Maximum backoff duration in seconds.
+
+        Returns:
+            Next backoff duration in seconds.
+
+        """
+        self._resources.reset_runtime_state()
+        self._agent = None
+
+        stopped = await self._sleep_or_stop(timeout_s=backoff)
+        if stopped:
+            return backoff
+
+        return min(backoff * 2.0, max_backoff)
+
+    async def _sleep_or_stop(self, *, timeout_s: float) -> bool:
+        """Wait for either a stop signal or a timeout.
+
+        Args:
+            timeout_s: Maximum wait duration in seconds.
+
+        Returns:
+            True if a stop signal was received, otherwise False.
+
+        """
+        if self._stop_event.is_set():
+            return True
+
+        try:
+            await asyncio.wait_for(self._stop_event.wait(), timeout=timeout_s)
+        except asyncio.TimeoutError:  # noqa: UP041
+            return False
+        else:
+            return True
 
 
 # -----------------------------

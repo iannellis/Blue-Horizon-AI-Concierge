@@ -29,6 +29,9 @@ router_timeout_s = 30.0
 info_timeout_s = 60
 # Wall-clock cap for the rooms node (wraps the rooms LLM call)
 rooms_timeout_s = 60
+# Maximum concurrent LLM pipeline executions. Prevents token-per-minute
+# exhaustion under high concurrency (e.g. stress tests, production traffic spikes).
+llm_concurrency = 10
 
 [orchestration.prompts]
 # Folder (relative to blue_horizon package root) containing prompt files

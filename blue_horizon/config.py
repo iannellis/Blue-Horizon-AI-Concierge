@@ -7,6 +7,7 @@ import tomllib
 from functools import lru_cache
 from importlib import resources as importlib_resources
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -351,6 +352,9 @@ class OrchestrationRuntimeConfig(BaseModel):
         router_timeout_s: Timeout for the router decision step.
         info_timeout_s: Timeout for the info agent node.
         rooms_timeout_s: Timeout for the rooms agent node.
+        llm_concurrency: Maximum number of concurrent LLM pipeline executions.
+            Limits simultaneous ainvoke calls to prevent token-per-minute
+            exhaustion under high concurrency.
 
     """
 
@@ -361,6 +365,7 @@ class OrchestrationRuntimeConfig(BaseModel):
     router_timeout_s: float
     info_timeout_s: float
     rooms_timeout_s: float
+    llm_concurrency: Annotated[int, Field(ge=1)] = 10
 
 
 class OrchestrationPromptsConfig(BaseModel):

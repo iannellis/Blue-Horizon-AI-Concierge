@@ -661,6 +661,7 @@ class OrchestrationManager:
         "_agent",
         "_factory",
         "_init_task",
+        "_llm_semaphore",
         "_lock",
         "_prune_tool_messages",
         "_resources",
@@ -671,6 +672,7 @@ class OrchestrationManager:
     _factory: OrchestrationAgentFactory
     _agent: CompiledStateGraph | None
     _init_task: asyncio.Task[None] | None
+    _llm_semaphore: asyncio.Semaphore
     _lock: asyncio.Lock
     _stop_event: asyncio.Event
 
@@ -685,6 +687,8 @@ class OrchestrationManager:
         self._resources = OrchestrationResources()
         self._factory = OrchestrationAgentFactory(resources=self._resources)
 
+        llm_concurrency = self._resources.get_config().orchestration.llm_concurrency
+        self._llm_semaphore = asyncio.Semaphore(llm_concurrency)
         self._agent = None
         self._init_task = None
         self._lock = asyncio.Lock()
@@ -783,13 +787,14 @@ class OrchestrationManager:
         if metadata is not None:
             config["metadata"] = metadata
 
-        return cast(
-            "dict[str, Any]",
-            await self._agent.ainvoke(
-                state,
-                config=config,
-            ),
-        )
+        async with self._llm_semaphore:
+            return cast(
+                "dict[str, Any]",
+                await self._agent.ainvoke(
+                    state,
+                    config=config,
+                ),
+            )
 
     async def _sleep_or_stop(self, *, timeout_s: float) -> bool:
         """Wait for either a stop signal or a timeout.

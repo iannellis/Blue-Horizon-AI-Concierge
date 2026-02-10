@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import asyncio
 import heapq
-import json
 import logging
 import math
 from collections import OrderedDict
@@ -220,29 +219,11 @@ class Source(StrEnum):
     SERVICES = "services"
 
 
-class RetrievalItemLite(BaseModel):
-    """Lightweight retrieval result.
-
-    This model is used for cross-source reranking. The actual text and metadata are
-    fetched later during hydration.
+class RetrievalItem(BaseModel):
+    """Retrieval result containing text and metadata.
 
     Attributes:
         source: Origin source of the item (faq/amenities/services).
-        item_id: Stable identifier used to hydrate the item from Redis.
-        score: Similarity score used for ranking.
-
-    """
-
-    source: Source = Field(..., description="faq | amenities | services")
-    item_id: str = Field(..., description="Stable identifier for this item")
-    score: float = Field(..., description="Similarity score; higher is more relevant")
-
-
-class RetrievalItem(BaseModel):
-    """Hydrated retrieval result containing text and metadata.
-
-    Attributes:
-        source: Origin source of the item.
         metadata: Metadata payload associated with the node.
         text: Human-readable text for the node.
         score: Similarity score used for ranking.
@@ -267,28 +248,17 @@ class RerankInput(BaseModel):
 
     """
 
-    faq_results: list[RetrievalItemLite] = Field(
+    faq_results: list[RetrievalItem] = Field(
         ..., description="Output from query_faq",
     )
-    amenities_results: list[RetrievalItemLite] = Field(
+    amenities_results: list[RetrievalItem] = Field(
         ...,
         description="Output from query_amenities",
     )
-    services_results: list[RetrievalItemLite] = Field(
+    services_results: list[RetrievalItem] = Field(
         ...,
         description="Output from query_services",
     )
-
-
-class HydrateInput(BaseModel):
-    """Input schema for the hydrate_items tool.
-
-    Attributes:
-        items: Top items selected by the reranker.
-
-    """
-
-    items: list[RetrievalItemLite] = Field(..., description="Top items from reranker")
 
 
 class ParsedQuery(BaseModel):
@@ -367,15 +337,13 @@ class InfoState(MessagesState, total=False):
         amenities_results: Retrieved amenity items.
         services_results: Retrieved service items.
         top_results: Reranked items across sources.
-        hydrated_results: Hydrated text + metadata results.
 
     """
 
-    faq_results: list[RetrievalItemLite]
-    amenities_results: list[RetrievalItemLite]
-    services_results: list[RetrievalItemLite]
-    top_results: list[RetrievalItemLite]
-    hydrated_results: list[RetrievalItem]
+    faq_results: list[RetrievalItem]
+    amenities_results: list[RetrievalItem]
+    services_results: list[RetrievalItem]
+    top_results: list[RetrievalItem]
 
 
 class ParsedState(InfoState):
@@ -1103,14 +1071,14 @@ class InfoRagResources:
             raise RuntimeError(msg)
         return self.system_prompt
 
-    async def retrieve_faq(self, query: str) -> list[RetrievalItemLite]:
+    async def retrieve_faq(self, query: str) -> list[RetrievalItem]:
         """Retrieve FAQ nodes relevant to a query.
 
         Args:
             query: Natural-language query.
 
         Returns:
-            list[RetrievalItemLite]: Lightweight FAQ matches.
+            list[RetrievalItem]: FAQ matches with text and metadata.
 
         Raises:
             OperationalError: If retrieval fails.
@@ -1123,9 +1091,10 @@ class InfoRagResources:
             raise OperationalError(msg) from exc
 
         return [
-            RetrievalItemLite(
+            RetrievalItem(
                 source=Source.FAQ,
-                item_id=getattr(n, "id_", ""),
+                metadata=getattr(n.node, "metadata", None) or {},
+                text=getattr(n.node, "text", "") or "",
                 score=self._coerce_score(n),
             )
             for n in nodes
@@ -1137,7 +1106,7 @@ class InfoRagResources:
         source: Source,
         query: str,
         filters: MetadataFilters | None,
-    ) -> list[RetrievalItemLite]:
+    ) -> list[RetrievalItem]:
         """Retrieve amenity/service nodes for a query with optional metadata filters.
 
         Args:
@@ -1146,7 +1115,7 @@ class InfoRagResources:
             filters: Optional metadata filters.
 
         Returns:
-            list[RetrievalItemLite]: Lightweight matches for the given source.
+            list[RetrievalItem]: Matches with text and metadata for the given source.
 
         Raises:
             OperationalError: If retrieval fails.
@@ -1160,215 +1129,15 @@ class InfoRagResources:
             raise OperationalError(msg) from exc
 
         return [
-            RetrievalItemLite(
+            RetrievalItem(
                 source=source,
-                item_id=getattr(n, "id_", ""),
+                metadata=getattr(n.node, "metadata", None) or {},
+                text=getattr(n.node, "text", "") or "",
                 score=self._coerce_score(n),
             )
             for n in nodes
         ]
 
-    def _build_hydration_pipeline(
-        self,
-        items: list[RetrievalItemLite],
-    ) -> tuple[Any, list[str]]:
-        """Build a Redis pipeline to fetch hydration fields for a list of items.
-
-        Args:
-            items: Items to hydrate.
-
-        Returns:
-            tuple[Any, list[str]]: (pipeline, redis_keys) in matching order.
-
-        """
-        pipe = self.redis_async.pipeline(transaction=False)
-        keys: list[str] = []
-        for item in items:
-            key = f"{item.source}:{item.item_id}"
-            keys.append(key)
-            pipe.hmget(key, ["_node_content", "text"])
-        return pipe, keys
-
-    def _parse_hmget_result(
-        self,
-        *,
-        item: RetrievalItemLite,
-        key: str,
-        result: object,
-        best_effort: bool,
-    ) -> tuple[str, str] | None:
-        """Parse a single HMGET result into (_node_content, text).
-
-        Args:
-            item: Item being hydrated.
-            key: Redis key used for hydration.
-            result: Raw HMGET result.
-            best_effort: If True, return None on malformed/missing results.
-
-        Returns:
-            tuple[str, str] | None: (node_content_json, text) or None if best_effort
-            skips this item.
-
-        Raises:
-            OperationalError: If best_effort is False and the result is malformed.
-
-        """
-        try:
-            node_content_str, text = result  # type: ignore[misc]
-        except Exception as exc:
-            if best_effort:
-                logger.warning("Hydration malformed result for key=%s", key)
-                return None
-            msg = f"Hydration malformed result for key={key}"
-            raise OperationalError(msg) from exc
-
-        if not node_content_str:
-            if best_effort:
-                logger.warning(
-                    "Missing _node_content for key=%s (source=%s item_id=%s)",
-                    key,
-                    item.source,
-                    item.item_id,
-                )
-                return None
-            msg = (
-                f"Could not hydrate item_id={item.item_id} "
-                f"from source={item.source} (key={key})"
-            )
-            raise OperationalError(msg)
-
-        return str(node_content_str), str(text or "")
-
-    def _decode_node_content(
-        self,
-        *,
-        node_content_str: str,
-        key: str,
-        best_effort: bool,
-    ) -> dict[str, Any] | None:
-        """Decode the JSON stored in _node_content.
-
-        Args:
-            node_content_str: JSON string stored under the _node_content field.
-            key: Redis key used for logging and error messages.
-            best_effort: If True, return None on invalid payloads.
-
-        Returns:
-            dict[str, Any] | None: Parsed JSON dict or None if best_effort skips.
-
-        Raises:
-            OperationalError: If best_effort is False and JSON decoding fails.
-
-        """
-        try:
-            node_content = json.loads(node_content_str)
-        except json.JSONDecodeError as exc:
-            if best_effort:
-                logger.warning("Invalid _node_content JSON for key=%s", key)
-                return None
-            msg = f"Invalid _node_content JSON for key={key}"
-            raise OperationalError(msg) from exc
-
-        if not isinstance(node_content, dict):
-            if best_effort:
-                logger.warning("Unexpected _node_content type for key=%s", key)
-                return None
-            msg = f"Unexpected _node_content type for key={key}"
-            raise OperationalError(msg)
-
-        return node_content
-
-    @staticmethod
-    def _to_hydrated_item(
-        *,
-        item: RetrievalItemLite,
-        node_content: dict[str, Any],
-        text: str,
-    ) -> RetrievalItem:
-        """Convert parsed Redis payload to a hydrated RetrievalItem.
-
-        Args:
-            item: Lightweight item containing source/id/score.
-            node_content: Parsed JSON dict from _node_content.
-            text: Text field fetched from Redis.
-
-        Returns:
-            RetrievalItem: Hydrated result.
-
-        """
-        metadata = node_content.get("metadata")
-        if not isinstance(metadata, dict):
-            metadata = {}
-        return RetrievalItem(
-            source=item.source,
-            metadata=metadata,
-            text=text,
-            score=item.score,
-        )
-
-    async def hydrate(
-        self,
-        items: Iterable[RetrievalItemLite],
-        *,
-        best_effort: bool = True,
-    ) -> list[RetrievalItem]:
-        """Hydrate lite results into full objects by fetching Redis document fields.
-
-        This method fetches the Redis fields "_node_content" and "text" for each item
-        and converts them into ``RetrievalItem`` instances.
-
-        Args:
-            items: Lightweight items selected by the reranker.
-            best_effort: If True, logs and skips malformed/missing items instead of
-                raising.
-
-        Returns:
-            list[RetrievalItem]: Hydrated items.
-
-        Raises:
-            OperationalError: If best_effort is False and hydration fails.
-
-        """
-        item_list = list(items)
-        if not item_list:
-            return []
-
-        pipe, keys = self._build_hydration_pipeline(item_list)
-
-        try:
-            results = await pipe.execute()
-        except Exception as exc:
-            if best_effort:
-                logger.exception("Hydration pipeline failed")
-                return []
-            msg = "Hydration pipeline failed"
-            raise OperationalError(msg) from exc
-
-        hydrated: list[RetrievalItem] = []
-        for item, key, result in zip(item_list, keys, results, strict=True):
-            parsed = self._parse_hmget_result(
-                item=item,
-                key=key,
-                result=result,
-                best_effort=best_effort,
-            )
-            if parsed is None:
-                continue
-
-            node_content_str, text = parsed
-            node_content = self._decode_node_content(
-                node_content_str=node_content_str,
-                key=key,
-                best_effort=best_effort,
-            )
-            if node_content is None:
-                continue
-
-            hydrated.append(
-                self._to_hydrated_item(item=item, node_content=node_content, text=text),
-            )
-
-        return hydrated
 
 
 # ============================
@@ -1644,59 +1413,42 @@ class InfoAgentFactory:
             )
             return {"top_results": ranked}
 
-        async def hydrate_node(state: InfoState) -> dict[str, Any]:
-            """Hydrate reranked items into full text + metadata objects.
+        async def respond_node(state: InfoState) -> dict[str, Any]:
+            """Generate the final response using retrieved context.
 
             Args:
                 state: Current state with reranked results.
 
             Returns:
-                State patch with ``hydrated_results`` populated.
+                State patch with the LLM response appended to messages.
 
             """
-            items = state.get("top_results", [])
-            try:
-                hydrated = await resources.hydrate(items, best_effort=True)
-            except OperationalError as exc:
-                logger.warning("hydrate_items operational failure: %s", exc)
-                _log_eval_tool_summary(
-                    {"tool": "hydrate_items", "status": "error", "error": str(exc)},
-                )
-                return {"hydrated_results": []}
-            except Exception as exc:  # noqa: BLE001
-                _log_node_failure("hydrate_items", exc)
-                _log_eval_tool_summary(
-                    {"tool": "hydrate_items", "status": "error", "error": str(exc)},
-                )
-                return {"hydrated_results": []}
-            _log_eval_tool_summary(
-                {"tool": "hydrate_items", "status": "ok", "count": len(hydrated)},
-            )
+            top_items = state.get("top_results", [])
+
             # Log contexts with metadata for evaluators and judge LLM
             contexts_with_metadata = []
-            for item in hydrated:
+            for item in top_items:
                 if not isinstance(item.text, str) or not item.text:
                     continue
                 context = item.text
                 if item.metadata:
-                    # Format metadata as readable key-value pairs
                     metadata_str = ", ".join(
-                        f"{k}: {v}" for k, v in item.metadata.items() if v is not None
+                        f"{k}: {v}"
+                        for k, v in item.metadata.items()
+                        if v is not None
                     )
                     if metadata_str:
                         context = f"{context}\n[Metadata: {metadata_str}]"
                 contexts_with_metadata.append(context)
             _log_eval_contexts(contexts_with_metadata)
-            return {"hydrated_results": hydrated}
 
-        async def respond_node(state: InfoState) -> dict[str, Any]:
-            """Generate the final response using hydrated context."""
-            hydrated = state.get("hydrated_results", [])
-            context_block = _build_context_block(hydrated)
+            context_block = _build_context_block(top_items)
             system_prompt = resources.get_system_prompt()
             response = await responder_llm.ainvoke(
                 [
-                    SystemMessage(content=(f"{system_prompt}{context_block}")),
+                    SystemMessage(
+                        content=(f"{system_prompt}{context_block}"),
+                    ),
                     *state["messages"],
                 ],
             )
@@ -1708,7 +1460,6 @@ class InfoAgentFactory:
         graph.add_node("query_amenities", query_amenities_node)
         graph.add_node("query_services", query_services_node)
         graph.add_node("rerank", rerank_node)
-        graph.add_node("hydrate", hydrate_node)
         graph.add_node("respond", respond_node)
 
         graph.add_edge(START, "parse")
@@ -1718,8 +1469,7 @@ class InfoAgentFactory:
         graph.add_edge("query_faq", "rerank")
         graph.add_edge("query_amenities", "rerank")
         graph.add_edge("query_services", "rerank")
-        graph.add_edge("rerank", "hydrate")
-        graph.add_edge("hydrate", "respond")
+        graph.add_edge("rerank", "respond")
         graph.add_edge("respond", END)
 
         return graph.compile()

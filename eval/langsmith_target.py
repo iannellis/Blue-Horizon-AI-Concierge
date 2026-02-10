@@ -24,7 +24,7 @@ from langchain_core.messages import (
     HumanMessage,
     ToolMessage,
 )
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ValidationError
 
 from blue_horizon.agents.information import (
     EvalInfoToolLog,
@@ -69,26 +69,6 @@ class RunSqlOutput(BaseModel):
     error: str | None = None
     rows: list[dict[str, Any]] | None = None
 
-
-class HydratedItemOutput(BaseModel):
-    """Typed payload for ``hydrate_items`` outputs used in eval logging.
-
-    The info agent returns hydrated items with rich metadata. The evaluation
-    harness captures the source, text, and metadata fields for use by
-    evaluators and the judge LLM.
-
-    Attributes:
-        source: Origin of the hydrated item (faq/amenities/services).
-        text: Human-readable content used by the agent.
-        metadata: Metadata dict containing price, duration, booking info, etc.
-
-    """
-
-    model_config = ConfigDict(from_attributes=True)
-
-    source: str | None = None
-    text: str | None = None
-    metadata: dict[str, Any] | None = None
 
 logger = logging.getLogger(__name__)
 
@@ -411,41 +391,6 @@ def _tool_messages_since_last_user(
     ]
 
 
-def _extract_hydrate_contexts_from_messages(
-    messages: list[BaseMessage],
-) -> list[str]:
-    """Extract hydrate_items contexts from tool messages.
-
-    Args:
-        messages: Ordered list of LangChain messages.
-
-    Returns:
-        List of context strings extracted from hydrate_items tool payloads.
-
-    """
-    contexts: list[str] = []
-    for tool_message in _tool_messages_since_last_user(messages):
-        tool_name = getattr(tool_message, "name", None)
-        if tool_name != "hydrate_items":
-            continue
-        payload = _extract_tool_payload(tool_message)
-        payload = _parse_tool_content(payload)
-        if not isinstance(payload, list):
-            continue
-        for item in payload:
-            try:
-                parsed = HydratedItemOutput.model_validate(
-                    item,
-                    from_attributes=True,
-                )
-            except ValidationError:
-                continue
-            if parsed.text is None:
-                continue
-            contexts.append(str(parsed.text))
-    return contexts
-
-
 async def ensure_orchestration_ready() -> OrchestrationManager:
     """Ensure the shared orchestration manager is initialized and ready.
 
@@ -487,7 +432,7 @@ class EvalCaptureCallback(AsyncCallbackHandler):
     Attributes:
         route_pred: Router decision captured for the turn.
         tool_summary: Compact summaries of tools executed in this turn.
-        contexts_used: Truncated context snippets captured from hydrate_items output.
+        contexts_used: Context snippets captured from retrieval output.
 
     """
 
@@ -587,7 +532,7 @@ class EvalCaptureCallback(AsyncCallbackHandler):
                 entry["k"] = k_value
         self._pending_tool_entries[run_id] = entry
 
-    async def on_tool_end(  # noqa: C901, PLR0912
+    async def on_tool_end(  # noqa: C901
         self,
         output: Any,  # noqa: ANN401
         *,
@@ -646,9 +591,6 @@ class EvalCaptureCallback(AsyncCallbackHandler):
             # Only capture if we successfully parsed to a dict/mapping
             if isinstance(actual_output, Mapping):
                 self._capture_run_sql(actual_output, entry)
-            return
-        if tool_name == "hydrate_items":
-            self._capture_hydrate_items(output, entry)
             return
         if tool_name in {"query_amenities", "query_services", "query_faq"}:
             summary = entry or {"tool": tool_name}
@@ -793,63 +735,6 @@ class EvalCaptureCallback(AsyncCallbackHandler):
             )
         return safe_rows
 
-    def _capture_hydrate_items(
-        self,
-        output: list[object],
-        base_entry: dict[str, Any] | None = None,
-    ) -> None:
-        """Capture hydration summary and contexts used.
-
-        Args:
-            output: hydrate_items tool output.
-            base_entry: Optional base entry with input previews.
-
-        """
-        payload = _extract_tool_payload(output)
-        payload = _parse_tool_content(payload)
-        if not isinstance(payload, list):
-            return
-        summary = dict(base_entry or {})
-        summary["tool"] = "hydrate_items"
-        summary["status"] = summary.get("status") or "ok"
-        summary["count"] = len(payload)
-        parsed_items: list[HydratedItemOutput] = []
-        for item in payload:
-            if isinstance(item, HydratedItemOutput):
-                parsed_items.append(item)
-                continue
-            try:
-                parsed_items.append(
-                    HydratedItemOutput.model_validate(item, from_attributes=True),
-                )
-            except ValidationError:
-                continue
-
-        sources = [
-            str(item.source)
-            for item in parsed_items
-            if item.source is not None
-        ]
-        if sources:
-            summary["sources"] = sources
-        summary["output_preview"] = _preview({"num_items": len(parsed_items)})
-        self.tool_summary.append(summary)
-
-        for item in parsed_items:
-            if item.text is None:
-                continue
-            # Include metadata with the text for evaluator context
-            context = str(item.text)
-            if hasattr(item, "metadata") and item.metadata:
-                # Format metadata as readable key-value pairs
-                metadata_str = ", ".join(
-                    f"{k}: {v}" for k, v in item.metadata.items() if v is not None
-                )
-                if metadata_str:
-                    context = f"{context}\n[Metadata: {metadata_str}]"
-            self.contexts_used.append(context)
-
-
 def _get_tool_name(metadata: dict[str, Any]) -> str | None:
     """Extract the tool name from callback metadata.
 
@@ -871,7 +756,7 @@ def _get_tool_name(metadata: dict[str, Any]) -> str | None:
     return None
 
 
-async def run_example(  # noqa: C901, PLR0912, PLR0915
+async def run_example(  # noqa: C901, PLR0912
     example: dict[str, Any],
 ) -> dict[str, Any]:
     """Run a single LangSmith example through the orchestration pipeline.
@@ -933,8 +818,6 @@ async def run_example(  # noqa: C901, PLR0912, PLR0915
 
         tool_summary = callback.tool_summary
         contexts_used = callback.contexts_used
-        if not contexts_used:
-            contexts_used = _extract_hydrate_contexts_from_messages(messages)
         if log is not None:
             if not tool_summary and log.tool_summary:
                 tool_summary = list(log.tool_summary)
@@ -988,24 +871,6 @@ async def run_example(  # noqa: C901, PLR0912, PLR0915
                 "contexts_used": contexts_used,
             },
         )
-        if (
-            contexts_used
-            and not any(
-                entry.get("tool") == "hydrate_items"
-                for entry in tool_summary
-                if isinstance(entry, dict)
-            )
-        ):
-            tool_summary.append(
-                {
-                    "tool": "hydrate_items",
-                    "status": "ok",
-                    "input_keys": ["num_items"],
-                    "input_preview": _preview(
-                        {"num_items": len(contexts_used)},
-                    ),
-                },
-            )
 
     return {
         "turn_outputs": turn_outputs,

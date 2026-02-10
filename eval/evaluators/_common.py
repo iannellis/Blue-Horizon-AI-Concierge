@@ -13,7 +13,6 @@ _INFO_REQUIRED_TOOLS = (
     "query_amenities",
     "query_services",
     "reranker",
-    "hydrate_items",
 )
 
 # Tool names used by rooms agent SQL generation

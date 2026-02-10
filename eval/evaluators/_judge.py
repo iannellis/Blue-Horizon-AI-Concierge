@@ -296,38 +296,6 @@ def _safe_json_loads(payload: str) -> dict[str, Any] | None:
     return None
 
 
-async def _get_judge_llm(model: str) -> BaseChatModel:
-    """Lazily initialize and return the LangChain judge model.
-
-    Args:
-        model: Model name to use for the judge.
-
-    Returns:
-        LangChain chat model instance.
-
-    Raises:
-        RuntimeError: If the LangChain Gemini integration is unavailable.
-
-    """
-    global _JUDGE_LLM  # noqa: PLW0603
-    global _JUDGE_LLM_MODEL  # noqa: PLW0603
-    if _JUDGE_LLM is not None and model == _JUDGE_LLM_MODEL:
-        return _JUDGE_LLM
-
-    async with _JUDGE_LLM_LOCK:
-        if _JUDGE_LLM is not None and model == _JUDGE_LLM_MODEL:
-            return _JUDGE_LLM
-        if _ChatGoogleGenerativeAI is None:
-            msg = "langchain-google-genai is required for judge evaluation."
-            raise RuntimeError(msg) from _LANGCHAIN_GEMINI_IMPORT_ERROR
-        _JUDGE_LLM = _ChatGoogleGenerativeAI(
-            model=model,
-            temperature=0,
-        )
-        _JUDGE_LLM_MODEL = model
-        return _JUDGE_LLM
-
-
 async def _call_judge_llm(prompt: str, model: str) -> str:
     """Call the judge LLM and return raw text output.
 
@@ -368,6 +336,38 @@ async def _call_judge_llm(prompt: str, model: str) -> str:
                     parts.append(text)
         return "".join(parts)
     return ""
+
+
+async def _get_judge_llm(model: str) -> BaseChatModel:
+    """Lazily initialize and return the LangChain judge model.
+
+    Args:
+        model: Model name to use for the judge.
+
+    Returns:
+        LangChain chat model instance.
+
+    Raises:
+        RuntimeError: If the LangChain Gemini integration is unavailable.
+
+    """
+    global _JUDGE_LLM  # noqa: PLW0603
+    global _JUDGE_LLM_MODEL  # noqa: PLW0603
+    if _JUDGE_LLM is not None and model == _JUDGE_LLM_MODEL:
+        return _JUDGE_LLM
+
+    async with _JUDGE_LLM_LOCK:
+        if _JUDGE_LLM is not None and model == _JUDGE_LLM_MODEL:
+            return _JUDGE_LLM
+        if _ChatGoogleGenerativeAI is None:
+            msg = "langchain-google-genai is required for judge evaluation."
+            raise RuntimeError(msg) from _LANGCHAIN_GEMINI_IMPORT_ERROR
+        _JUDGE_LLM = _ChatGoogleGenerativeAI(
+            model=model,
+            temperature=0,
+        )
+        _JUDGE_LLM_MODEL = model
+        return _JUDGE_LLM
 
 
 def _is_model_unavailable_error(exc: Exception) -> bool:

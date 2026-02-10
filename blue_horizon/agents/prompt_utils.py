@@ -8,6 +8,28 @@ from typing import Final
 DEFAULT_PACKAGE: Final[str] = "blue_horizon"
 
 
+def load_prompt_template(
+    relative_path: str,
+    *,
+    base_package: str = DEFAULT_PACKAGE,
+) -> Template:
+    """Load a prompt template from a packaged resource.
+
+    Args:
+        relative_path: Path to the template relative to the package.
+        base_package: Package containing the template.
+
+    Returns:
+        Parsed string.Template for the prompt.
+
+    Raises:
+        RuntimeError: If the template content cannot be loaded.
+
+    """
+    text = load_packaged_text(relative_path, base_package=base_package)
+    return Template(text)
+
+
 @lru_cache(maxsize=10)
 def load_packaged_text(
     relative_path: str,
@@ -36,25 +58,3 @@ def load_packaged_text(
     except OSError as exc:
         msg = f"Failed to read resource: {base_package}/{relative_path}"
         raise RuntimeError(msg) from exc
-
-
-def load_prompt_template(
-    relative_path: str,
-    *,
-    base_package: str = DEFAULT_PACKAGE,
-) -> Template:
-    """Load a prompt template from a packaged resource.
-
-    Args:
-        relative_path: Path to the template relative to the package.
-        base_package: Package containing the template.
-
-    Returns:
-        Parsed string.Template for the prompt.
-
-    Raises:
-        RuntimeError: If the template content cannot be loaded.
-
-    """
-    text = load_packaged_text(relative_path, base_package=base_package)
-    return Template(text)

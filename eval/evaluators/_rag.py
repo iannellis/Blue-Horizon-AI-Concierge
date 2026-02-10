@@ -368,19 +368,6 @@ def _build_ragas_llm() -> InstructorBaseRagasLLM:
     return AsyncFromSyncInstructorLLM(sync_llm=sync_llm)
 
 
-def _get_google_genai_client() -> object:
-    """Create a Google GenAI client using environment-based auth.
-
-    Returns:
-        Initialized Google GenAI client.
-
-    """
-    if _genai is None:
-        msg = "google-genai SDK is required for Ragas Gemini models."
-        raise RuntimeError(msg) from _GENAI_IMPORT_ERROR
-    return _genai.Client()
-
-
 def _build_ragas_embeddings() -> BaseRagasEmbeddings | BaseRagasEmbedding:
     """Build the Ragas embeddings configured for Gemini.
 
@@ -395,6 +382,19 @@ def _build_ragas_embeddings() -> BaseRagasEmbeddings | BaseRagasEmbedding:
         model=ragas_cfg.embedding_model,
         client=client,
     )
+
+
+def _get_google_genai_client() -> object:
+    """Create a Google GenAI client using environment-based auth.
+
+    Returns:
+        Initialized Google GenAI client.
+
+    """
+    if _genai is None:
+        msg = "google-genai SDK is required for Ragas Gemini models."
+        raise RuntimeError(msg) from _GENAI_IMPORT_ERROR
+    return _genai.Client()
 
 
 def _ensure_base_embedding(
@@ -433,29 +433,6 @@ def _rag_is_eligible_turn(turn_output: dict[str, object]) -> bool:
         return True
     contexts = turn_output.get("contexts_used")
     return isinstance(contexts, list) and len(contexts) > 0
-
-
-def _rag_truncate_text(value: object, limit: int) -> str:
-    """Convert a value to a truncated string.
-
-    Args:
-        value: Value to coerce into a string.
-        limit: Maximum character length.
-
-    Returns:
-        Truncated string value.
-
-    """
-    if limit <= 0:
-        return ""
-    if value is None:
-        return ""
-    text = str(value)
-    if len(text) <= limit:
-        return text
-    if limit <= 3:  # noqa: PLR2004
-        return text[:limit]
-    return f"{text[: limit - 3]}..."
 
 
 def _rag_prepare_contexts(
@@ -515,6 +492,29 @@ def _rag_extract_reference(
         return None
     text = _rag_truncate_text(reference, max_chars)
     return text if text else None
+
+
+def _rag_truncate_text(value: object, limit: int) -> str:
+    """Convert a value to a truncated string.
+
+    Args:
+        value: Value to coerce into a string.
+        limit: Maximum character length.
+
+    Returns:
+        Truncated string value.
+
+    """
+    if limit <= 0:
+        return ""
+    if value is None:
+        return ""
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    if limit <= 3:  # noqa: PLR2004
+        return text[:limit]
+    return f"{text[: limit - 3]}..."
 
 
 async def _rag_score_turn(

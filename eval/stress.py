@@ -294,22 +294,6 @@ async def _init_schema_and_targets(
     return token, targets, hot_targets
 
 
-async def _set_search_path(conn: object, schema: str) -> None:
-    """Set the connection's search path to the target schema safely.
-
-    Args:
-        conn: An async psycopg connection-like object.
-        schema: The schema name to place at the front of ``search_path``.
-
-    """
-    # Use set_config to avoid interpolating identifiers in SQL text.
-    conn_obj = cast("object", conn)
-    await cast("object", conn_obj).execute(  # type: ignore[attr-defined]
-        "SELECT set_config('search_path', %s, false)",
-        (schema,),
-    )
-
-
 async def find_available_targets(
     conn: object,
     *,
@@ -989,6 +973,22 @@ async def _check_invariants(
         "null_status_count": int(null_status_count),
         "passed": len(double_booked_rows) == 0 and int(null_status_count) == 0,
     }
+
+
+async def _set_search_path(conn: object, schema: str) -> None:
+    """Set the connection's search path to the target schema safely.
+
+    Args:
+        conn: An async psycopg connection-like object.
+        schema: The schema name to place at the front of ``search_path``.
+
+    """
+    # Use set_config to avoid interpolating identifiers in SQL text.
+    conn_obj = cast("object", conn)
+    await cast("object", conn_obj).execute(  # type: ignore[attr-defined]
+        "SELECT set_config('search_path', %s, false)",
+        (schema,),
+    )
 
 
 def _build_summary(  # noqa: PLR0913

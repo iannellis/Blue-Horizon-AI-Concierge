@@ -359,48 +359,6 @@ def _score_expected_filters_present(
     )
 
 
-def _apply_filter_check(
-    *,
-    condition: bool,
-    label: str,
-    total_checks: int,
-    passed_checks: int,
-    failed_checks: list[str],
-) -> tuple[int, int]:
-    """Apply a filter check and update counters.
-
-    Args:
-        condition: Boolean indicating whether the check passes.
-        label: Failure label to record when the check fails.
-        total_checks: Current total checks count.
-        passed_checks: Current passed checks count.
-        failed_checks: List of failure labels to append to.
-
-    Returns:
-        Updated (total_checks, passed_checks).
-
-    """
-    total_checks += 1
-    if condition:
-        passed_checks += 1
-    else:
-        failed_checks.append(label)
-    return total_checks, passed_checks
-
-
-def _has_filters(filters: dict[str, Any] | None) -> bool:
-    """Check whether a filters dict is non-empty.
-
-    Args:
-        filters: Filters dict or None.
-
-    Returns:
-        True if the dict is present and non-empty, otherwise False.
-
-    """
-    return isinstance(filters, dict) and bool(filters)
-
-
 def _score_expected_filters_empty(
     filter_context: dict[str, Any],
 ) -> tuple[int, int, int, int, list[str]]:
@@ -449,6 +407,48 @@ def _score_expected_filters_empty(
     )
 
     return total_checks, passed_checks, 0, 0, failed_checks
+
+
+def _apply_filter_check(
+    *,
+    condition: bool,
+    label: str,
+    total_checks: int,
+    passed_checks: int,
+    failed_checks: list[str],
+) -> tuple[int, int]:
+    """Apply a filter check and update counters.
+
+    Args:
+        condition: Boolean indicating whether the check passes.
+        label: Failure label to record when the check fails.
+        total_checks: Current total checks count.
+        passed_checks: Current passed checks count.
+        failed_checks: List of failure labels to append to.
+
+    Returns:
+        Updated (total_checks, passed_checks).
+
+    """
+    total_checks += 1
+    if condition:
+        passed_checks += 1
+    else:
+        failed_checks.append(label)
+    return total_checks, passed_checks
+
+
+def _has_filters(filters: dict[str, Any] | None) -> bool:
+    """Check whether a filters dict is non-empty.
+
+    Args:
+        filters: Filters dict or None.
+
+    Returns:
+        True if the dict is present and non-empty, otherwise False.
+
+    """
+    return isinstance(filters, dict) and bool(filters)
 
 
 def _build_info_expected_filters_failure(

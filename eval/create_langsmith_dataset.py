@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 load_dotenv()
 
+
 def _raise(message: str) -> None:
     """Raise a ValueError with a provided message.
 

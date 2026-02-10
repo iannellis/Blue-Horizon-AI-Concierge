@@ -110,80 +110,6 @@ def eval_info_reference_subset(run: Run, example: Example) -> list[dict[str, Any
     ]
 
 
-def _split_expected_reference(reference: str) -> list[str]:
-    """Split a reference string into expected snippet parts.
-
-    Args:
-        reference: Reference string containing one or more snippets.
-
-    Returns:
-        List of non-empty snippet strings.
-
-    """
-    if not reference:
-        return []
-    return [snippet.strip() for snippet in reference.split(" | ") if snippet.strip()]
-
-
-def _build_reference_candidate_text(turn_output: dict[str, Any]) -> str:
-    """Build a candidate text blob from retrieval contexts and the response.
-
-    Args:
-        turn_output: Turn output dict containing contexts and assistant text.
-
-    Returns:
-        Combined candidate text used for subset matching.
-
-    """
-    contexts = turn_output.get("contexts_used")
-    context_list = contexts if isinstance(contexts, list) else []
-    context_text = "\n".join([str(item) for item in context_list if item is not None])
-    assistant_text = turn_output.get("assistant_text")
-    if assistant_text:
-        if context_text:
-            return f"{context_text}\n{assistant_text}"
-        return str(assistant_text)
-    return context_text
-
-
-def _normalize_text(text: str) -> str:
-    """Normalize text for substring matching.
-
-    Args:
-        text: Raw input text.
-
-    Returns:
-        Lowercased text with collapsed whitespace.
-
-    """
-    if not text:
-        return ""
-    return " ".join(str(text).lower().split())
-
-
-def _reference_subset_match(
-    expected_snippets: list[str],
-    candidate_text: str,
-) -> tuple[bool, list[str]]:
-    """Determine whether all expected snippets appear in candidate text.
-
-    Args:
-        expected_snippets: Snippets expected to appear in the candidate text.
-        candidate_text: Combined retrieval contexts and assistant response.
-
-    Returns:
-        Tuple of (matched, missing_snippets).
-
-    """
-    normalized_candidate = _normalize_text(candidate_text)
-    missing = []
-    for snippet in expected_snippets:
-        normalized_snippet = _normalize_text(snippet)
-        if normalized_snippet and normalized_snippet not in normalized_candidate:
-            missing.append(snippet)
-    return len(missing) == 0, missing
-
-
 def _rag_extract_turn_inputs(
     run: Run,
     example: Example,
@@ -265,3 +191,77 @@ def _rag_truncate_text(value: object, limit: int) -> str:
     if limit <= 3:  # noqa: PLR2004
         return text[:limit]
     return f"{text[: limit - 3]}..."
+
+
+def _split_expected_reference(reference: str) -> list[str]:
+    """Split a reference string into expected snippet parts.
+
+    Args:
+        reference: Reference string containing one or more snippets.
+
+    Returns:
+        List of non-empty snippet strings.
+
+    """
+    if not reference:
+        return []
+    return [snippet.strip() for snippet in reference.split(" | ") if snippet.strip()]
+
+
+def _build_reference_candidate_text(turn_output: dict[str, Any]) -> str:
+    """Build a candidate text blob from retrieval contexts and the response.
+
+    Args:
+        turn_output: Turn output dict containing contexts and assistant text.
+
+    Returns:
+        Combined candidate text used for subset matching.
+
+    """
+    contexts = turn_output.get("contexts_used")
+    context_list = contexts if isinstance(contexts, list) else []
+    context_text = "\n".join([str(item) for item in context_list if item is not None])
+    assistant_text = turn_output.get("assistant_text")
+    if assistant_text:
+        if context_text:
+            return f"{context_text}\n{assistant_text}"
+        return str(assistant_text)
+    return context_text
+
+
+def _reference_subset_match(
+    expected_snippets: list[str],
+    candidate_text: str,
+) -> tuple[bool, list[str]]:
+    """Determine whether all expected snippets appear in candidate text.
+
+    Args:
+        expected_snippets: Snippets expected to appear in the candidate text.
+        candidate_text: Combined retrieval contexts and assistant response.
+
+    Returns:
+        Tuple of (matched, missing_snippets).
+
+    """
+    normalized_candidate = _normalize_text(candidate_text)
+    missing = []
+    for snippet in expected_snippets:
+        normalized_snippet = _normalize_text(snippet)
+        if normalized_snippet and normalized_snippet not in normalized_candidate:
+            missing.append(snippet)
+    return len(missing) == 0, missing
+
+
+def _normalize_text(text: str) -> str:
+    """Normalize text for substring matching.
+
+    Args:
+        text: Raw input text.
+
+    Returns:
+        Lowercased text with collapsed whitespace.
+
+    """
+    if not text:
+        return ""
+    return " ".join(str(text).lower().split())

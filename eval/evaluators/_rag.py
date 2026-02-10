@@ -53,6 +53,19 @@ InstructorTypeVar = TypeVar("InstructorTypeVar", bound=BaseModel)
 logger = logging.getLogger(__name__)
 
 
+@runtime_checkable
+class _MetricResultLike(Protocol):
+    """Protocol for Ragas MetricResult-like objects."""
+
+    @property
+    def value(self) -> object:
+        """Return the underlying metric value."""
+
+    def __float__(self) -> float:
+        """Return a float representation of the metric."""
+        raise NotImplementedError
+
+
 class AsyncFromSyncInstructorLLM(InstructorBaseRagasLLM):
     """Wrap a sync Instructor LLM to provide async calls via threads.
 
@@ -577,18 +590,6 @@ def _metric_result_to_float(value: object) -> float:
         Float representation of the metric result.
 
     """
-    @runtime_checkable
-    class _MetricResultLike(Protocol):
-        """Protocol for Ragas MetricResult-like objects."""
-
-        @property
-        def value(self) -> object:
-            """Return the underlying metric value."""
-
-        def __float__(self) -> float:
-            """Return a float representation of the metric."""
-            raise NotImplementedError
-
     result: float
     if isinstance(value, bool):
         result = 1.0 if value else 0.0

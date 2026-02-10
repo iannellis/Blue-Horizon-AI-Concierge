@@ -276,62 +276,6 @@ def _accumulate_outcome(
     unexpected_fail_details.append({"turn": turn_idx, "op": op, **detail})
 
 
-def _format_tool_error_metric(counts: dict[str, int]) -> tuple[float, str]:
-    """Format the tool error metric from accumulated counts.
-
-    Args:
-        counts: Counter dict accumulated across rooms turns.
-
-    Returns:
-        Tuple of (score, comment) for rooms_tool_errors.
-
-    """
-    tool_errors = counts["tool_errors"]
-    if tool_errors == 0:
-        return 1.0, "No tool errors detected."
-    return 0.0, f"{tool_errors} run_sql errors detected."
-
-
-def _format_outcome_match_metric(counts: dict[str, int]) -> tuple[float, str]:
-    """Format the outcome match metric from accumulated counts.
-
-    Args:
-        counts: Counter dict accumulated across rooms turns.
-
-    Returns:
-        Tuple of (score, comment) for rooms_outcome_match_rate.
-
-    """
-    matches = counts["outcome_matches"]
-    unexpected = counts["unexpected_failures"]
-    total = matches + unexpected
-    if total == 0:
-        return 1.0, "No BOOK/MODIFY outcomes to evaluate."
-    return (
-        matches / total,
-        f"Outcomes matched {matches}/{total}.",
-    )
-
-
-def _format_rowcount_metric(counts: dict[str, int]) -> tuple[float, str]:
-    """Format the rowcount presence metric from accumulated counts.
-
-    Args:
-        counts: Counter dict accumulated across rooms turns.
-
-    Returns:
-        Tuple of (score, comment) for rooms_rowcount_sanity.
-
-    """
-    run_sql_calls = counts["run_sql_calls"]
-    rowcount_present = counts["rowcount_present"]
-    if run_sql_calls == 0:
-        return 1.0, "No run_sql calls observed."
-    score = rowcount_present / run_sql_calls
-    comment = f"Rowcount present on {rowcount_present}/{run_sql_calls} run_sql calls."
-    return score, comment
-
-
 def _extract_rows(entry: dict[str, Any]) -> list[dict[str, Any]]:
     """Extract rows from a run_sql tool summary entry.
 
@@ -438,52 +382,60 @@ def _score_atomic_outcome(op: str, row: dict[str, Any]) -> tuple[bool, dict[str,
     }
 
 
-async def _get_eval_db_url() -> str:
-    """Resolve the evaluation database URL.
+def _format_tool_error_metric(counts: dict[str, int]) -> tuple[float, str]:
+    """Format the tool error metric from accumulated counts.
+
+    Args:
+        counts: Counter dict accumulated across rooms turns.
 
     Returns:
-        Database URL string.
-
-    Raises:
-        RuntimeError: If no database URL is available.
+        Tuple of (score, comment) for rooms_tool_errors.
 
     """
-    env_url = os.getenv("EVAL_DB_URL")
-    if env_url:
-        return env_url
-
-    if _load_app_config is None:
-        msg = "Unable to import load_app_config for evaluator DB access."
-        raise RuntimeError(msg) from _PGSQL_IMPORT_ERROR
-
-    return _load_app_config().pgsql_db_url
+    tool_errors = counts["tool_errors"]
+    if tool_errors == 0:
+        return 1.0, "No tool errors detected."
+    return 0.0, f"{tool_errors} run_sql errors detected."
 
 
-async def _ensure_eval_pool() -> AsyncConnectionPool[Any]:
-    """Create or return the shared async connection pool for evaluator queries.
+def _format_outcome_match_metric(counts: dict[str, int]) -> tuple[float, str]:
+    """Format the outcome match metric from accumulated counts.
+
+    Args:
+        counts: Counter dict accumulated across rooms turns.
 
     Returns:
-        Open AsyncConnectionPool instance.
+        Tuple of (score, comment) for rooms_outcome_match_rate.
 
     """
-    global _EVAL_POOL  # noqa: PLW0603
-    if _EVAL_POOL is not None:
-        return _EVAL_POOL
+    matches = counts["outcome_matches"]
+    unexpected = counts["unexpected_failures"]
+    total = matches + unexpected
+    if total == 0:
+        return 1.0, "No BOOK/MODIFY outcomes to evaluate."
+    return (
+        matches / total,
+        f"Outcomes matched {matches}/{total}.",
+    )
 
-    async with _EVAL_POOL_LOCK:
-        if _EVAL_POOL is not None:
-            return _EVAL_POOL
-        conninfo = await _get_eval_db_url()
-        pool = AsyncConnectionPool(
-            conninfo=conninfo,
-            min_size=1,
-            max_size=2,
-            timeout=30,
-            open=False,
-        )
-        await pool.open()
-        _EVAL_POOL = pool
-        return pool
+
+def _format_rowcount_metric(counts: dict[str, int]) -> tuple[float, str]:
+    """Format the rowcount presence metric from accumulated counts.
+
+    Args:
+        counts: Counter dict accumulated across rooms turns.
+
+    Returns:
+        Tuple of (score, comment) for rooms_rowcount_sanity.
+
+    """
+    run_sql_calls = counts["run_sql_calls"]
+    rowcount_present = counts["rowcount_present"]
+    if run_sql_calls == 0:
+        return 1.0, "No run_sql calls observed."
+    score = rowcount_present / run_sql_calls
+    comment = f"Rowcount present on {rowcount_present}/{run_sql_calls} run_sql calls."
+    return score, comment
 
 
 async def _check_rooms_db_invariants() -> list[dict[str, Any]]:
@@ -560,3 +512,51 @@ async def _check_rooms_db_invariants() -> list[dict[str, Any]]:
             ),
         },
     ]
+
+
+async def _ensure_eval_pool() -> AsyncConnectionPool[Any]:
+    """Create or return the shared async connection pool for evaluator queries.
+
+    Returns:
+        Open AsyncConnectionPool instance.
+
+    """
+    global _EVAL_POOL  # noqa: PLW0603
+    if _EVAL_POOL is not None:
+        return _EVAL_POOL
+
+    async with _EVAL_POOL_LOCK:
+        if _EVAL_POOL is not None:
+            return _EVAL_POOL
+        conninfo = await _get_eval_db_url()
+        pool = AsyncConnectionPool(
+            conninfo=conninfo,
+            min_size=1,
+            max_size=2,
+            timeout=30,
+            open=False,
+        )
+        await pool.open()
+        _EVAL_POOL = pool
+        return pool
+
+
+async def _get_eval_db_url() -> str:
+    """Resolve the evaluation database URL.
+
+    Returns:
+        Database URL string.
+
+    Raises:
+        RuntimeError: If no database URL is available.
+
+    """
+    env_url = os.getenv("EVAL_DB_URL")
+    if env_url:
+        return env_url
+
+    if _load_app_config is None:
+        msg = "Unable to import load_app_config for evaluator DB access."
+        raise RuntimeError(msg) from _PGSQL_IMPORT_ERROR
+
+    return _load_app_config().pgsql_db_url

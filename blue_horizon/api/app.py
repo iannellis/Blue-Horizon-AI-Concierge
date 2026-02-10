@@ -29,6 +29,7 @@ class ChatPayload(BaseModel):
 
 orchestrator = OrchestrationManager()
 
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """Manage the lifespan of the FastAPI app.
@@ -48,6 +49,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     await orchestrator.stop()
 
 app = FastAPI(lifespan=lifespan)
+
 
 @app.post("/chat")
 async def chat(payload: ChatPayload) -> dict[str, Any]:

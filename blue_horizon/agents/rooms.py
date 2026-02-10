@@ -140,7 +140,20 @@ def render_system_prompt(  # noqa: PLR0913
     additional_amenities: list[str],
     view_types: list[str],
 ) -> str:
-    """Render the system prompt template with runtime substitutions."""
+    """Render the system prompt template with runtime substitutions.
+
+    Args:
+        template: String Template loaded from the rooms prompt resource.
+        top_k: Maximum number of rooms to surface in the prompt.
+        enum_values: Mapping of enum type name to list of valid values.
+        basic_amenities: Distinct basic amenity values from the database.
+        additional_amenities: Distinct additional amenity values from the database.
+        view_types: Distinct view type values from the database.
+
+    Returns:
+        Rendered system prompt string with all placeholders substituted.
+
+    """
     return template.safe_substitute(
         top_k=top_k,
         room_type=enum_values.get("room_type", []),

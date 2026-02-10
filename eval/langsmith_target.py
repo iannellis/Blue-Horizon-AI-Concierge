@@ -365,6 +365,7 @@ def _parse_tool_content(content: object) -> object:
                     break
     return parsed
 
+
 def _tool_messages_since_last_user(
     messages: list[BaseMessage],
 ) -> list[ToolMessage]:
@@ -734,6 +735,7 @@ class EvalCaptureCallback(AsyncCallbackHandler):
                 },
             )
         return safe_rows
+
 
 def _get_tool_name(metadata: dict[str, Any]) -> str | None:
     """Extract the tool name from callback metadata.

@@ -84,6 +84,46 @@ class StressRunConfig:
     db_url: str
 
 
+@dataclass
+class UserState:
+    """Track best-effort booking state for a simulated user thread.
+
+    Attributes:
+        last_room_number: The last room number used by the user, if any.
+        last_check_in: The last check-in date as an ISO string, if any.
+        last_check_out: The last check-out date as an ISO string, if any.
+        has_booking: Whether the user likely has an active booking.
+
+    """
+
+    last_room_number: int | None = None
+    last_check_in: str | None = None
+    last_check_out: str | None = None
+    has_booking: bool = False
+
+
+@dataclass(frozen=True)
+class OperationBuildResult:
+    """Container for a prepared operation prompt and context.
+
+    Attributes:
+        op_type: The requested operation type label.
+        prompt: The user prompt to send to the agent.
+        target_used: The target dict used for the operation, if any.
+        old_room: The prior room number before the operation.
+        old_check_in: The prior check-in date before the operation.
+        old_check_out: The prior check-out date before the operation.
+
+    """
+
+    op_type: str
+    prompt: str
+    target_used: dict[str, object] | None
+    old_room: int | None
+    old_check_in: str | None
+    old_check_out: str | None
+
+
 async def run_stress() -> None:
     """Execute a full stress run against a shared evaluation schema.
 
@@ -359,46 +399,6 @@ async def find_available_targets(
         )
 
     return targets
-
-
-@dataclass
-class UserState:
-    """Track best-effort booking state for a simulated user thread.
-
-    Attributes:
-        last_room_number: The last room number used by the user, if any.
-        last_check_in: The last check-in date as an ISO string, if any.
-        last_check_out: The last check-out date as an ISO string, if any.
-        has_booking: Whether the user likely has an active booking.
-
-    """
-
-    last_room_number: int | None = None
-    last_check_in: str | None = None
-    last_check_out: str | None = None
-    has_booking: bool = False
-
-
-@dataclass(frozen=True)
-class OperationBuildResult:
-    """Container for a prepared operation prompt and context.
-
-    Attributes:
-        op_type: The requested operation type label.
-        prompt: The user prompt to send to the agent.
-        target_used: The target dict used for the operation, if any.
-        old_room: The prior room number before the operation.
-        old_check_in: The prior check-in date before the operation.
-        old_check_out: The prior check-out date before the operation.
-
-    """
-
-    op_type: str
-    prompt: str
-    target_used: dict[str, object] | None
-    old_room: int | None
-    old_check_in: str | None
-    old_check_out: str | None
 
 
 async def _run_workload(
@@ -906,8 +906,6 @@ def _build_op_entry(  # noqa: PLR0913
     return op_entry
 
 
-
-
 def _summarize_user_ops(
     *,
     user_idx: int,
@@ -1036,16 +1034,16 @@ def _build_summary(  # noqa: PLR0913
     error_count = sum(1 for op in op_logs if op.get("outcome") == "error")
 
     def _rate(count: int) -> float:
-            """Compute a rate safely when the denominator may be zero.
+        """Compute a rate safely when the denominator may be zero.
 
-            Args:
-                count: The numerator count.
+        Args:
+            count: The numerator count.
 
-            Returns:
-                The rate ``count / total_ops`` or ``0.0`` when ``total_ops`` is 0.
+        Returns:
+            The rate ``count / total_ops`` or ``0.0`` when ``total_ops`` is 0.
 
-            """
-            return (count / total_ops) if total_ops else 0.0
+        """
+        return (count / total_ops) if total_ops else 0.0
 
     summary: dict[str, object] = {
         "schema": cfg.schema,

@@ -170,9 +170,6 @@ def build_index(
         sys.exit(1)
 
 
-redis_conn_string = load_app_config().redis_url
-Settings.embed_model = OpenAIEmbedding(model="text-embedding-3-small")
-
 FAQ_REQUIRED_COLUMNS = [
     "question",
     "answer",
@@ -202,45 +199,17 @@ SERVICES_REQUIRED_COLUMNS = [
     "min_notice_hours",
 ]
 
+
 # ============================
-# Load FAQ data into Redis
+# Node builders
 # ============================
 
-# Define the Redis schema
-faq_schema = IndexSchema.from_dict(
-    {
-        "index": {"name": "faq", "prefix": "faq"},
-        # customize fields that are indexed
-        "fields": [
-            # required fields for llamaindex
-            {"type": "tag", "name": "id"},
-            {"type": "tag", "name": "doc_id"},
-            {"type": "text", "name": "text"},
-            # custom for metadata filtering
-            {"type": "tag", "name": "category"},
-            # custom vector field for text-embedding-3-small
-            {
-                "type": "vector",
-                "name": "vector",
-                "attrs": {
-                    "dims": 1536,
-                    "algorithm": "hnsw",
-                    "distance_metric": "cosine",
-                },
-            },
-        ],
-    },
-)
 
-df_faq = load_dataframe(
-    "FAQ",
-    get_data_path() / "faq_knowledge_base.pkl",
-    FAQ_REQUIRED_COLUMNS,
-)
-
-
-def get_faq_nodes() -> list[TextNode]:
+def get_faq_nodes(df_faq: pd.DataFrame) -> list[TextNode]:
     """Convert each FAQ row into a TextNode with metadata.
+
+    Args:
+        df_faq: DataFrame containing FAQ data with required columns.
 
     Returns:
         List of TextNodes derived from the FAQ dataset.
@@ -262,53 +231,11 @@ def get_faq_nodes() -> list[TextNode]:
     return nodes
 
 
-# Load the data into Redis
-faq_nodes = get_faq_nodes()
-faq_index = build_index(faq_schema, faq_nodes, "faq", redis_conn_string)
-
-# ============================
-# Load amenities data into Redis
-# ============================
-
-# Define the Redis schema
-amenities_schema = IndexSchema.from_dict(
-    {
-        "index": {"name": "amenities", "prefix": "amenities"},
-        # customize fields that are indexed
-        "fields": [
-            # required fields for llamaindex
-            {"type": "tag", "name": "id"},
-            {"type": "tag", "name": "doc_id"},
-            {"type": "text", "name": "text"},
-            # custom fields for filtering
-            {"type": "tag", "name": "category"},
-            {"type": "numeric", "name": "price"},
-            {"type": "numeric", "name": "duration"},
-            {"type": "numeric", "name": "min_notice_hours"},
-            {"type": "tag", "name": "booking_required"},
-            # custom vector field for text-embedding-3-small embeddings
-            {
-                "type": "vector",
-                "name": "vector",
-                "attrs": {
-                    "dims": 1536,
-                    "algorithm": "hnsw",
-                    "distance_metric": "cosine",
-                },
-            },
-        ],
-    },
-)
-
-df_amenities = load_dataframe(
-    "Amenities",
-    get_data_path() / "amenities.pkl",
-    AMENITIES_REQUIRED_COLUMNS,
-)
-
-
-def get_amenities_nodes() -> list[TextNode]:
+def get_amenities_nodes(df_amenities: pd.DataFrame) -> list[TextNode]:
     """Convert amenities rows into TextNodes with sanitized metadata.
+
+    Args:
+        df_amenities: DataFrame containing amenities data with required columns.
 
     Returns:
         List of TextNodes derived from the amenities dataset.
@@ -334,60 +261,11 @@ def get_amenities_nodes() -> list[TextNode]:
     return nodes
 
 
-# Load the data into Redis
-amenities_nodes = get_amenities_nodes()
-amenities_index = build_index(
-    amenities_schema,
-    amenities_nodes,
-    "amenities",
-    redis_conn_string,
-)
-
-
-# ============================
-# Load services data into Redis
-# ============================
-
-# Define the Redis schema
-services_schema = IndexSchema.from_dict(
-    {
-        "index": {"name": "services", "prefix": "services"},
-        # customize fields that are indexed
-        "fields": [
-            # required fields for llamaindex
-            {"type": "tag", "name": "id"},
-            {"type": "tag", "name": "doc_id"},
-            {"type": "text", "name": "text"},
-            # custom fields for filtering
-            {"type": "tag", "name": "service_type"},
-            {"type": "numeric", "name": "price"},
-            {"type": "numeric", "name": "duration"},
-            {"type": "numeric", "name": "min_notice_hours"},
-            {"type": "tag", "name": "department"},
-            {"type": "tag", "name": "booking_required"},
-            # custom vector field for text-embedding-3-small embeddings
-            {
-                "type": "vector",
-                "name": "vector",
-                "attrs": {
-                    "dims": 1536,
-                    "algorithm": "hnsw",
-                    "distance_metric": "cosine",
-                },
-            },
-        ],
-    },
-)
-
-df_services = load_dataframe(
-    "Services",
-    get_data_path() / "services.pkl",
-    SERVICES_REQUIRED_COLUMNS,
-)
-
-
-def get_services_nodes() -> list[TextNode]:
+def get_services_nodes(df_services: pd.DataFrame) -> list[TextNode]:
     """Convert services rows into TextNodes with sanitized metadata.
+
+    Args:
+        df_services: DataFrame containing services data with required columns.
 
     Returns:
         List of TextNodes derived from the services dataset.
@@ -413,11 +291,144 @@ def get_services_nodes() -> list[TextNode]:
     return nodes
 
 
-# Load the data into Redis
-services_nodes = get_services_nodes()
-services_index = build_index(
-    services_schema,
-    services_nodes,
-    "services",
-    redis_conn_string,
-)
+# ============================
+# Main entry point
+# ============================
+
+
+def main() -> None:
+    """Load FAQ, services, and amenities datasets into Redis vector indices.
+
+    Initialises the OpenAI embedding model, loads each dataset from pickled
+    files, converts records into LlamaIndex TextNodes, and writes them to Redis
+    via separate vector store indices.
+
+    """
+    redis_conn_string = load_app_config().redis_url
+    Settings.embed_model = OpenAIEmbedding(model="text-embedding-3-small")
+
+    data_path = get_data_path()
+
+    # ============================
+    # Load FAQ data into Redis
+    # ============================
+
+    faq_schema = IndexSchema.from_dict(
+        {
+            "index": {"name": "faq", "prefix": "faq"},
+            # customize fields that are indexed
+            "fields": [
+                # required fields for llamaindex
+                {"type": "tag", "name": "id"},
+                {"type": "tag", "name": "doc_id"},
+                {"type": "text", "name": "text"},
+                # custom for metadata filtering
+                {"type": "tag", "name": "category"},
+                # custom vector field for text-embedding-3-small
+                {
+                    "type": "vector",
+                    "name": "vector",
+                    "attrs": {
+                        "dims": 1536,
+                        "algorithm": "hnsw",
+                        "distance_metric": "cosine",
+                    },
+                },
+            ],
+        },
+    )
+
+    df_faq = load_dataframe(
+        "FAQ",
+        data_path / "faq_knowledge_base.pkl",
+        FAQ_REQUIRED_COLUMNS,
+    )
+    faq_nodes = get_faq_nodes(df_faq)
+    build_index(faq_schema, faq_nodes, "faq", redis_conn_string)
+
+    # ============================
+    # Load amenities data into Redis
+    # ============================
+
+    amenities_schema = IndexSchema.from_dict(
+        {
+            "index": {"name": "amenities", "prefix": "amenities"},
+            # customize fields that are indexed
+            "fields": [
+                # required fields for llamaindex
+                {"type": "tag", "name": "id"},
+                {"type": "tag", "name": "doc_id"},
+                {"type": "text", "name": "text"},
+                # custom fields for filtering
+                {"type": "tag", "name": "category"},
+                {"type": "numeric", "name": "price"},
+                {"type": "numeric", "name": "duration"},
+                {"type": "numeric", "name": "min_notice_hours"},
+                {"type": "tag", "name": "booking_required"},
+                # custom vector field for text-embedding-3-small embeddings
+                {
+                    "type": "vector",
+                    "name": "vector",
+                    "attrs": {
+                        "dims": 1536,
+                        "algorithm": "hnsw",
+                        "distance_metric": "cosine",
+                    },
+                },
+            ],
+        },
+    )
+
+    df_amenities = load_dataframe(
+        "Amenities",
+        data_path / "amenities.pkl",
+        AMENITIES_REQUIRED_COLUMNS,
+    )
+    amenities_nodes = get_amenities_nodes(df_amenities)
+    build_index(amenities_schema, amenities_nodes, "amenities", redis_conn_string)
+
+    # ============================
+    # Load services data into Redis
+    # ============================
+
+    services_schema = IndexSchema.from_dict(
+        {
+            "index": {"name": "services", "prefix": "services"},
+            # customize fields that are indexed
+            "fields": [
+                # required fields for llamaindex
+                {"type": "tag", "name": "id"},
+                {"type": "tag", "name": "doc_id"},
+                {"type": "text", "name": "text"},
+                # custom fields for filtering
+                {"type": "tag", "name": "service_type"},
+                {"type": "numeric", "name": "price"},
+                {"type": "numeric", "name": "duration"},
+                {"type": "numeric", "name": "min_notice_hours"},
+                {"type": "tag", "name": "department"},
+                {"type": "tag", "name": "booking_required"},
+                # custom vector field for text-embedding-3-small embeddings
+                {
+                    "type": "vector",
+                    "name": "vector",
+                    "attrs": {
+                        "dims": 1536,
+                        "algorithm": "hnsw",
+                        "distance_metric": "cosine",
+                    },
+                },
+            ],
+        },
+    )
+
+    df_services = load_dataframe(
+        "Services",
+        data_path / "services.pkl",
+        SERVICES_REQUIRED_COLUMNS,
+    )
+    services_nodes = get_services_nodes(df_services)
+    build_index(services_schema, services_nodes, "services", redis_conn_string)
+
+
+if __name__ == "__main__":
+    main()

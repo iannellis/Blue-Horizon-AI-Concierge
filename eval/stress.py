@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import platform
 import random
 import statistics
 import time
@@ -1136,4 +1137,6 @@ def _write_artifacts(
 
 
 if __name__ == "__main__":
+    if platform.system() == "Windows":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     asyncio.run(run_stress())

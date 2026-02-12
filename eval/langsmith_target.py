@@ -21,7 +21,6 @@ from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
-    HumanMessage,
     ToolMessage,
 )
 from pydantic import BaseModel, ValidationError
@@ -439,32 +438,6 @@ def _parse_tool_content(content: object) -> object:
                     parsed = _parse_tool_content(text)
                     break
     return parsed
-
-
-def _tool_messages_since_last_user(
-    messages: list[BaseMessage],
-) -> list[ToolMessage]:
-    """Collect tool messages that occurred after the last user message.
-
-    Args:
-        messages: Ordered list of LangChain messages.
-
-    Returns:
-        List of ToolMessage objects for the most recent turn.
-
-    """
-    last_user_index = -1
-    for idx in range(len(messages) - 1, -1, -1):
-        if isinstance(messages[idx], HumanMessage):
-            last_user_index = idx
-            break
-    if last_user_index == -1:
-        return []
-    return [
-        message
-        for message in messages[last_user_index + 1 :]
-        if isinstance(message, ToolMessage)
-    ]
 
 
 async def ensure_orchestration_ready() -> OrchestrationManager:

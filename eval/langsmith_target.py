@@ -26,12 +26,6 @@ from langchain_core.messages import (
 )
 from pydantic import BaseModel, ValidationError
 
-from blue_horizon.agents.information import (
-    EvalInfoToolLog,
-    get_eval_info_tool_log,
-    reset_eval_info_tool_log,
-    set_eval_info_tool_log,
-)
 from blue_horizon.agents.orchestration import OrchestrationManager
 from eval._utils import (
     coerce_float as _coerce_float,
@@ -77,8 +71,21 @@ _ORCHESTRATION: OrchestrationManager | None = None
 
 _ROUTE_KEY = "route"  # key from orchestration.py
 
+# Filter keys present in ParsedQuery that map to retrieval metadata filters.
+_INFO_FILTER_KEYS: frozenset[str] = frozenset(
+    {
+        "booking_required",
+        "min_price",
+        "max_price",
+        "min_notice_hours",
+        "max_notice_hours",
+        "min_duration_minutes",
+        "max_duration_minutes",
+    },
+)
 
-async def run_example(  # noqa: C901, PLR0912
+
+async def run_example(
     example: dict[str, Any],
 ) -> dict[str, Any]:
     """Run a single LangSmith example through the orchestration pipeline.
@@ -113,20 +120,13 @@ async def run_example(  # noqa: C901, PLR0912
             "turn_index": turn_index,
         }
 
-        token = set_eval_info_tool_log(
-            EvalInfoToolLog(tool_summary=[], contexts_used=[]),
+        result = await orchestration_mgr.ainvoke(
+            thread_id=thread_id,
+            user_text=user_text,
+            callbacks=[callback],
+            tags=tags,
+            metadata=metadata,
         )
-        try:
-            result = await orchestration_mgr.ainvoke(
-                thread_id=thread_id,
-                user_text=user_text,
-                callbacks=[callback],
-                tags=tags,
-                metadata=metadata,
-            )
-        finally:
-            log = get_eval_info_tool_log()
-            reset_eval_info_tool_log(token)
 
         messages_raw = result.get("messages", [])
         messages = messages_raw if isinstance(messages_raw, list) else []
@@ -138,57 +138,12 @@ async def run_example(  # noqa: C901, PLR0912
             if isinstance(fallback_route, str):
                 route_pred = fallback_route
 
-        tool_summary = callback.tool_summary
-        contexts_used = callback.contexts_used
-        if log is not None:
-            if not tool_summary and log.tool_summary:
-                tool_summary = list(log.tool_summary)
-                # Normalize filters for query_amenities/query_services from log
-                for entry in tool_summary:
-                    if (
-                        isinstance(entry, dict)
-                        and entry.get("tool") in {"query_amenities", "query_services"}
-                        and "filters" in entry
-                        and "filters_norm" not in entry
-                    ):
-                        normalized, unknown = _normalize_info_filters_strict(
-                            entry.get("filters"),
-                        )
-                        entry["filters_norm"] = normalized
-                        if unknown:
-                            entry["filters_unknown_keys"] = unknown
-            if not contexts_used and log.contexts_used:
-                contexts_used = list(log.contexts_used)
-            if log.tool_summary and tool_summary:
-                logged_names = {
-                    entry.get("tool")
-                    for entry in tool_summary
-                    if isinstance(entry, dict)
-                }
-                for entry in log.tool_summary:
-                    if (
-                        isinstance(entry, dict)
-                        and entry.get("tool") not in logged_names
-                    ):
-                        if (
-                            entry.get("tool") in {"query_amenities", "query_services"}
-                            and "filters" in entry
-                            and "filters_norm" not in entry
-                        ):
-                            normalized, unknown = _normalize_info_filters_strict(
-                                entry.get("filters"),
-                            )
-                            entry["filters_norm"] = normalized
-                            if unknown:
-                                entry["filters_unknown_keys"] = unknown
-                        tool_summary.append(entry)
-
         turn_outputs.append(
             {
                 "assistant_text": assistant_text,
                 "route_pred": route_pred,
-                "tool_summary": tool_summary,
-                "contexts_used": contexts_used,
+                "tool_summary": callback.tool_summary,
+                "contexts_used": callback.contexts_used,
             },
         )
 
@@ -561,6 +516,7 @@ class EvalCaptureCallback(AsyncCallbackHandler):
     tool_summary: list[dict[str, Any]]
     contexts_used: list[str]
     _pending_tool_entries: dict[UUID, dict[str, Any]]
+    _parsed_query: dict[str, Any] | None
 
     def __init__(self) -> None:
         """Initialize the callback handler."""
@@ -569,6 +525,7 @@ class EvalCaptureCallback(AsyncCallbackHandler):
         self.tool_summary = []
         self.contexts_used = []
         self._pending_tool_entries = {}
+        self._parsed_query = None
 
     async def on_chain_end(
         self,
@@ -579,7 +536,7 @@ class EvalCaptureCallback(AsyncCallbackHandler):
         tags: list[str] | None = None,
         **kwargs: Any,  # noqa: ANN401
     ) -> None:
-        """Capture router outputs for the current turn.
+        """Capture router outputs and info-DAG node results for the current turn.
 
         Args:
             outputs: Chain outputs from LangChain/LangGraph.
@@ -590,10 +547,164 @@ class EvalCaptureCallback(AsyncCallbackHandler):
 
         """
         _ = run_id, parent_run_id, tags, kwargs
-        if isinstance(outputs, dict) and _ROUTE_KEY in outputs:
+        if not isinstance(outputs, dict):
+            return
+
+        # Capture orchestration router decision.
+        if _ROUTE_KEY in outputs:
             route_val = outputs.get(_ROUTE_KEY)
             if isinstance(route_val, str):
                 self.route_pred = route_val
+            return
+
+        # Full-state events (e.g., graph start/end) contain messages alongside
+        # other keys and should not be mistaken for individual node outputs.
+        if "messages" in outputs:
+            return
+
+        self._dispatch_info_dag_node(outputs)
+
+    def _dispatch_info_dag_node(self, outputs: dict[str, Any]) -> None:
+        """Route a single info-DAG node output to the appropriate capture handler.
+
+        Args:
+            outputs: State-patch dict returned by one info DAG node.
+
+        """
+        if "parsed" in outputs:
+            self._capture_parse_node(outputs)
+        elif "faq_results" in outputs:
+            self._capture_faq_node(outputs)
+        elif "amenities_results" in outputs or "services_results" in outputs:
+            self._capture_catalog_node(outputs)
+        elif "top_results" in outputs:
+            self._capture_rerank_node(outputs)
+
+    def _capture_parse_node(self, outputs: dict[str, Any]) -> None:
+        """Store the parsed query and append a parser tool-summary entry.
+
+        Args:
+            outputs: Parse-node output containing ``"parsed"``.
+
+        """
+        parsed_raw = outputs["parsed"]
+        if hasattr(parsed_raw, "model_dump"):
+            parsed_dict: dict[str, Any] = parsed_raw.model_dump()
+        elif isinstance(parsed_raw, dict):
+            parsed_dict = parsed_raw
+        else:
+            return
+        self._parsed_query = parsed_dict
+        self.tool_summary.append(
+            {
+                "tool": "parser",
+                "status": "ok",
+                "parsed_query": {k: v for k, v in parsed_dict.items() if v is not None},
+            },
+        )
+
+    def _capture_faq_node(self, outputs: dict[str, Any]) -> None:
+        """Append a query_faq tool-summary entry.
+
+        Args:
+            outputs: FAQ-node output containing ``"faq_results"``.
+
+        """
+        results = outputs["faq_results"]
+        self.tool_summary.append(
+            {
+                "tool": "query_faq",
+                "status": "ok",
+                "count": len(results) if isinstance(results, list) else 0,
+            },
+        )
+
+    def _capture_catalog_node(self, outputs: dict[str, Any]) -> None:
+        """Append a query_amenities or query_services tool-summary entry with filters.
+
+        Args:
+            outputs: Catalog-node output containing ``"amenities_results"`` or
+                ``"services_results"``.
+
+        """
+        for state_key, tool_name in (
+            ("amenities_results", "query_amenities"),
+            ("services_results", "query_services"),
+        ):
+            if state_key not in outputs:
+                continue
+            results = outputs[state_key]
+            entry: dict[str, Any] = {
+                "tool": tool_name,
+                "status": "ok",
+                "count": len(results) if isinstance(results, list) else 0,
+            }
+            if self._parsed_query:
+                raw_filters = {
+                    k: v
+                    for k, v in self._parsed_query.items()
+                    if k in _INFO_FILTER_KEYS and v is not None
+                }
+                if raw_filters:
+                    norm, unknown = _normalize_info_filters_strict(raw_filters)
+                    entry["filters"] = raw_filters
+                    entry["filters_norm"] = norm
+                    if unknown:
+                        entry["filters_unknown_keys"] = unknown
+            self.tool_summary.append(entry)
+            return
+
+    def _capture_rerank_node(self, outputs: dict[str, Any]) -> None:
+        """Append a reranker tool-summary entry and populate contexts_used.
+
+        Args:
+            outputs: Rerank-node output containing ``"top_results"``.
+
+        """
+        results = outputs["top_results"]
+        self.tool_summary.append(
+            {
+                "tool": "reranker",
+                "status": "ok",
+                "count": len(results) if isinstance(results, list) else 0,
+            },
+        )
+        for item in results or []:
+            context = self._item_to_context(item)
+            if context:
+                self.contexts_used.append(context)
+
+    @staticmethod
+    def _item_to_context(item: Any) -> str | None:  # noqa: ANN401
+        """Convert a single retrieval item to a context string.
+
+        Args:
+            item: A ``RetrievalItem`` instance or plain dict with ``text`` and
+                ``metadata`` fields.
+
+        Returns:
+            Context string combining text and metadata, or ``None`` when the
+            item has no usable text.
+
+        """
+        if hasattr(item, "text"):
+            text: object = item.text
+            metadata: dict[str, Any] = getattr(item, "metadata", None) or {}
+        elif isinstance(item, dict):
+            text = item.get("text", "")
+            metadata = item.get("metadata") or {}
+        else:
+            return None
+        if not isinstance(text, str) or not text:
+            return None
+        context = text
+        if metadata:
+            metadata_str = ", ".join(
+                f"{k}: {v}" for k, v in metadata.items() if v is not None
+            )
+            if metadata_str:
+                context = f"{context}\n[Metadata: {metadata_str}]"
+        return context
 
     async def on_tool_start(  # noqa: PLR0913
         self,
@@ -635,15 +746,6 @@ class EvalCaptureCallback(AsyncCallbackHandler):
             "input_preview": _preview(inputs),
             "status": "started",
         }
-        if tool_name in {"query_amenities", "query_services"}:
-            raw_filters = _extract_filters_from_tool_inputs(inputs)
-            normalized_filters, unknown_keys = _normalize_info_filters_strict(
-                raw_filters,
-            )
-            entry["filters"] = raw_filters
-            entry["filters_norm"] = normalized_filters
-            if unknown_keys:
-                entry["filters_unknown_keys"] = unknown_keys
         if isinstance(inputs, Mapping):
             raw_k = inputs.get("k")
             if raw_k is None:
@@ -653,7 +755,7 @@ class EvalCaptureCallback(AsyncCallbackHandler):
                 entry["k"] = k_value
         self._pending_tool_entries[run_id] = entry
 
-    async def on_tool_end(  # noqa: C901
+    async def on_tool_end(
         self,
         output: Any,  # noqa: ANN401
         *,
@@ -712,20 +814,6 @@ class EvalCaptureCallback(AsyncCallbackHandler):
             # Only capture if we successfully parsed to a dict/mapping
             if isinstance(actual_output, Mapping):
                 self._capture_run_sql(actual_output, entry)
-            return
-        if tool_name in {"query_amenities", "query_services", "query_faq"}:
-            summary = entry or {"tool": tool_name}
-            summary["status"] = "ok"
-            if isinstance(output, list):
-                summary["output_preview"] = _preview({"num_items": len(output)})
-            self.tool_summary.append(summary)
-            return
-        if tool_name == "reranker":
-            summary = entry or {"tool": tool_name}
-            summary["status"] = "ok"
-            if isinstance(output, list):
-                summary["output_preview"] = _preview({"reranked_k": len(output)})
-            self.tool_summary.append(summary)
             return
         if entry is not None:
             entry["status"] = "ok"
@@ -808,7 +896,6 @@ class EvalCaptureCallback(AsyncCallbackHandler):
                     if row_str:
                         self.contexts_used.append(f"SQL result: {row_str}")
 
-    @staticmethod
     @staticmethod
     def _compact_rows(
         rows: list[dict[str, Any]],

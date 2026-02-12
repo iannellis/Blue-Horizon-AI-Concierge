@@ -28,8 +28,7 @@ import heapq
 import logging
 import math
 from collections import OrderedDict
-from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
-from contextvars import ContextVar, Token
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, cast
@@ -70,87 +69,6 @@ if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class EvalInfoToolLog:
-    """Capture tool activity and contexts for evaluation runs.
-
-    Attributes:
-        tool_summary: Compact tool summaries for LangSmith eval.
-        contexts_used: Hydrated context strings used in responses.
-
-    """
-
-    tool_summary: list[dict[str, Any]]
-    contexts_used: list[str]
-
-
-_EVAL_INFO_TOOL_LOG: ContextVar[EvalInfoToolLog | None] = ContextVar(
-    "EVAL_INFO_TOOL_LOG",
-    default=None,
-)
-
-
-def set_eval_info_tool_log(log: EvalInfoToolLog) -> Token[EvalInfoToolLog | None]:
-    """Set the per-task evaluation tool log container.
-
-    Args:
-        log: Log container to use for the current task.
-
-    Returns:
-        Token used to reset the ContextVar to its prior state.
-
-    """
-    return _EVAL_INFO_TOOL_LOG.set(log)
-
-
-def reset_eval_info_tool_log(token: Token[EvalInfoToolLog | None]) -> None:
-    """Reset the evaluation tool log ContextVar.
-
-    Args:
-        token: Token returned by ``set_eval_info_tool_log``.
-
-    """
-    _EVAL_INFO_TOOL_LOG.reset(token)
-
-
-def _log_eval_tool_summary(summary: dict[str, Any]) -> None:
-    """Append a tool summary entry when evaluation logging is enabled.
-
-    Args:
-        summary: Tool summary payload to append.
-
-    """
-    log = get_eval_info_tool_log()
-    if log is None:
-        return
-    log.tool_summary.append(summary)
-
-
-def _log_eval_contexts(contexts: Iterable[str]) -> None:
-    """Append hydrated contexts when evaluation logging is enabled.
-
-    Args:
-        contexts: Iterable of context strings.
-
-    """
-    log = get_eval_info_tool_log()
-    if log is None:
-        return
-    for context in contexts:
-        if context:
-            log.contexts_used.append(str(context))
-
-
-def get_eval_info_tool_log() -> EvalInfoToolLog | None:
-    """Return the active evaluation tool log container, if any.
-
-    Returns:
-        EvalInfoToolLog when set, otherwise ``None``.
-
-    """
-    return _EVAL_INFO_TOOL_LOG.get()
 
 
 # ============================
@@ -456,33 +374,6 @@ def build_filters(  # noqa: PLR0913
 
     return MetadataFilters(filters=filters) if filters else None
 
-
-def _build_eval_filter_payload(parsed: ParsedQuery) -> dict[str, Any] | None:
-    """Build a compact filters payload for evaluation logging.
-
-    Args:
-        parsed: Parsed query containing the extracted constraints.
-
-    Returns:
-        Dict of non-null filter values, or None when no constraints are present.
-
-    """
-    payload: dict[str, Any] = {}
-    if parsed.booking_required is not None:
-        payload["booking_required"] = parsed.booking_required
-    if parsed.min_price is not None:
-        payload["min_price"] = parsed.min_price
-    if parsed.max_price is not None:
-        payload["max_price"] = parsed.max_price
-    if parsed.min_notice_hours is not None:
-        payload["min_notice_hours"] = parsed.min_notice_hours
-    if parsed.max_notice_hours is not None:
-        payload["max_notice_hours"] = parsed.max_notice_hours
-    if parsed.min_duration_minutes is not None:
-        payload["min_duration_minutes"] = parsed.min_duration_minutes
-    if parsed.max_duration_minutes is not None:
-        payload["max_duration_minutes"] = parsed.max_duration_minutes
-    return payload or None
 
 
 def build_index_schema(
@@ -1273,7 +1164,6 @@ class InfoAgentFactory:
 
             async def _node(state: ParsedState) -> dict[str, Any]:
                 parsed = state["parsed"]
-                filters_payload = _build_eval_filter_payload(parsed)
                 filters = build_filters(
                     booking_required=parsed.booking_required,
                     min_price=parsed.min_price,
@@ -1291,31 +1181,10 @@ class InfoAgentFactory:
                     )
                 except OperationalError as exc:
                     logger.warning("%s operational failure: %s", tool_name, exc)
-                    summary: dict[str, Any] = {
-                        "tool": tool_name,
-                        "status": "error",
-                        "error": str(exc),
-                        "filters": filters_payload or {},
-                    }
-                    _log_eval_tool_summary(summary)
                     return {state_key: []}
                 except Exception as exc:  # noqa: BLE001
                     _log_node_failure(tool_name, exc)
-                    summary: dict[str, Any] = {
-                        "tool": tool_name,
-                        "status": "error",
-                        "error": str(exc),
-                        "filters": filters_payload or {},
-                    }
-                    _log_eval_tool_summary(summary)
                     return {state_key: []}
-                summary: dict[str, Any] = {
-                    "tool": tool_name,
-                    "status": "ok",
-                    "count": len(results),
-                    "filters": filters_payload or {},
-                }
-                _log_eval_tool_summary(summary)
                 return {state_key: results}
 
             _node.__name__ = _node.__qualname__ = tool_name + "_node"
@@ -1351,15 +1220,6 @@ class InfoAgentFactory:
                 _log_node_failure("parse", exc)
                 parsed = ParsedQuery(query=_latest_user_text(state["messages"]))
 
-            # Log parsed query for evaluation visibility
-            _log_eval_tool_summary(
-                {
-                    "tool": "parser",
-                    "status": "ok",
-                    "parsed_query": parsed.model_dump(exclude_none=True),
-                },
-            )
-
             return {"parsed": parsed}
 
         async def query_faq_node(state: ParsedState) -> dict[str, Any]:
@@ -1377,19 +1237,10 @@ class InfoAgentFactory:
                 results = await resources.retrieve_faq(query)
             except OperationalError as exc:
                 logger.warning("query_faq operational failure: %s", exc)
-                _log_eval_tool_summary(
-                    {"tool": "query_faq", "status": "error", "error": str(exc)},
-                )
                 return {"faq_results": []}
             except Exception as exc:  # noqa: BLE001
                 _log_node_failure("query_faq", exc)
-                _log_eval_tool_summary(
-                    {"tool": "query_faq", "status": "error", "error": str(exc)},
-                )
                 return {"faq_results": []}
-            _log_eval_tool_summary(
-                {"tool": "query_faq", "status": "ok", "count": len(results)},
-            )
             return {"faq_results": results}
 
         query_amenities_node = _make_catalog_query_node(
@@ -1417,9 +1268,6 @@ class InfoAgentFactory:
                 *state.get("services_results", []),
             ]
             ranked = heapq.nlargest(top_k, all_results, key=lambda x: x.score)
-            _log_eval_tool_summary(
-                {"tool": "reranker", "status": "ok", "count": len(ranked)},
-            )
             return {"top_results": ranked}
 
         async def respond_node(state: InfoState) -> dict[str, Any]:
@@ -1433,21 +1281,6 @@ class InfoAgentFactory:
 
             """
             top_items = state.get("top_results", [])
-
-            # Log contexts with metadata for evaluators and judge LLM
-            contexts_with_metadata = []
-            for item in top_items:
-                if not isinstance(item.text, str) or not item.text:
-                    continue
-                context = item.text
-                if item.metadata:
-                    metadata_str = ", ".join(
-                        f"{k}: {v}" for k, v in item.metadata.items() if v is not None
-                    )
-                    if metadata_str:
-                        context = f"{context}\n[Metadata: {metadata_str}]"
-                contexts_with_metadata.append(context)
-            _log_eval_contexts(contexts_with_metadata)
 
             context_block = _build_context_block(top_items)
             system_prompt = resources.get_system_prompt()

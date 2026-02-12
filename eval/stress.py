@@ -30,7 +30,7 @@ from blue_horizon.agents.rooms import set_eval_schema
 from blue_horizon.config import load_app_config
 from eval._utils import truncate as _truncate
 from eval.config import load_eval_config
-from eval.langsmith_target import OrchestrationManager
+from eval.langsmith_target import EvalCaptureCallback, OrchestrationManager
 from eval.rooms_schema_manager import (
     create_case_schema,
     generate_schema_name,
@@ -611,9 +611,10 @@ def _classify_outcome(text: str) -> str:
     return "success"
 
 
-async def _invoke_orchestration(
+async def _invoke_orchestration(  # noqa: PLR0913
     *,
     orchestration: OrchestrationManager,
+    callback: EvalCaptureCallback,
     thread_id: str,
     prompt: str,
     tags: list[str],
@@ -623,6 +624,7 @@ async def _invoke_orchestration(
 
     Args:
         orchestration: The ready orchestrator.
+        callback: The eval capture callback to attach for this invocation.
         thread_id: The thread identifier for the user.
         prompt: The user prompt.
         tags: LangSmith tags to attach to the trace.
@@ -636,6 +638,7 @@ async def _invoke_orchestration(
         result = await orchestration.ainvoke(
             thread_id=thread_id,
             user_text=prompt,
+            callbacks=[callback],
             tags=tags,
             metadata=metadata,
         )
@@ -678,6 +681,7 @@ def _build_op_entry(  # noqa: PLR0913
     old_check_in: str | None,
     old_check_out: str | None,
     state: UserState,
+    sql_calls: list[dict[str, object]],
 ) -> dict[str, object]:
     """Create a normalized operation log entry.
 
@@ -696,6 +700,7 @@ def _build_op_entry(  # noqa: PLR0913
         old_check_in: The prior check-in date before the operation.
         old_check_out: The prior check-out date before the operation.
         state: The current user state after the operation.
+        sql_calls: Compact summaries of run_sql tool calls from the callback.
 
     Returns:
         The operation log dictionary.
@@ -710,8 +715,11 @@ def _build_op_entry(  # noqa: PLR0913
         "prompt": prompt,
         "latency_ms": round(latency_ms, 2),
         "outcome": outcome,
+        "agent_response": assistant_text or "",
         "assistant_text_trunc": _truncate(assistant_text or "", 300),
     }
+    if sql_calls:
+        op_entry["sql_calls"] = sql_calls
 
     if op_type == "MODIFY":
         op_entry.update(
@@ -833,8 +841,10 @@ async def _run_workload(
                     op_type=build.op_type,
                 )
                 t0 = time.perf_counter()
+                callback = EvalCaptureCallback()
                 assistant_text, outcome, err_text = await _invoke_orchestration(
                     orchestration=orchestration,
+                    callback=callback,
                     thread_id=thread_id,
                     prompt=build.prompt,
                     tags=tags,
@@ -843,6 +853,9 @@ async def _run_workload(
 
                 latency_ms = (time.perf_counter() - t0) * 1000.0
 
+                sql_calls = [
+                    e for e in callback.tool_summary if e.get("tool") == "run_sql"
+                ]
                 _update_booking_state(state, op_type=build.op_type, outcome=outcome)
                 op_entry = _build_op_entry(
                     op_type=build.op_type,
@@ -859,6 +872,7 @@ async def _run_workload(
                     old_check_in=build.old_check_in,
                     old_check_out=build.old_check_out,
                     state=state,
+                    sql_calls=sql_calls,
                 )
 
                 local_ops.append(op_entry)
@@ -1041,6 +1055,30 @@ def _build_summary(  # noqa: PLR0913
     return summary
 
 
+def _is_failure_entry(op: dict[str, object]) -> bool:
+    """Return True when an operation log entry represents a failure worth diagnosing.
+
+    An entry is a failure if it has a Python-level error, an LLM-classified
+    "error" outcome, or any ``run_sql`` call that returned an error from the
+    database layer.
+
+    Args:
+        op: A per-operation log dictionary.
+
+    Returns:
+        ``True`` when the entry should be included in ``stress_failures.jsonl``.
+
+    """
+    if op.get("outcome") == "error" or op.get("error"):
+        return True
+    sql_calls = op.get("sql_calls")
+    if isinstance(sql_calls, list):
+        return any(
+            isinstance(c, dict) and c.get("error") for c in sql_calls
+        )
+    return False
+
+
 def _write_artifacts(
     cfg: StressRunConfig,
     *,
@@ -1048,7 +1086,7 @@ def _write_artifacts(
     user_logs: list[dict[str, object]],
     summary: dict[str, object],
 ) -> None:
-    """Write JSON artifacts for operations, users, and the summary.
+    """Write JSON artifacts for operations, users, summary, and failures.
 
     Args:
         cfg: The stress run configuration.
@@ -1074,6 +1112,24 @@ def _write_artifacts(
     summary_path = run_dir / "stress_summary.json"
     with summary_path.open("w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=True, indent=2)
+
+    failures = [op for op in op_logs if _is_failure_entry(op)]
+    if failures:
+        failures_path = run_dir / "stress_failures.jsonl"
+        with failures_path.open("w", encoding="utf-8") as f:
+            for op in failures:
+                failure_record: dict[str, object] = {
+                    "ts": op.get("ts"),
+                    "user_idx": op.get("user_idx"),
+                    "op_idx": op.get("op_idx"),
+                    "op_type": op.get("op_type"),
+                    "outcome": op.get("outcome"),
+                    "user_query": op.get("prompt"),
+                    "agent_response": op.get("agent_response"),
+                    "error": op.get("error"),
+                    "sql_calls": op.get("sql_calls"),
+                }
+                f.write(json.dumps(failure_record, ensure_ascii=True) + "\n")
 
 
 async def run_stress() -> None:

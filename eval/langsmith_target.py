@@ -726,6 +726,10 @@ class EvalCaptureCallback(AsyncCallbackHandler):
             k_value = _coerce_int(raw_k)
             if k_value is not None:
                 entry["k"] = k_value
+            if tool_name == "run_sql":
+                raw_sql = inputs.get("query")
+                if isinstance(raw_sql, str):
+                    entry["sql_query"] = raw_sql
         self._pending_tool_entries[run_id] = entry
 
     async def on_tool_end(

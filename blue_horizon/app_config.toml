@@ -31,7 +31,7 @@ info_timeout_s = 60
 rooms_timeout_s = 60
 # Maximum concurrent LLM pipeline executions. Prevents token-per-minute
 # exhaustion under high concurrency (e.g. stress tests, production traffic spikes).
-llm_concurrency = 10
+llm_concurrency = 25
 
 [orchestration.prompts]
 # Folder (relative to blue_horizon package root) containing prompt files
@@ -43,7 +43,7 @@ orchestration_prompt_filename = "orchestration.txt"
 # User-facing message when the router explicitly chooses "refuse"
 refusal = "I'm sorry, I cannot help with that query. I can only provide information about the hotel and help with room bookings."
 # User-facing message when an internal error occurs (router failure, parsing failure, etc.)
-error = "Sorry - there was a problem processing your request. Please try again."
+error = "Sorry - there was a problem processing your request. Please try again in a minute."
 # User-facing message when the system is still initializing or temporarily unavailable
 unavailable = "Sorry - the system isn't available at the moment. Please try again shortly."
 

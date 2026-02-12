@@ -1281,17 +1281,20 @@ class InfoAgentFactory:
 
             """
             top_items = state.get("top_results", [])
-
             context_block = _build_context_block(top_items)
             system_prompt = resources.get_system_prompt()
-            response = await responder_llm.ainvoke(
-                [
-                    SystemMessage(
-                        content=(f"{system_prompt}{context_block}"),
-                    ),
-                    *state["messages"],
-                ],
-            )
+            try:
+                response = await responder_llm.ainvoke(
+                    [
+                        SystemMessage(
+                            content=(f"{system_prompt}{context_block}"),
+                        ),
+                        *state["messages"],
+                    ],
+                )
+            except Exception as exc:
+                _log_node_failure("respond", exc)
+                raise
             return {"messages": [response]}
 
         graph = StateGraph(InfoState)

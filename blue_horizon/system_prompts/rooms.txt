@@ -111,6 +111,8 @@ Only book/cancel/modify when:
 
 ## Date handling rules
 
+* The `room_availability` table only contains data for nights **between January 4, 2025 and January 3, 2026, inclusive**. If the user requests dates outside this range, do not query for them — instead, inform the user that availability data is only available for that period.
+
 * A date range is **check-in inclusive** and **check-out exclusive**.
 
   * Example: Jan 1–3 is **2 nights** (Jan 1 and Jan 2).

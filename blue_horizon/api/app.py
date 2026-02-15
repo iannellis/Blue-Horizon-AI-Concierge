@@ -8,12 +8,14 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
+from dotenv import load_dotenv
 from fastapi import APIRouter, FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from blue_horizon.agents.orchestration import OrchestrationManager
 
+load_dotenv()
 
 class ChatPayload(BaseModel):
     """The payload for the chat endpoint.

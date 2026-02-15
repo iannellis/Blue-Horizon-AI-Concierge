@@ -13,7 +13,7 @@ from fastapi import APIRouter, FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from blue_horizon.agents.orchestration import OrchestrationManager
+from blue_horizon.agents.orchestration import OrchestrationManager, format_chat_response
 
 load_dotenv()
 
@@ -86,10 +86,11 @@ async def chat(payload: ChatPayload) -> dict[str, Any]:
         Response dict from the orchestrator containing the agent's response.
 
     """
-    return await orchestrator.ainvoke(
+    result = await orchestrator.ainvoke(
         thread_id=payload.thread_id,
         user_text=payload.text,
     )
+    return format_chat_response(result)
 
 
 app.include_router(router)

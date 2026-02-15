@@ -8,7 +8,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from pydantic import BaseModel
 
 from blue_horizon.agents.orchestration import OrchestrationManager
@@ -51,8 +51,10 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
 
 app = FastAPI(lifespan=lifespan)
 
+router = APIRouter(prefix="/v1")
 
-@app.post("/chat")
+
+@router.post("/chat")
 async def chat(payload: ChatPayload) -> dict[str, Any]:
     """Pass the payload to the agent.
 
@@ -68,3 +70,6 @@ async def chat(payload: ChatPayload) -> dict[str, Any]:
         thread_id=payload.thread_id,
         user_text=payload.text,
     )
+
+
+app.include_router(router)

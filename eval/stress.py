@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import platform
 import random
@@ -45,6 +46,8 @@ if TYPE_CHECKING:
     from psycopg_pool import AsyncConnectionPool
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -321,6 +324,7 @@ async def _init_schema_and_targets(
         RuntimeError: If no bookable targets can be found.
 
     """
+    logger.info("Loading stress schema '%s'...", cfg.schema)
     await create_case_schema(
         pool=pool,
         schema=cfg.schema,
@@ -343,6 +347,12 @@ async def _init_schema_and_targets(
         raise RuntimeError(msg)
 
     hot_targets = targets[: max(0, min(cfg.hot_target_count, len(targets)))]
+    logger.info(
+        "Schema '%s' loaded: %d targets available (%d hot).",
+        cfg.schema,
+        len(targets),
+        len(hot_targets),
+    )
     return token, targets, hot_targets
 
 

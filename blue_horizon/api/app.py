@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import APIRouter, FastAPI
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from blue_horizon.agents.orchestration import OrchestrationManager
@@ -52,6 +53,23 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
 app = FastAPI(lifespan=lifespan)
 
 router = APIRouter(prefix="/v1")
+
+
+@router.get("/health")
+async def health() -> JSONResponse:
+    """Return the readiness status of the orchestrator.
+
+    Returns HTTP 200 when the orchestrator is ready to serve requests, or
+    HTTP 503 while it is still initializing.
+
+    Returns:
+        JSONResponse with ``{"status": "ok"}`` on 200 or
+        ``{"status": "starting"}`` on 503.
+
+    """
+    if orchestrator.is_ready:
+        return JSONResponse({"status": "ok"})
+    return JSONResponse({"status": "starting"}, status_code=503)
 
 
 @router.post("/chat")

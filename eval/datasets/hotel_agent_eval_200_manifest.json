@@ -3,19 +3,19 @@
   "num_cases": 200,
   "distribution": {
     "info_only": 70,
-    "rooms_only": 70,
-    "mixed": 60
+    "rooms_only": 65,
+    "mixed": 65
   },
   "turn_counts": {
     "total_turns": 524,
-    "info_turns": 216,
+    "info_turns": 206,
     "rooms_turns": 278,
-    "refuse_turns": 30,
+    "refuse_turns": 40,
     "labeled_filter_turns": 40
   },
   "refuse_coverage": {
-    "cases_with_refuse_turns": 30,
-    "turns_with_refuse": 30
+    "cases_with_refuse_turns": 40,
+    "turns_with_refuse": 40
   },
   "expected_filters_coverage": {
     "cases_with_any_expected_filters": 30,
@@ -52,7 +52,32 @@
       "case_0014",
       "case_0017",
       "case_0018",
-      "case_0019"
+      "case_0019",
+      "case_0020",
+      "case_0021",
+      "case_0023",
+      "case_0024",
+      "case_0025",
+      "case_0027",
+      "case_0031",
+      "case_0035",
+      "case_0039",
+      "case_0044",
+      "case_0047",
+      "case_0050",
+      "case_0053",
+      "case_0057",
+      "case_0060",
+      "case_0063",
+      "case_0066",
+      "case_0069",
+      "case_0074",
+      "case_0149",
+      "case_0160",
+      "case_0169",
+      "case_0179",
+      "case_0189",
+      "case_0197"
     ],
     "case_ids_with_expected_filters": [
       "case_0002",
@@ -69,7 +94,22 @@
       "case_0045",
       "case_0068",
       "case_0151",
-      "case_0153"
+      "case_0153",
+      "case_0156",
+      "case_0159",
+      "case_0165",
+      "case_0167",
+      "case_0168",
+      "case_0172",
+      "case_0174",
+      "case_0175",
+      "case_0176",
+      "case_0182",
+      "case_0184",
+      "case_0188",
+      "case_0190",
+      "case_0194",
+      "case_0196"
     ],
     "case_ids_with_notice_constraints": [
       "case_0002",
@@ -86,7 +126,21 @@
       "case_0068",
       "case_0151",
       "case_0153",
-      "case_0156"
+      "case_0156",
+      "case_0159",
+      "case_0165",
+      "case_0167",
+      "case_0168",
+      "case_0172",
+      "case_0174",
+      "case_0175",
+      "case_0176",
+      "case_0182",
+      "case_0184",
+      "case_0188",
+      "case_0190",
+      "case_0194",
+      "case_0196"
     ],
     "case_ids_with_duration_constraints": [
       "case_0002",
@@ -103,7 +157,21 @@
       "case_0045",
       "case_0151",
       "case_0153",
-      "case_0156"
+      "case_0156",
+      "case_0159",
+      "case_0165",
+      "case_0167",
+      "case_0168",
+      "case_0172",
+      "case_0174",
+      "case_0175",
+      "case_0176",
+      "case_0182",
+      "case_0184",
+      "case_0188",
+      "case_0190",
+      "case_0194",
+      "case_0196"
     ],
     "case_ids_with_price_constraints": [
       "case_0002",
@@ -120,7 +188,20 @@
       "case_0045",
       "case_0068",
       "case_0151",
-      "case_0156"
+      "case_0156",
+      "case_0159",
+      "case_0165",
+      "case_0167",
+      "case_0168",
+      "case_0172",
+      "case_0174",
+      "case_0175",
+      "case_0182",
+      "case_0184",
+      "case_0188",
+      "case_0190",
+      "case_0194",
+      "case_0196"
     ],
     "case_ids_with_booking_required_constraints": [
       "case_0005",

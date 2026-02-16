@@ -1,0 +1,68 @@
+{
+  "schema": "stress_20260215_182243_0x6lry",
+  "users": 50,
+  "ops_per_user": 5,
+  "max_concurrency": 50,
+  "total_ops": 250,
+  "elapsed_s": 315.712,
+  "ops_per_s": 0.792,
+  "latency_ms": {
+    "mean": 48279.19,
+    "median": 50248.86,
+    "p95": 61646.75
+  },
+  "outcomes": {
+    "success": {
+      "count": 116,
+      "rate": 0.464
+    },
+    "conflict": {
+      "count": 133,
+      "rate": 0.532
+    },
+    "error": {
+      "count": 1,
+      "rate": 0.004
+    }
+  },
+  "invariants": {
+    "double_booking_violations": 0,
+    "null_status_count": 0,
+    "passed": true
+  },
+  "targets": {
+    "total": 20,
+    "hot_count": 5,
+    "hot_targets": [
+      {
+        "room_number": 1109,
+        "check_in": "2025-02-03",
+        "check_out": "2025-02-05"
+      },
+      {
+        "room_number": 1223,
+        "check_in": "2025-02-08",
+        "check_out": "2025-02-10"
+      },
+      {
+        "room_number": 312,
+        "check_in": "2025-02-13",
+        "check_out": "2025-02-15"
+      },
+      {
+        "room_number": 904,
+        "check_in": "2025-03-22",
+        "check_out": "2025-03-24"
+      },
+      {
+        "room_number": 709,
+        "check_in": "2025-03-27",
+        "check_out": "2025-03-29"
+      }
+    ]
+  },
+  "cleanup": {
+    "schema_drop_error": null
+  },
+  "status": "PASS"
+}

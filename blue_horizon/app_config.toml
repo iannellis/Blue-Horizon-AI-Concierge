@@ -8,7 +8,7 @@
 
 [orchestration.llm]
 # Model identifier passed to ChatOpenAI
-model = "gpt-5-nano"
+model = "gpt-5-mini"
 # Sampling temperature
 temperature = 0.0
 # Reasoning effort hint for reasoning models (passed as reasoning={"effort": ...})
@@ -31,7 +31,7 @@ info_timeout_s = 60
 rooms_timeout_s = 60
 # Maximum concurrent LLM pipeline executions. Prevents token-per-minute
 # exhaustion under high concurrency (e.g. stress tests, production traffic spikes).
-llm_concurrency = 25
+llm_concurrency = 15
 
 [orchestration.prompts]
 # Folder (relative to blue_horizon package root) containing prompt files

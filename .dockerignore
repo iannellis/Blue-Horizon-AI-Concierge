@@ -1,0 +1,36 @@
+# Version control
+.git/
+.gitignore
+
+# Python cache
+__pycache__/
+*.py[codz]
+*.pyo
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+
+# Dev tooling and notebooks
+.vscode/
+.logfire/
+notebooks/
+tests/
+eval/
+
+# Secrets — must never enter the image; set these as HF Space secrets instead
+.env
+
+# Poetry / build artefacts — deps are installed from requirements.txt
+pyproject.toml
+poetry.lock
+
+# Data: exclude everything under data/, then re-include only the two pkl files
+# needed at runtime for the rooms SQL reload feature.
+data/
+!data/pandas/rooms.pkl
+!data/pandas/room_availability.pkl
+
+# Docs and local notes
+CLAUDE.md
+AGENTS.md
+todo.txt

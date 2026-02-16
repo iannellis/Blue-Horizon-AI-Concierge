@@ -1,0 +1,7 @@
+[server]
+headless = true
+port = 8501
+# Disable CORS and XSRF checks so Streamlit works correctly behind the nginx
+# reverse proxy without origin-mismatch errors.
+enableCORS = false
+enableXsrfProtection = false

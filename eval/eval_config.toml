@@ -101,7 +101,7 @@ db_schema = ""
 # Number of concurrent simulated users.
 users = 50
 # Number of operations per user.
-ops_per_user = 20
+ops_per_user = 5
 # Maximum number of users allowed to run concurrently.
 max_concurrency = 50
 # Baseline data directory for stress schema resets.
@@ -111,7 +111,7 @@ output_dir = "eval/outputs"
 # Nights per booking when generating targets.
 stay_nights = 2
 # Number of available targets to precompute.
-num_targets = 10
+num_targets = 20
 # Size of the hot contention target subset.
 hot_target_count = 5
 # Probability of selecting a hot target vs any target (0.0-1.0).

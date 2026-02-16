@@ -605,7 +605,7 @@ def _classify_outcome(text: str) -> str:
         One of ``"success"``, ``"conflict"``, or ``"error"``.
 
     """
-    lower = text.lower()
+    lower = text.lower().replace("\u2019", "'").replace("\u2018", "'")
     conflict_markers = [
         "unavailable",
         "no availability",
@@ -613,10 +613,12 @@ def _classify_outcome(text: str) -> str:
         "couldn't",
         "cannot",
         "not available",
+        "isn't available",
+        "i can't",
     ]
     if any(m in lower for m in conflict_markers):
         return "conflict"
-    if any(m in lower for m in ["error", "failed", "exception"]):
+    if any(m in lower for m in ["error", "failed", "exception", "try again"]):
         return "error"
     return "success"
 

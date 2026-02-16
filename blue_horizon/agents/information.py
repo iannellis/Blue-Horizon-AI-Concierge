@@ -1133,7 +1133,7 @@ class InfoAgentFactory:
             timeout=float(llm_cfg.timeout_s),
             max_retries=int(llm_cfg.max_retries),
             reasoning={"effort": llm_cfg.reasoning_effort},
-        ).with_structured_output(ParsedQuery)
+        ).with_structured_output(ParsedQuery, method="function_calling")
         responder_llm = ChatOpenAI(
             model=str(llm_cfg.model),
             temperature=float(llm_cfg.temperature),

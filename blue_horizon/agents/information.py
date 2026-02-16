@@ -597,7 +597,7 @@ class InfoRagResources:
         try:
             await self.redis_async.close()
         finally:
-            self.redis_async.connection_pool.disconnect()
+            await self.redis_async.connection_pool.disconnect()  # type: ignore[misc]
 
     def _render_system_prompt(self) -> str:
         """Render and return the system prompt string.

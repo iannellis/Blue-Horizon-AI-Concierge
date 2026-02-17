@@ -212,7 +212,3 @@ AGENTS.md
 # Claude
 .claude/
 CLAUDE.md
-
-# Data files
-data/csv/
-data/pandas/

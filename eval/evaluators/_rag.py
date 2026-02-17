@@ -425,14 +425,11 @@ def _rag_is_eligible_turn(turn_output: dict[str, object]) -> bool:
         turn_output: Turn output dict from the run outputs.
 
     Returns:
-        True if the turn is an info route or has retrieved contexts.
+        True only when the agent routed the turn to the info path.
 
     """
     route_pred = turn_output.get("route_pred")
-    if isinstance(route_pred, str) and route_pred == "info":
-        return True
-    contexts = turn_output.get("contexts_used")
-    return isinstance(contexts, list) and len(contexts) > 0
+    return isinstance(route_pred, str) and route_pred == "info"
 
 
 def _rag_prepare_contexts(

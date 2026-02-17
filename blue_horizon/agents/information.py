@@ -195,10 +195,11 @@ class ParsedQuery(BaseModel):
     booking_required: bool | None = Field(
         default=None,
         description=(
-            "If the user explicitly requires booking (not cases where booking required "
-            "is just OK or they're fine with booking required), set True. "
-            "If the user explicitly wants no booking (e.g., 'no booking', "
-            "'no reservation', 'walk-in'), set False. "
+            "If the user explicitly requires booking (NOT cases where booking required "
+            "is OK or they're fine with booking required), set True (will almost "
+            "never happen). If the user explicitly wants no booking "
+            "(e.g., 'no booking', 'no reservation', 'walk-in'), set False. "
+            "Do not set otherwise."
             "Do not infer notice requirements from booking status."
         ),
     )

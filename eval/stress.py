@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 
 _DB_RETRY_ATTEMPTS: Final[int] = 3
 _DB_RETRY_DELAY_S: Final[float] = 2.0
+_RECONCILE_MAX_DETAIL: Final[int] = 10
 
 
 @dataclass(frozen=True)
@@ -689,19 +690,40 @@ async def _invoke_orchestration(  # noqa: PLR0913
     return assistant_text, outcome, None
 
 
-def _update_booking_state(state: UserState, *, op_type: str, outcome: str) -> None:
+def _update_booking_state(
+    state: UserState,
+    build: OperationBuildResult,
+    *,
+    outcome: str,
+) -> None:
     """Update booking state based on the operation outcome.
+
+    ``_build_operation_request`` speculatively updates ``state`` with the new
+    room and dates before the agent responds.  This function either confirms
+    that speculative update (on success) or reverts it (on conflict or error).
 
     Args:
         state: The mutable per-user state to update.
-        op_type: The operation type label.
+        build: The operation build result carrying ``op_type`` and the
+            pre-operation room/date values used for reverting on failure.
         outcome: The classified outcome label.
 
     """
-    if op_type == "CANCEL":
-        state.has_booking = False
-    elif outcome != "error":
+    if build.op_type == "CANCEL":
+        if outcome == "success":
+            state.has_booking = False
+            state.last_room_number = None
+            state.last_check_in = None
+            state.last_check_out = None
+        # conflict/error: booking still exists; leave state unchanged
+    elif outcome == "success":
+        # BOOK/MODIFY succeeded; speculative room/dates in state are correct
         state.has_booking = True
+    else:
+        # BOOK/MODIFY conflict or error: revert speculative state update
+        state.last_room_number = build.old_room
+        state.last_check_in = build.old_check_in
+        state.last_check_out = build.old_check_out
 
 
 def _build_op_entry(  # noqa: PLR0913
@@ -894,7 +916,7 @@ async def _run_workload(
                 sql_calls = [
                     e for e in callback.tool_summary if e.get("tool") == "run_sql"
                 ]
-                _update_booking_state(state, op_type=build.op_type, outcome=outcome)
+                _update_booking_state(state, build, outcome=outcome)
                 op_entry = _build_op_entry(
                     op_type=build.op_type,
                     user_idx=user_idx,
@@ -1007,6 +1029,231 @@ async def _check_invariants(
     }
 
 
+def _generate_date_range(check_in: str, check_out: str) -> list[date]:
+    """Generate every date in the half-open interval ``[check_in, check_out)``.
+
+    Args:
+        check_in: ISO-8601 check-in date string (inclusive).
+        check_out: ISO-8601 check-out date string (exclusive).
+
+    Returns:
+        A list of ``date`` objects, one per night of the stay.
+
+    """
+    start = date.fromisoformat(check_in)
+    end = date.fromisoformat(check_out)
+    count = (end - start).days
+    return [start + timedelta(days=i) for i in range(max(0, count))]
+
+
+def _build_thread_final_states(
+    op_logs: list[dict[str, object]],
+) -> dict[str, dict[str, object] | None]:
+    """Walk op_logs in order to compute each thread's expected final booking.
+
+    Successful BOOK and MODIFY ops establish a booking; a successful CANCEL
+    clears it.  Conflict and error outcomes leave the state unchanged.
+
+    Args:
+        op_logs: The per-operation log entries in chronological order.
+
+    Returns:
+        A mapping of thread_id to either a booking dict (keys
+        ``room_number``, ``check_in``, ``check_out``) or ``None`` if the
+        thread ended with no active booking.
+
+    """
+    thread_state: dict[str, dict[str, object] | None] = {}
+    for op in op_logs:
+        thread_id = str(op.get("thread_id", ""))
+        op_type = str(op.get("op_type", ""))
+        outcome = str(op.get("outcome", ""))
+        if outcome != "success":
+            continue
+        if op_type == "BOOK":
+            thread_state[thread_id] = {
+                "room_number": op.get("room_number"),
+                "check_in": str(op.get("check_in", "")),
+                "check_out": str(op.get("check_out", "")),
+            }
+        elif op_type == "MODIFY":
+            thread_state[thread_id] = {
+                "room_number": op.get("new_room_number"),
+                "check_in": str(op.get("new_check_in", "")),
+                "check_out": str(op.get("new_check_out", "")),
+            }
+        elif op_type == "CANCEL":
+            thread_state[thread_id] = None
+    return thread_state
+
+
+async def _fetch_booked_dates(
+    pool: AsyncConnectionPool,
+) -> frozenset[tuple[int, date]]:
+    """Query the database for all (room_number, date) pairs with status='Booked'.
+
+    Args:
+        pool: The open database connection pool.
+
+    Returns:
+        A frozenset of ``(room_number, date)`` tuples currently marked Booked.
+
+    Raises:
+        psycopg.OperationalError: If the query fails after all retry attempts.
+
+    """
+    rows: list[Any] = []
+    for attempt in range(_DB_RETRY_ATTEMPTS):
+        try:
+            async with pool.connection() as conn:
+                await _set_search_path(conn, "public")
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        "SELECT room_number, date"
+                        " FROM room_availability WHERE status = 'Booked'",
+                    )
+                    rows = await cur.fetchall()
+            break
+        except (
+            psycopg.OperationalError,
+            psycopg.InterfaceError,
+            PoolTimeout,
+            TimeoutError,
+        ) as exc:
+            if attempt < _DB_RETRY_ATTEMPTS - 1 and _is_transient_db_error(exc):
+                logger.warning(
+                    "Transient DB error fetching booked dates"
+                    " (attempt %d/%d); retrying.",
+                    attempt + 1,
+                    _DB_RETRY_ATTEMPTS,
+                    exc_info=True,
+                )
+                await asyncio.sleep(_DB_RETRY_DELAY_S * (2**attempt))
+            else:
+                raise
+    return frozenset((int(r[0]), r[1]) for r in rows)
+
+
+def _find_suspicious_conflicts(
+    op_logs: list[dict[str, object]],
+    booked: frozenset[tuple[int, date]],
+) -> list[dict[str, object]]:
+    """Find conflict ops whose targeted room/dates have no booked night in the DB.
+
+    A conflict where none of the targeted nights are booked in the final DB
+    state may indicate the agent incorrectly rejected an available room.  It
+    can also occur legitimately when a booking was made and later cancelled
+    during the run, so the result is informational rather than definitive.
+
+    Args:
+        op_logs: The per-operation log entries in chronological order.
+        booked: The frozenset of ``(room_number, date)`` pairs currently Booked.
+
+    Returns:
+        A list of conflict op summaries where no targeted night is in ``booked``.
+
+    """
+    suspicious: list[dict[str, object]] = []
+    for op in op_logs:
+        if op.get("outcome") != "conflict":
+            continue
+        op_type = str(op.get("op_type", ""))
+        if op_type == "BOOK":
+            room = op.get("room_number")
+            check_in = str(op.get("check_in", ""))
+            check_out = str(op.get("check_out", ""))
+        elif op_type == "MODIFY":
+            room = op.get("new_room_number")
+            check_in = str(op.get("new_check_in", ""))
+            check_out = str(op.get("new_check_out", ""))
+        else:
+            continue
+        if not room or not check_in or not check_out:
+            continue
+        room_num = int(cast("int", room))
+        dates = _generate_date_range(check_in, check_out)
+        if dates and not any((room_num, d) in booked for d in dates):
+            suspicious.append({
+                "thread_id": op.get("thread_id"),
+                "room_number": room,
+                "check_in": check_in,
+                "check_out": check_out,
+                "op_type": op_type,
+            })
+    return suspicious
+
+
+async def _reconcile_with_db(
+    pool: AsyncConnectionPool,
+    op_logs: list[dict[str, object]],
+) -> dict[str, object]:
+    """Reconcile op-log expected bookings against the final database state.
+
+    Two checks are performed:
+
+    1. **Missing bookings**: for each thread whose last successful operation
+       was a BOOK or MODIFY, verify that every night in the booked range is
+       ``status='Booked'`` in the database.  A missing booking that was not
+       subsequently cancelled by the same thread indicates the agent may have
+       reported a false success.
+
+    2. **Suspicious conflicts**: for each BOOK or MODIFY op classified as
+       ``"conflict"``, check whether the targeted room/dates contain *any*
+       booked night in the final database.  If none are booked, the agent may
+       have incorrectly rejected an available room — though this can also occur
+       legitimately when a booking was made and then cancelled during the run.
+
+    Args:
+        pool: The open database connection pool.
+        op_logs: The per-operation log entries in chronological order.
+
+    Returns:
+        A reconciliation dictionary with counts, detail lists capped at
+        ``_RECONCILE_MAX_DETAIL`` entries, and a ``"passed"`` flag that is
+        ``True`` only when ``missing_from_db == 0``.
+
+    """
+    booked = await _fetch_booked_dates(pool)
+    thread_finals = _build_thread_final_states(op_logs)
+
+    expected_count = 0
+    confirmed_count = 0
+    missing: list[dict[str, object]] = []
+
+    for thread_id, booking in thread_finals.items():
+        if booking is None:
+            continue  # thread ended with a successful cancel — nothing to assert
+        expected_count += 1
+        room = booking.get("room_number")
+        check_in = str(booking.get("check_in", ""))
+        check_out = str(booking.get("check_out", ""))
+        if not room or not check_in or not check_out:
+            continue
+        room_num = int(cast("int", room))
+        dates = _generate_date_range(check_in, check_out)
+        if dates and all((room_num, d) in booked for d in dates):
+            confirmed_count += 1
+        else:
+            missing.append({
+                "thread_id": thread_id,
+                "room_number": room,
+                "check_in": check_in,
+                "check_out": check_out,
+            })
+
+    suspicious = _find_suspicious_conflicts(op_logs, booked)
+
+    return {
+        "expected_bookings": expected_count,
+        "confirmed_in_db": confirmed_count,
+        "missing_from_db": len(missing),
+        "missing_from_db_detail": missing[:_RECONCILE_MAX_DETAIL],
+        "suspicious_conflicts": len(suspicious),
+        "suspicious_conflicts_detail": suspicious[:_RECONCILE_MAX_DETAIL],
+        "passed": len(missing) == 0,
+    }
+
+
 def _percentile(sorted_vals: list[float], p: float) -> float:
     """Compute a percentile from a pre-sorted list without numpy.
 
@@ -1029,6 +1276,7 @@ def _build_summary(  # noqa: PLR0913
     *,
     op_logs: list[dict[str, object]],
     invariants: dict[str, object],
+    reconciliation: dict[str, object],
     targets: list[dict[str, object]],
     hot_targets: list[dict[str, object]],
     elapsed_s: float,
@@ -1039,6 +1287,7 @@ def _build_summary(  # noqa: PLR0913
         cfg: The stress run configuration.
         op_logs: The per-operation logs.
         invariants: The invariant check results.
+        reconciliation: The post-hoc log/DB reconciliation results.
         targets: The full target pool.
         hot_targets: The hot contention subset.
         elapsed_s: The total elapsed time in seconds.
@@ -1095,6 +1344,7 @@ def _build_summary(  # noqa: PLR0913
             "error": {"count": error_count, "rate": round(_rate(error_count), 4)},
         },
         "invariants": invariants,
+        "reconciliation": reconciliation,
         "targets": {
             "total": len(targets),
             "hot_count": len(hot_targets),
@@ -1102,7 +1352,11 @@ def _build_summary(  # noqa: PLR0913
         },
     }
 
-    summary["status"] = "PASS" if bool(invariants.get("passed")) else "FAIL"
+    summary["status"] = (
+        "PASS"
+        if bool(invariants.get("passed")) and bool(reconciliation.get("passed"))
+        else "FAIL"
+    )
     return summary
 
 
@@ -1239,6 +1493,7 @@ async def run_stress() -> None:
     op_logs: list[dict[str, object]] = []
     user_logs: list[dict[str, object]] = []
     invariants: dict[str, object] = {}
+    reconciliation: dict[str, object] = {}
 
     start_time = time.perf_counter()
     try:
@@ -1254,6 +1509,7 @@ async def run_stress() -> None:
             hot_targets,
         )
         invariants = await _check_invariants(pool)
+        reconciliation = await _reconcile_with_db(pool, op_logs)
     finally:
         if pool is not None:
             with suppress(Exception):
@@ -1264,6 +1520,7 @@ async def run_stress() -> None:
         cfg,
         op_logs=op_logs,
         invariants=invariants,
+        reconciliation=reconciliation,
         targets=targets,
         hot_targets=hot_targets,
         elapsed_s=elapsed_s,

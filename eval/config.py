@@ -142,6 +142,8 @@ class NeonConfig(BaseModel):
         project_id: Neon project ID (visible in the console URL:
             ``console.neon.tech/app/projects/<project_id>``).
         branch_name: Name of the branch to restore to its parent baseline.
+        lock_retry_attempts: Retry attempts when the branch is locked (HTTP 423).
+        lock_retry_delay_s: Seconds to wait between lock retry attempts.
 
     """
 
@@ -149,6 +151,14 @@ class NeonConfig(BaseModel):
 
     project_id: str
     branch_name: str
+    lock_retry_attempts: Annotated[int, Field(ge=1)] = 8
+    lock_retry_delay_s: Annotated[float, Field(ge=0.0)] = 5.0
+
+    @field_validator("lock_retry_attempts", mode="before")
+    @classmethod
+    def _clamp_to_one(cls, value: int) -> int:
+        """Ensure lock_retry_attempts is at least 1."""
+        return max(1, value)
 
 
 class OrchestrationConfig(BaseModel):
@@ -248,6 +258,9 @@ class StressConfig(BaseModel):
         start_date: Search start date for availability targets.
         horizon_days: Search horizon in days from start_date.
         pool_max: Maximum size of the database connection pool.
+        db_retry_attempts: Retry attempts on transient DB connection errors.
+        db_retry_delay_s: Base delay in seconds between DB retry attempts.
+        reconcile_max_detail: Maximum entries in reconciliation failure detail lists.
 
     """
 
@@ -265,6 +278,9 @@ class StressConfig(BaseModel):
     start_date: date
     horizon_days: Annotated[int, Field(ge=1)]
     pool_max: Annotated[int, Field(ge=1)]
+    db_retry_attempts: Annotated[int, Field(ge=1)] = 3
+    db_retry_delay_s: Annotated[float, Field(ge=0.0)] = 2.0
+    reconcile_max_detail: Annotated[int, Field(ge=1)] = 10
 
     @field_validator(
         "users",
@@ -274,6 +290,8 @@ class StressConfig(BaseModel):
         "num_targets",
         "horizon_days",
         "pool_max",
+        "db_retry_attempts",
+        "reconcile_max_detail",
         mode="before",
     )
     @classmethod

@@ -22,7 +22,7 @@ from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
-from typing import TYPE_CHECKING, Any, Final, cast
+from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
 import psycopg
@@ -44,10 +44,6 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-_DB_RETRY_ATTEMPTS: Final[int] = 3
-_DB_RETRY_DELAY_S: Final[float] = 2.0
-_RECONCILE_MAX_DETAIL: Final[int] = 10
-
 
 @dataclass(frozen=True)
 class StressRunConfig:
@@ -66,6 +62,9 @@ class StressRunConfig:
         start_date: The search start date for available targets.
         horizon_days: The search horizon, in days, for available targets.
         pool_max: The maximum connection pool size.
+        db_retry_attempts: Retry attempts on transient DB connection errors.
+        db_retry_delay_s: Base delay in seconds between DB retry attempts.
+        reconcile_max_detail: Maximum entries in reconciliation failure detail lists.
         db_url: The Postgres connection URL.
 
     """
@@ -82,6 +81,9 @@ class StressRunConfig:
     start_date: date
     horizon_days: int
     pool_max: int
+    db_retry_attempts: int
+    db_retry_delay_s: float
+    reconcile_max_detail: int
     db_url: str
 
 
@@ -155,6 +157,9 @@ def _load_config() -> StressRunConfig:
         start_date=cfg.start_date,
         horizon_days=cfg.horizon_days,
         pool_max=cfg.pool_max,
+        db_retry_attempts=cfg.db_retry_attempts,
+        db_retry_delay_s=cfg.db_retry_delay_s,
+        reconcile_max_detail=cfg.reconcile_max_detail,
         db_url=db_url,
     )
 
@@ -346,7 +351,7 @@ async def _init_branch_and_targets(
     )
 
     targets: list[dict[str, object]] = []
-    for attempt in range(_DB_RETRY_ATTEMPTS):
+    for attempt in range(cfg.db_retry_attempts):
         try:
             async with pool.connection() as conn:
                 await _set_search_path(conn, "public")
@@ -364,14 +369,14 @@ async def _init_branch_and_targets(
             PoolTimeout,
             TimeoutError,
         ) as exc:
-            if attempt < _DB_RETRY_ATTEMPTS - 1 and _is_transient_db_error(exc):
+            if attempt < cfg.db_retry_attempts - 1 and _is_transient_db_error(exc):
                 logger.warning(
                     "Transient DB error fetching targets (attempt %d/%d); retrying.",
                     attempt + 1,
-                    _DB_RETRY_ATTEMPTS,
+                    cfg.db_retry_attempts,
                     exc_info=True,
                 )
-                await asyncio.sleep(_DB_RETRY_DELAY_S * (2**attempt))
+                await asyncio.sleep(cfg.db_retry_delay_s * (2**attempt))
             else:
                 raise
 
@@ -967,11 +972,13 @@ async def _run_workload(
 
 async def _check_invariants(
     pool: AsyncConnectionPool,
+    cfg: StressRunConfig,
 ) -> dict[str, object]:
     """Check deterministic database invariants after the stress run.
 
     Args:
         pool: The open database connection pool pointing at the Neon branch.
+        cfg: The stress run configuration supplying retry settings.
 
     Returns:
         A dictionary describing invariant counts and pass/fail status.
@@ -979,7 +986,7 @@ async def _check_invariants(
     """
     double_booked_rows: list[Any] = []
     null_status_count = 0
-    for attempt in range(_DB_RETRY_ATTEMPTS):
+    for attempt in range(cfg.db_retry_attempts):
         try:
             async with pool.connection() as conn:
                 await _set_search_path(conn, "public")
@@ -1011,14 +1018,14 @@ async def _check_invariants(
             PoolTimeout,
             TimeoutError,
         ) as exc:
-            if attempt < _DB_RETRY_ATTEMPTS - 1 and _is_transient_db_error(exc):
+            if attempt < cfg.db_retry_attempts - 1 and _is_transient_db_error(exc):
                 logger.warning(
                     "Transient DB error checking invariants (attempt %d/%d); retrying.",
                     attempt + 1,
-                    _DB_RETRY_ATTEMPTS,
+                    cfg.db_retry_attempts,
                     exc_info=True,
                 )
-                await asyncio.sleep(_DB_RETRY_DELAY_S * (2**attempt))
+                await asyncio.sleep(cfg.db_retry_delay_s * (2**attempt))
             else:
                 raise
 
@@ -1089,11 +1096,13 @@ def _build_thread_final_states(
 
 async def _fetch_booked_dates(
     pool: AsyncConnectionPool,
+    cfg: StressRunConfig,
 ) -> frozenset[tuple[int, date]]:
     """Query the database for all (room_number, date) pairs with status='Booked'.
 
     Args:
         pool: The open database connection pool.
+        cfg: The stress run configuration supplying retry settings.
 
     Returns:
         A frozenset of ``(room_number, date)`` tuples currently marked Booked.
@@ -1103,7 +1112,7 @@ async def _fetch_booked_dates(
 
     """
     rows: list[Any] = []
-    for attempt in range(_DB_RETRY_ATTEMPTS):
+    for attempt in range(cfg.db_retry_attempts):
         try:
             async with pool.connection() as conn:
                 await _set_search_path(conn, "public")
@@ -1120,15 +1129,15 @@ async def _fetch_booked_dates(
             PoolTimeout,
             TimeoutError,
         ) as exc:
-            if attempt < _DB_RETRY_ATTEMPTS - 1 and _is_transient_db_error(exc):
+            if attempt < cfg.db_retry_attempts - 1 and _is_transient_db_error(exc):
                 logger.warning(
                     "Transient DB error fetching booked dates"
                     " (attempt %d/%d); retrying.",
                     attempt + 1,
-                    _DB_RETRY_ATTEMPTS,
+                    cfg.db_retry_attempts,
                     exc_info=True,
                 )
-                await asyncio.sleep(_DB_RETRY_DELAY_S * (2**attempt))
+                await asyncio.sleep(cfg.db_retry_delay_s * (2**attempt))
             else:
                 raise
     return frozenset((int(r[0]), r[1]) for r in rows)
@@ -1186,6 +1195,7 @@ def _find_suspicious_conflicts(
 async def _reconcile_with_db(
     pool: AsyncConnectionPool,
     op_logs: list[dict[str, object]],
+    cfg: StressRunConfig,
 ) -> dict[str, object]:
     """Reconcile op-log expected bookings against the final database state.
 
@@ -1206,14 +1216,15 @@ async def _reconcile_with_db(
     Args:
         pool: The open database connection pool.
         op_logs: The per-operation log entries in chronological order.
+        cfg: The stress run configuration supplying retry and limit settings.
 
     Returns:
         A reconciliation dictionary with counts, detail lists capped at
-        ``_RECONCILE_MAX_DETAIL`` entries, and a ``"passed"`` flag that is
+        ``cfg.reconcile_max_detail`` entries, and a ``"passed"`` flag that is
         ``True`` only when ``missing_from_db == 0``.
 
     """
-    booked = await _fetch_booked_dates(pool)
+    booked = await _fetch_booked_dates(pool, cfg)
     thread_finals = _build_thread_final_states(op_logs)
 
     expected_count = 0
@@ -1247,9 +1258,9 @@ async def _reconcile_with_db(
         "expected_bookings": expected_count,
         "confirmed_in_db": confirmed_count,
         "missing_from_db": len(missing),
-        "missing_from_db_detail": missing[:_RECONCILE_MAX_DETAIL],
+        "missing_from_db_detail": missing[:cfg.reconcile_max_detail],
         "suspicious_conflicts": len(suspicious),
-        "suspicious_conflicts_detail": suspicious[:_RECONCILE_MAX_DETAIL],
+        "suspicious_conflicts_detail": suspicious[:cfg.reconcile_max_detail],
         "passed": len(missing) == 0,
     }
 
@@ -1508,8 +1519,8 @@ async def run_stress() -> None:
             targets,
             hot_targets,
         )
-        invariants = await _check_invariants(pool)
-        reconciliation = await _reconcile_with_db(pool, op_logs)
+        invariants = await _check_invariants(pool, cfg)
+        reconciliation = await _reconcile_with_db(pool, op_logs, cfg)
     finally:
         if pool is not None:
             with suppress(Exception):

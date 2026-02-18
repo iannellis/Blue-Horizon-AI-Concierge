@@ -16,8 +16,6 @@ from eval.config import load_eval_config
 logger = logging.getLogger(__name__)
 
 _HTTP_LOCKED: Final[int] = 423
-_LOCK_RETRY_ATTEMPTS: Final[int] = 8
-_LOCK_RETRY_DELAY_S: Final[float] = 5.0
 
 
 async def open_schema_pool(
@@ -64,17 +62,27 @@ async def reset_neon_branch(*, project_id: str, branch_name: str) -> None:
         httpx.HTTPStatusError: If the Neon API returns a non-2xx response.
 
     """
-    api_key = load_eval_config().neon_api_key
+    eval_cfg = load_eval_config()
+    api_key = eval_cfg.neon_api_key
     if not api_key:
         msg = "NEON_API_KEY environment variable is not set."
         raise RuntimeError(msg)
+    neon_cfg = eval_cfg.neon
     base_url = "https://console.neon.tech/api/v2"
     headers = {"Authorization": f"Bearer {api_key}"}
     async with httpx.AsyncClient(headers=headers) as client:
         branch_id, parent_id = await _find_neon_branch(
             client, base_url, project_id, branch_name,
         )
-        await _restore_neon_branch(client, base_url, project_id, branch_id, parent_id)
+        await _restore_neon_branch(
+            client,
+            base_url,
+            project_id,
+            branch_id,
+            parent_id,
+            lock_retry_attempts=neon_cfg.lock_retry_attempts,
+            lock_retry_delay_s=neon_cfg.lock_retry_delay_s,
+        )
     logger.info(
         "Neon branch %r in project %r reset to parent.", branch_name, project_id,
     )
@@ -117,17 +125,20 @@ async def _find_neon_branch(
     raise RuntimeError(msg)
 
 
-async def _restore_neon_branch(
+async def _restore_neon_branch(  # noqa: PLR0913
     client: httpx.AsyncClient,
     base_url: str,
     project_id: str,
     branch_id: str,
     parent_id: str,
+    *,
+    lock_retry_attempts: int,
+    lock_retry_delay_s: float,
 ) -> None:
     """Call the Neon restore endpoint to reset a branch to a parent.
 
-    Retries up to ``_LOCK_RETRY_ATTEMPTS`` times when the branch is locked
-    (HTTP 423), waiting ``_LOCK_RETRY_DELAY_S`` seconds between attempts.
+    Retries up to ``lock_retry_attempts`` times when the branch is locked
+    (HTTP 423), waiting ``lock_retry_delay_s`` seconds between attempts.
     This handles ongoing Neon operations that block a restore request.
 
     Args:
@@ -136,6 +147,8 @@ async def _restore_neon_branch(
         project_id: ID of the project that owns the branch.
         branch_id: ID of the branch to restore.
         parent_id: ID of the parent branch to restore from.
+        lock_retry_attempts: Maximum number of retry attempts on HTTP 423.
+        lock_retry_delay_s: Seconds to wait between lock retry attempts.
 
     Raises:
         httpx.HTTPStatusError: If the Neon API returns a non-2xx response
@@ -144,20 +157,20 @@ async def _restore_neon_branch(
     """
     url = f"{base_url}/projects/{project_id}/branches/{branch_id}/restore"
     body: dict[str, str] = {"source_branch_id": parent_id}
-    for attempt in range(_LOCK_RETRY_ATTEMPTS):
+    for attempt in range(lock_retry_attempts):
         response = await client.post(url, json=body)
         if response.status_code != _HTTP_LOCKED:
             response.raise_for_status()
             return
-        if attempt < _LOCK_RETRY_ATTEMPTS - 1:
+        if attempt < lock_retry_attempts - 1:
             logger.warning(
                 "Neon branch %r is locked (attempt %d/%d); waiting %.0fs.",
                 branch_id,
                 attempt + 1,
-                _LOCK_RETRY_ATTEMPTS,
-                _LOCK_RETRY_DELAY_S,
+                lock_retry_attempts,
+                lock_retry_delay_s,
             )
-            await asyncio.sleep(_LOCK_RETRY_DELAY_S)
+            await asyncio.sleep(lock_retry_delay_s)
     response.raise_for_status()
 
 

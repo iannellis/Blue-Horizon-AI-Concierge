@@ -428,19 +428,24 @@ def _choose_target(
     return random.choice(pool)  # noqa: S311
 
 
-def _choose_new_target(
+def _choose_new_target(  # noqa: PLR0913
     *,
     targets: list[dict[str, object]],
     hot_targets: list[dict[str, object]],
+    hot_target_probability: float,
     old_room: int | None,
     old_check_in: str | None,
     old_check_out: str | None,
 ) -> dict[str, object]:
     """Choose a new target that differs from the previous booking if possible.
 
+    Applies the same hot/cold probability split as ``_choose_target`` before
+    searching for a candidate that differs from the current booking.
+
     Args:
         targets: The full candidate target pool.
         hot_targets: The high-contention subset.
+        hot_target_probability: Probability of selecting from hot targets.
         old_room: The prior room number, if known.
         old_check_in: The prior check-in date, if known.
         old_check_out: The prior check-out date, if known.
@@ -449,7 +454,9 @@ def _choose_new_target(
         A chosen target dictionary, preferring a different triplet.
 
     """
-    candidates = list(hot_targets) if hot_targets else list(targets)
+    use_hot = bool(hot_targets) and random.random() < hot_target_probability  # noqa: S311
+    pool = hot_targets if use_hot else targets
+    candidates = list(pool)
     random.shuffle(candidates)
     for cand in candidates:
         if (
@@ -511,6 +518,7 @@ def _build_operation_request(
         new_target = _choose_new_target(
             targets=targets,
             hot_targets=hot_targets,
+            hot_target_probability=hot_target_probability,
             old_room=old_room,
             old_check_in=old_check_in,
             old_check_out=old_check_out,

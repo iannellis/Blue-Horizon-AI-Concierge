@@ -115,3 +115,9 @@ db_retry_attempts = 3
 db_retry_delay_s = 2.0
 # Maximum entries in reconciliation failure detail lists.
 reconcile_max_detail = 10
+# Relative weight for BOOK operations in the op-type mix (need not sum to 1).
+book_weight = 0.5
+# Relative weight for MODIFY operations in the op-type mix.
+modify_weight = 0.25
+# Relative weight for CANCEL operations in the op-type mix.
+cancel_weight = 0.25

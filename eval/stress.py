@@ -65,6 +65,9 @@ class StressRunConfig:
         db_retry_attempts: Retry attempts on transient DB connection errors.
         db_retry_delay_s: Base delay in seconds between DB retry attempts.
         reconcile_max_detail: Maximum entries in reconciliation failure detail lists.
+        book_weight: Relative weight for BOOK operations in the op-type mix.
+        modify_weight: Relative weight for MODIFY operations in the op-type mix.
+        cancel_weight: Relative weight for CANCEL operations in the op-type mix.
         db_url: The Postgres connection URL.
 
     """
@@ -84,6 +87,9 @@ class StressRunConfig:
     db_retry_attempts: int
     db_retry_delay_s: float
     reconcile_max_detail: int
+    book_weight: float
+    modify_weight: float
+    cancel_weight: float
     db_url: str
 
 
@@ -160,6 +166,9 @@ def _load_config() -> StressRunConfig:
         db_retry_attempts=cfg.db_retry_attempts,
         db_retry_delay_s=cfg.db_retry_delay_s,
         reconcile_max_detail=cfg.reconcile_max_detail,
+        book_weight=cfg.book_weight,
+        modify_weight=cfg.modify_weight,
+        cancel_weight=cfg.cancel_weight,
         db_url=db_url,
     )
 
@@ -393,8 +402,11 @@ async def _init_branch_and_targets(
     return targets, hot_targets
 
 
-def _pick_op_type() -> str:
+def _pick_op_type(cfg: StressRunConfig) -> str:
     """Sample an operation type using the configured weights.
+
+    Args:
+        cfg: The stress run configuration supplying op-type weights.
 
     Returns:
         The chosen operation type string.
@@ -402,7 +414,7 @@ def _pick_op_type() -> str:
     """
     return random.choices(  # noqa: S311
         population=["BOOK", "MODIFY", "CANCEL"],
-        weights=[0.5, 0.25, 0.25],
+        weights=[cfg.book_weight, cfg.modify_weight, cfg.cancel_weight],
         k=1,
     )[0]
 
@@ -900,7 +912,7 @@ async def _run_workload(
 
         async with semaphore:
             for op_idx in range(cfg.ops_per_user):
-                op_type = _pick_op_type()
+                op_type = _pick_op_type(cfg)
                 build = _build_operation_request(
                     op_type,
                     state,

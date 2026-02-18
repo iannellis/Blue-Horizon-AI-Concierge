@@ -261,6 +261,9 @@ class StressConfig(BaseModel):
         db_retry_attempts: Retry attempts on transient DB connection errors.
         db_retry_delay_s: Base delay in seconds between DB retry attempts.
         reconcile_max_detail: Maximum entries in reconciliation failure detail lists.
+        book_weight: Relative weight for BOOK operations in the op-type mix.
+        modify_weight: Relative weight for MODIFY operations in the op-type mix.
+        cancel_weight: Relative weight for CANCEL operations in the op-type mix.
 
     """
 
@@ -281,6 +284,9 @@ class StressConfig(BaseModel):
     db_retry_attempts: Annotated[int, Field(ge=1)] = 3
     db_retry_delay_s: Annotated[float, Field(ge=0.0)] = 2.0
     reconcile_max_detail: Annotated[int, Field(ge=1)] = 10
+    book_weight: Annotated[float, Field(ge=0.0)] = 0.5
+    modify_weight: Annotated[float, Field(ge=0.0)] = 0.25
+    cancel_weight: Annotated[float, Field(ge=0.0)] = 0.25
 
     @field_validator(
         "users",

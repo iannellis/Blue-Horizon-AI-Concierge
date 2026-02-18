@@ -8,10 +8,12 @@ RUN apt-get update \
 WORKDIR /app
 
 # ── Python dependencies ────────────────────────────────────────────────────────
-# Copy requirements first so Docker can cache this layer independently of
-# application code changes.
+# Copy requirements and local wheels first so Docker can cache this layer
+# independently of application code changes.
 COPY deploy/requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+COPY assets/ ./assets/
+RUN pip install --no-cache-dir assets/ml_dtypes-0.4.1-cp313-cp313-linux_x86_64.whl \
+    && pip install --no-cache-dir -r requirements.txt
 
 # ── Application code ───────────────────────────────────────────────────────────
 COPY blue_horizon/ ./blue_horizon/

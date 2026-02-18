@@ -12,7 +12,8 @@ from importlib import resources as importlib_resources
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_PACKAGE = "eval"
 _EVAL_CONFIG_RESOURCE = "eval_config.toml"
@@ -134,23 +135,20 @@ class EvaluatorLimitsConfig(BaseModel):
         return max(1, value)
 
 
-class RoomsDataConfig(BaseModel):
-    """Configuration for rooms baseline data used in eval runs.
+class NeonConfig(BaseModel):
+    """Configuration for the Neon branch reset used before each eval run.
 
     Attributes:
-        data_path: Filesystem path to the pickled rooms datasets.
+        project_id: Neon project ID (visible in the console URL:
+            ``console.neon.tech/app/projects/<project_id>``).
+        branch_name: Name of the branch to restore to its parent baseline.
 
     """
 
     model_config = {"frozen": True}
 
-    data_path: Path
-
-    @field_validator("data_path", mode="before")
-    @classmethod
-    def _resolve_data_path(cls, value: object) -> Path:
-        """Resolve data_path relative to repository root."""
-        return _resolve_path(value, base_dir=_BASE_DIR)
+    project_id: str
+    branch_name: str
 
 
 class OrchestrationConfig(BaseModel):
@@ -170,65 +168,6 @@ class OrchestrationConfig(BaseModel):
     def _clamp_timeout(cls, value: float) -> float:
         """Ensure timeout is at least 0.1 seconds."""
         return max(0.1, value)
-
-
-class SchemaSlotsConfig(BaseModel):
-    """Configuration for distributed schema slot throttling.
-
-    Attributes:
-        max_active_schemas: Maximum concurrent schemas (0 disables throttling).
-        stale_after_s: Time before schema slots are considered stale.
-        wait_timeout_s: Time to wait for an available slot.
-        poll_interval_s: Poll interval while waiting for a slot.
-
-    """
-
-    model_config = {"frozen": True}
-
-    max_active_schemas: Annotated[int, Field(ge=0)]
-    stale_after_s: Annotated[int, Field(ge=0)]
-    wait_timeout_s: Annotated[float, Field(ge=0.1)]
-    poll_interval_s: Annotated[float, Field(ge=0.1)]
-
-    @field_validator("max_active_schemas", "stale_after_s", mode="before")
-    @classmethod
-    def _clamp_to_zero(cls, value: int) -> int:
-        """Ensure values are non-negative."""
-        return max(0, value)
-
-    @field_validator("wait_timeout_s", "poll_interval_s", mode="before")
-    @classmethod
-    def _clamp_timeout(cls, value: float) -> float:
-        """Ensure timeout values are at least 0.1 seconds."""
-        return max(0.1, value)
-
-
-class ResetPoolConfig(BaseModel):
-    """Configuration for schema reset connection pools.
-
-    Attributes:
-        max_size: Maximum pool size.
-        min_size: Minimum pool size.
-
-    """
-
-    model_config = {"frozen": True}
-
-    max_size: Annotated[int, Field(ge=1)]
-    min_size: Annotated[int, Field(ge=1)]
-
-    @field_validator("max_size", "min_size", mode="before")
-    @classmethod
-    def _clamp_to_one(cls, value: int) -> int:
-        """Ensure pool sizes are at least 1."""
-        return max(1, value)
-
-    @model_validator(mode="after")
-    def _validate_pool_sizes(self) -> ResetPoolConfig:
-        """Ensure min_size <= max_size."""
-        if self.min_size > self.max_size:
-            object.__setattr__(self, "min_size", self.max_size)
-        return self
 
 
 class JudgeConfig(BaseModel):
@@ -297,12 +236,11 @@ class StressConfig(BaseModel):
     """Configuration for stress-test runs.
 
     Attributes:
-        db_schema: Optional database schema name override for the stress run.
         users: Number of concurrent simulated users.
         ops_per_user: Number of operations per user.
         max_concurrency: Maximum concurrent users.
-        baseline_data_path: Baseline data directory for schema setup.
         output_dir: Base output directory for stress artifacts.
+        log_dir: Directory for stress run logs.
         stay_nights: Nights per booking in generated targets.
         num_targets: Number of available targets to precompute.
         hot_target_count: Hot contention target subset size.
@@ -315,12 +253,11 @@ class StressConfig(BaseModel):
 
     model_config = {"frozen": True}
 
-    db_schema: str | None = None
     users: Annotated[int, Field(ge=1)]
     ops_per_user: Annotated[int, Field(ge=1)]
     max_concurrency: Annotated[int, Field(ge=1)]
-    baseline_data_path: Path
     output_dir: Path
+    log_dir: Path
     stay_nights: Annotated[int, Field(ge=1)]
     num_targets: Annotated[int, Field(ge=1)]
     hot_target_count: Annotated[int, Field(ge=0)]
@@ -328,14 +265,6 @@ class StressConfig(BaseModel):
     start_date: date
     horizon_days: Annotated[int, Field(ge=1)]
     pool_max: Annotated[int, Field(ge=1)]
-
-    @field_validator("db_schema", mode="before")
-    @classmethod
-    def _empty_str_to_none(cls, value: object) -> object:
-        """Convert empty strings to None for optional db_schema."""
-        if isinstance(value, str) and not value.strip():
-            return None
-        return value
 
     @field_validator(
         "users",
@@ -358,42 +287,59 @@ class StressConfig(BaseModel):
         """Ensure hot_target_count is non-negative."""
         return max(0, value)
 
-    @field_validator("baseline_data_path", "output_dir", mode="before")
+    @field_validator("output_dir", "log_dir", mode="before")
     @classmethod
     def _resolve_paths(cls, value: object) -> Path:
         """Resolve paths relative to repository root."""
         return _resolve_path(value, base_dir=_BASE_DIR)
 
 
-class EvalConfig(BaseModel):
+class EvalConfig(BaseSettings):
     """Parsed evaluation configuration container.
+
+    TOML configuration is loaded via ``load_eval_config()``.  Environment
+    variables are read from the process environment or a ``.env`` file.
 
     Attributes:
         experiment: Experiment execution settings.
         metadata: Optional LangSmith metadata values.
         evaluator_limits: Limits used by evaluators and summaries.
-        rooms: Rooms dataset paths.
+        neon: Neon branch reset configuration for eval runs.
         orchestration: Orchestration readiness timing.
-        schema_slots: Schema slot throttling parameters.
-        reset_pool: Schema reset pool sizes.
         judge: Judge model configuration.
         ragas: Ragas scoring configuration.
         stress: Stress-test configuration values.
+        pgsql_eval_db_url: PostgreSQL database URL override for eval runs.
+            When set, takes precedence over ``PGSQL_DB_URL`` for the rooms
+            agent and evaluator pool connections.
+        neon_api_key: API key for authenticating with the Neon management API,
+            required when resetting a Neon branch before an eval or stress run.
 
     """
 
-    model_config = {"frozen": True}
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        frozen=True,
+    )
 
     experiment: ExperimentConfig
     metadata: MetadataConfig
     evaluator_limits: EvaluatorLimitsConfig
-    rooms: RoomsDataConfig
+    neon: NeonConfig
     orchestration: OrchestrationConfig
-    schema_slots: SchemaSlotsConfig
-    reset_pool: ResetPoolConfig
     judge: JudgeConfig
     ragas: RagasConfig
     stress: StressConfig
+    pgsql_eval_db_url: str | None = Field(
+        default=None,
+        validation_alias="PGSQL_EVAL_DB_URL",
+    )
+    neon_api_key: str | None = Field(
+        default=None,
+        validation_alias="NEON_API_KEY",
+    )
 
 
 @lru_cache(maxsize=1)

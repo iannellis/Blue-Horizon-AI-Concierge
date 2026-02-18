@@ -7,13 +7,10 @@ checks, ensuring booking operations behave correctly.
 from __future__ import annotations
 
 import asyncio
-import os
 from typing import TYPE_CHECKING, Any, TypeGuard
 
-from psycopg import sql
 from psycopg_pool import AsyncConnectionPool
 
-from blue_horizon.agents.rooms import EVAL_SCHEMA
 from eval._utils import coerce_int, json_value
 from eval.config import load_eval_config
 from eval.evaluators._common import (
@@ -437,10 +434,7 @@ def _format_rowcount_metric(counts: dict[str, int]) -> tuple[float, str]:
 
 
 async def _check_rooms_db_invariants() -> list[dict[str, Any]]:
-    """Check rooms DB invariants in the current evaluation schema.
-
-    Uses the ``EVAL_SCHEMA`` ContextVar to determine the schema.  Falls back
-    to ``public`` when the variable is unset.
+    """Check rooms DB invariants in the public schema.
 
     Returns:
         List of LangSmith metric dicts for DB invariants.
@@ -450,13 +444,8 @@ async def _check_rooms_db_invariants() -> list[dict[str, Any]]:
     double_booking_rows = 0
     null_status_count = 0
 
-    eval_schema = EVAL_SCHEMA.get() or "public"
     async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute(
-            sql.SQL("SET search_path TO {};").format(
-                sql.Identifier(eval_schema),
-            ),
-        )
+        await cur.execute("SET search_path TO public;")
 
         await cur.execute(
             """
@@ -549,7 +538,7 @@ async def _get_eval_db_url() -> str:
         RuntimeError: If no database URL is available.
 
     """
-    env_url = os.getenv("EVAL_DB_URL")
+    env_url = load_eval_config().pgsql_eval_db_url
     if env_url:
         return env_url
 

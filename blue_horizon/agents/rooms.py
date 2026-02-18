@@ -23,7 +23,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from contextvars import ContextVar, Token
 from typing import TYPE_CHECKING, Any, Final, LiteralString, cast
 
 import psycopg
@@ -53,37 +52,6 @@ ENUM_TYPES: Final[tuple[str, ...]] = (
     "room_status_type",
     "room_type",
 )
-
-EVAL_SCHEMA: ContextVar[str | None] = ContextVar("EVAL_SCHEMA", default=None)
-"""Per-task schema override used by the stress-test harness.
-
-When set, ``execute_sql`` routes queries to this schema instead of
-``public``.
-"""
-
-
-def set_eval_schema(schema: str) -> Token[str | None]:
-    """Set the evaluation schema for the current async context.
-
-    Args:
-        schema: The PostgreSQL schema name to route queries to.
-
-    Returns:
-        A ``ContextVar`` token that can be passed to ``reset_eval_schema``
-        to restore the previous value.
-
-    """
-    return EVAL_SCHEMA.set(schema)
-
-
-def reset_eval_schema(token: Token[str | None]) -> None:
-    """Reset the evaluation schema to its previous value.
-
-    Args:
-        token: The token returned by a prior ``set_eval_schema`` call.
-
-    """
-    EVAL_SCHEMA.reset(token)
 
 
 # ============================
@@ -679,15 +647,7 @@ class RoomsSqlResources:
                     self.pool.connection(timeout=self.config.db.pool.timeout_s) as conn,
                     conn.cursor(row_factory=dict_row) as cur,
                 ):
-                    eval_schema = EVAL_SCHEMA.get()
-                    if eval_schema is not None:
-                        await cur.execute(
-                            sql.SQL("SET search_path TO {};").format(
-                                sql.Identifier(eval_schema),
-                            ),
-                        )
-                    else:
-                        await cur.execute("SET search_path TO public;")
+                    await cur.execute("SET search_path TO public;")
 
                     # NOTE: psycopg's type stubs expect a LiteralString for `execute()`.
                     # This cast is only to satisfy static type checkers. Runtime safety

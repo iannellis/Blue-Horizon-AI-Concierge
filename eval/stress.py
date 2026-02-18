@@ -14,33 +14,28 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import platform
 import random
 import statistics
 import time
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, Final, cast
 from uuid import uuid4
 
+import psycopg
 from dotenv import load_dotenv
+from psycopg_pool import PoolTimeout
 
-from blue_horizon.agents.rooms import set_eval_schema
 from blue_horizon.config import load_app_config
 from eval._utils import truncate as _truncate
-from eval.config import load_eval_config
+from eval.config import NeonConfig, load_eval_config
 from eval.langsmith_target import EvalCaptureCallback, OrchestrationManager
-from eval.rooms_schema_manager import (
-    create_case_schema,
-    generate_schema_name,
-    open_schema_pool,
-    teardown_schema,
-)
+from eval.rooms_db_manager import open_schema_pool, reset_neon_branch
 
 if TYPE_CHECKING:
-    from contextvars import Token
     from pathlib import Path
 
     from psycopg_pool import AsyncConnectionPool
@@ -49,18 +44,20 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+_DB_RETRY_ATTEMPTS: Final[int] = 3
+_DB_RETRY_DELAY_S: Final[float] = 2.0
+
 
 @dataclass(frozen=True)
 class StressRunConfig:
     """Configuration for a single stress run.
 
     Attributes:
-        schema: The shared schema name for the run.
         users: The number of concurrent simulated users.
         ops_per_user: The number of operations per user.
         max_concurrency: The maximum concurrent users allowed at once.
-        baseline_data_path: The baseline data directory passed to schema reset.
         output_dir: The base output directory for artifacts.
+        log_dir: The directory for stress run log files.
         stay_nights: The length of stay in nights for generated targets.
         num_targets: The number of available targets to precompute.
         hot_target_count: The size of the hot contention target subset.
@@ -72,12 +69,11 @@ class StressRunConfig:
 
     """
 
-    schema: str
     users: int
     ops_per_user: int
     max_concurrency: int
-    baseline_data_path: str
     output_dir: Path
+    log_dir: Path
     stay_nights: int
     num_targets: int
     hot_target_count: int
@@ -139,39 +135,25 @@ def _load_config() -> StressRunConfig:
 
     """
     cfg = load_eval_config().stress
-    schema = cfg.db_schema or generate_schema_name("stress")
-    users = cfg.users
-    ops_per_user = cfg.ops_per_user
-    max_concurrency = cfg.max_concurrency
-    baseline_data_path = str(cfg.baseline_data_path)
-    output_dir = cfg.output_dir
-    stay_nights = cfg.stay_nights
-    num_targets = cfg.num_targets
-    hot_target_count = cfg.hot_target_count
-    hot_target_probability = cfg.hot_target_probability
-    start_date = cfg.start_date
-    horizon_days = cfg.horizon_days
-    pool_max = cfg.pool_max
 
-    db_url = os.getenv("EVAL_DB_URL") or load_app_config().pgsql_db_url
+    db_url = load_eval_config().pgsql_eval_db_url or load_app_config().pgsql_db_url
     if not db_url:
         msg = "Database URL is required but was not found"
         raise RuntimeError(msg)
 
     return StressRunConfig(
-        schema=schema,
-        users=users,
-        ops_per_user=ops_per_user,
-        max_concurrency=max_concurrency,
-        baseline_data_path=baseline_data_path,
-        output_dir=output_dir,
-        stay_nights=stay_nights,
-        num_targets=num_targets,
-        hot_target_count=hot_target_count,
-        hot_target_probability=hot_target_probability,
-        start_date=start_date,
-        horizon_days=horizon_days,
-        pool_max=pool_max,
+        users=cfg.users,
+        ops_per_user=cfg.ops_per_user,
+        max_concurrency=cfg.max_concurrency,
+        output_dir=cfg.output_dir,
+        log_dir=cfg.log_dir,
+        stay_nights=cfg.stay_nights,
+        num_targets=cfg.num_targets,
+        hot_target_count=cfg.hot_target_count,
+        hot_target_probability=cfg.hot_target_probability,
+        start_date=cfg.start_date,
+        horizon_days=cfg.horizon_days,
+        pool_max=cfg.pool_max,
         db_url=db_url,
     )
 
@@ -307,40 +289,90 @@ async def find_available_targets(
     return targets
 
 
-async def _init_schema_and_targets(
-    pool: AsyncConnectionPool,
-    cfg: StressRunConfig,
-) -> tuple[Token[str | None], list[dict[str, object]], list[dict[str, object]]]:
-    """Create the stress schema, set search path, and find targets.
+def _is_transient_db_error(exc: BaseException) -> bool:
+    """Return True if the exception looks like a transient DB connection failure.
 
     Args:
-        pool: The open database connection pool.
-        cfg: The stress run configuration.
+        exc: The exception raised by psycopg or psycopg_pool.
 
     Returns:
-        A tuple of ``(token, targets, hot_targets)``.
-
-    Raises:
-        RuntimeError: If no bookable targets can be found.
+        True if the exception is a known transient connection error.
 
     """
-    logger.info("Loading stress schema '%s'...", cfg.schema)
-    await create_case_schema(
-        pool=pool,
-        schema=cfg.schema,
-        data_path=cfg.baseline_data_path,
+    if isinstance(exc, (PoolTimeout, TimeoutError)):
+        return True
+    msg = str(exc).lower()
+    patterns = (
+        "ssl connection has been closed unexpectedly",
+        "server closed the connection unexpectedly",
+        "connection is closed",
+        "connection not open",
+        "terminating connection",
     )
-    token = set_eval_schema(cfg.schema)
+    return any(p in msg for p in patterns)
 
-    async with pool.connection() as conn:
-        await _set_search_path(conn, cfg.schema)
-        targets = await find_available_targets(
-            conn,
-            num_targets=cfg.num_targets,
-            stay_nights=cfg.stay_nights,
-            start_date=cfg.start_date,
-            horizon_days=cfg.horizon_days,
-        )
+
+async def _init_branch_and_targets(
+    pool: AsyncConnectionPool,
+    cfg: StressRunConfig,
+    neon_cfg: NeonConfig,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Reset the Neon branch and discover bookable contention targets.
+
+    Resets the configured Neon branch to its parent baseline, then queries
+    the database to find bookable availability spans for the workload.
+
+    Args:
+        pool: The open database connection pool pointing at the Neon branch.
+        cfg: The stress run configuration.
+        neon_cfg: Neon project and branch settings from eval config.
+
+    Returns:
+        A tuple of ``(targets, hot_targets)``.
+
+    Raises:
+        RuntimeError: If no bookable targets can be found after the reset.
+
+    """
+    logger.info(
+        "Resetting Neon branch %r in project %r for stress run.",
+        neon_cfg.branch_name,
+        neon_cfg.project_id,
+    )
+    await reset_neon_branch(
+        project_id=neon_cfg.project_id,
+        branch_name=neon_cfg.branch_name,
+    )
+
+    targets: list[dict[str, object]] = []
+    for attempt in range(_DB_RETRY_ATTEMPTS):
+        try:
+            async with pool.connection() as conn:
+                await _set_search_path(conn, "public")
+                targets = await find_available_targets(
+                    conn,
+                    num_targets=cfg.num_targets,
+                    stay_nights=cfg.stay_nights,
+                    start_date=cfg.start_date,
+                    horizon_days=cfg.horizon_days,
+                )
+            break
+        except (
+            psycopg.OperationalError,
+            psycopg.InterfaceError,
+            PoolTimeout,
+            TimeoutError,
+        ) as exc:
+            if attempt < _DB_RETRY_ATTEMPTS - 1 and _is_transient_db_error(exc):
+                logger.warning(
+                    "Transient DB error fetching targets (attempt %d/%d); retrying.",
+                    attempt + 1,
+                    _DB_RETRY_ATTEMPTS,
+                    exc_info=True,
+                )
+                await asyncio.sleep(_DB_RETRY_DELAY_S * (2**attempt))
+            else:
+                raise
 
     if not targets:
         msg = "No bookable targets found"
@@ -348,12 +380,11 @@ async def _init_schema_and_targets(
 
     hot_targets = targets[: max(0, min(cfg.hot_target_count, len(targets)))]
     logger.info(
-        "Schema '%s' loaded: %d targets available (%d hot).",
-        cfg.schema,
+        "Branch reset complete: %d targets available (%d hot).",
         len(targets),
         len(hot_targets),
     )
-    return token, targets, hot_targets
+    return targets, hot_targets
 
 
 def _pick_op_type() -> str:
@@ -522,7 +553,6 @@ def _build_operation_request(
 
 def _build_trace_context(
     *,
-    cfg: StressRunConfig,
     user_idx: int,
     op_idx: int,
     op_type: str,
@@ -530,7 +560,6 @@ def _build_trace_context(
     """Build LangSmith tags and metadata for a stress operation.
 
     Args:
-        cfg: The stress run configuration.
         user_idx: The user index for the operation.
         op_idx: The operation index for the user.
         op_type: The operation type label.
@@ -543,13 +572,11 @@ def _build_trace_context(
         "stress",
         f"user:{user_idx}",
         f"op:{op_idx}",
-        f"schema:{cfg.schema}",
         f"op_type:{op_type}",
     ]
     metadata = {
         "user_idx": user_idx,
         "op_idx": op_idx,
-        "schema": cfg.schema,
         "op_type": op_type,
     }
     return tags, metadata
@@ -847,7 +874,6 @@ async def _run_workload(
                     hot_target_probability=cfg.hot_target_probability,
                 )
                 tags, metadata = _build_trace_context(
-                    cfg=cfg,
                     user_idx=user_idx,
                     op_idx=op_idx,
                     op_type=build.op_type,
@@ -919,40 +945,60 @@ async def _run_workload(
 
 async def _check_invariants(
     pool: AsyncConnectionPool,
-    schema: str,
 ) -> dict[str, object]:
-    """Check deterministic database invariants in the stress schema.
+    """Check deterministic database invariants after the stress run.
 
     Args:
-        pool: The open database connection pool.
-        schema: The schema name to set as the search path.
+        pool: The open database connection pool pointing at the Neon branch.
 
     Returns:
         A dictionary describing invariant counts and pass/fail status.
 
     """
-    async with pool.connection() as conn:
-        await _set_search_path(conn, schema)
-        async with conn.cursor() as cur:
-            await cur.execute(
-                """
-                SELECT room_number, date, COUNT(*) AS c
-                FROM room_availability
-                WHERE status = 'Booked'
-                GROUP BY room_number, date
-                HAVING COUNT(*) > 1
-                """,
-            )
-            double_booked_rows = await cur.fetchall()
+    double_booked_rows: list[Any] = []
+    null_status_count = 0
+    for attempt in range(_DB_RETRY_ATTEMPTS):
+        try:
+            async with pool.connection() as conn:
+                await _set_search_path(conn, "public")
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        """
+                        SELECT room_number, date, COUNT(*) AS c
+                        FROM room_availability
+                        WHERE status = 'Booked'
+                        GROUP BY room_number, date
+                        HAVING COUNT(*) > 1
+                        """,
+                    )
+                    double_booked_rows = await cur.fetchall()
 
-            await cur.execute(
-                "SELECT COUNT(*) AS c FROM room_availability WHERE status IS NULL",
-            )
-            row = await cur.fetchone()
-            if row is None:
-                msg = "Expected a count row for null status invariant query"
-                raise RuntimeError(msg)
-            null_status_count = cast("int", row[0])
+                    await cur.execute(
+                        "SELECT COUNT(*) AS c"
+                        " FROM room_availability WHERE status IS NULL",
+                    )
+                    row = await cur.fetchone()
+                    if row is None:
+                        msg = "Expected a count row for null status invariant query"
+                        raise RuntimeError(msg)
+                    null_status_count = cast("int", row[0])
+            break
+        except (
+            psycopg.OperationalError,
+            psycopg.InterfaceError,
+            PoolTimeout,
+            TimeoutError,
+        ) as exc:
+            if attempt < _DB_RETRY_ATTEMPTS - 1 and _is_transient_db_error(exc):
+                logger.warning(
+                    "Transient DB error checking invariants (attempt %d/%d); retrying.",
+                    attempt + 1,
+                    _DB_RETRY_ATTEMPTS,
+                    exc_info=True,
+                )
+                await asyncio.sleep(_DB_RETRY_DELAY_S * (2**attempt))
+            else:
+                raise
 
     return {
         "double_booking_violations": len(double_booked_rows),
@@ -986,7 +1032,6 @@ def _build_summary(  # noqa: PLR0913
     targets: list[dict[str, object]],
     hot_targets: list[dict[str, object]],
     elapsed_s: float,
-    schema_drop_error: str | None,
 ) -> dict[str, object]:
     """Compute summary statistics and status for the stress run.
 
@@ -997,7 +1042,6 @@ def _build_summary(  # noqa: PLR0913
         targets: The full target pool.
         hot_targets: The hot contention subset.
         elapsed_s: The total elapsed time in seconds.
-        schema_drop_error: Any schema drop error message.
 
     Returns:
         The stress summary dictionary.
@@ -1031,7 +1075,6 @@ def _build_summary(  # noqa: PLR0913
         return (count / total_ops) if total_ops else 0.0
 
     summary: dict[str, object] = {
-        "schema": cfg.schema,
         "users": cfg.users,
         "ops_per_user": cfg.ops_per_user,
         "max_concurrency": cfg.max_concurrency,
@@ -1057,13 +1100,9 @@ def _build_summary(  # noqa: PLR0913
             "hot_count": len(hot_targets),
             "hot_targets": hot_targets,
         },
-        "cleanup": {
-            "schema_drop_error": schema_drop_error,
-        },
     }
 
-    passed = bool(invariants.get("passed")) and schema_drop_error is None
-    summary["status"] = "PASS" if passed else "FAIL"
+    summary["status"] = "PASS" if bool(invariants.get("passed")) else "FAIL"
     return summary
 
 
@@ -1144,43 +1183,81 @@ def _write_artifacts(
                 f.write(json.dumps(failure_record, ensure_ascii=True) + "\n")
 
 
-async def run_stress() -> None:
-    """Execute a full stress run against a shared evaluation schema.
+def _configure_logging(run_name: str, log_dir: Path) -> None:
+    """Configure logging for the stress run.
 
-    This routine initializes the orchestrator and database pool once, creates
-    and loads a shared stress schema, discovers bookable contention targets,
-    runs concurrent user workloads, asserts database invariants, writes JSON
-    artifacts, and performs best-effort cleanup.
+    Attaches both a file handler (``<log_dir>/<run_name>.log``) and a stderr
+    stream handler so that progress is visible in the terminal as well as
+    persisted to disk.
+
+    Args:
+        run_name: Name of the current stress run, used as the log filename stem.
+        log_dir: Directory where log files should be written.
+
+    """
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"{run_name}.log"
+
+    formatter = logging.Formatter(
+        "%(asctime)s %(levelname)-8s [%(name)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(logging.INFO)
+    stream_handler.setFormatter(formatter)
+
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.addHandler(file_handler)
+    root.addHandler(stream_handler)
+
+
+async def run_stress() -> None:
+    """Execute a full stress run against the Neon development branch.
+
+    Resets the Neon branch to its parent baseline, initializes the orchestrator
+    and database pool, discovers bookable contention targets, runs concurrent
+    user workloads, asserts database invariants, and writes JSON artifacts.
 
     Raises:
         TimeoutError: If the orchestrator does not become ready within 30s.
-        RuntimeError: If no bookable targets can be found.
+        RuntimeError: If no bookable targets can be found after the branch reset.
 
     """
     cfg = _load_config()
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    _configure_logging(f"stress_{ts}", cfg.log_dir)
+    neon_cfg = load_eval_config().neon
     pool: AsyncConnectionPool | None = None
-    token: Token[str | None] | None = None
     targets: list[dict[str, object]] = []
     hot_targets: list[dict[str, object]] = []
     op_logs: list[dict[str, object]] = []
     user_logs: list[dict[str, object]] = []
     invariants: dict[str, object] = {}
-    schema_drop_error: str | None = None
 
     start_time = time.perf_counter()
     try:
         orchestration = await _start_orchestration()
         pool = await open_schema_pool(cfg.db_url, max_size=cfg.pool_max)
-        token, targets, hot_targets = await _init_schema_and_targets(pool, cfg)
+        targets, hot_targets = await _init_branch_and_targets(
+            pool, cfg, neon_cfg,
+        )
         op_logs, user_logs = await _run_workload(
             orchestration,
             cfg,
             targets,
             hot_targets,
         )
-        invariants = await _check_invariants(pool, cfg.schema)
+        invariants = await _check_invariants(pool)
     finally:
-        schema_drop_error = await teardown_schema(token, pool, cfg.schema)
+        if pool is not None:
+            with suppress(Exception):
+                await pool.close()
 
     elapsed_s = max(0.0, time.perf_counter() - start_time)
     summary = _build_summary(
@@ -1190,7 +1267,6 @@ async def run_stress() -> None:
         targets=targets,
         hot_targets=hot_targets,
         elapsed_s=elapsed_s,
-        schema_drop_error=schema_drop_error,
     )
     _write_artifacts(
         cfg,

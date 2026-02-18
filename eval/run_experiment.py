@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import json
 import logging
+import os
 import platform
 import re
 from collections.abc import Iterable, Mapping, MutableMapping
@@ -17,7 +18,6 @@ from dotenv import load_dotenv
 from langsmith import Client
 from langsmith.evaluation import aevaluate
 
-from blue_horizon.agents.rooms import set_eval_schema
 from blue_horizon.config import load_app_config
 from eval._utils import json_safe
 from eval.config import MetadataConfig, load_eval_config
@@ -31,19 +31,12 @@ from eval.evaluators import (
     eval_routing_accuracy,
 )
 from eval.langsmith_target import run_example
-from eval.rooms_schema_manager import (
-    create_case_schema,
-    generate_schema_name,
-    open_schema_pool,
-    teardown_schema,
-)
+from eval.rooms_db_manager import reset_neon_branch
 
 if TYPE_CHECKING:
-    from contextvars import Token
     from pathlib import Path
 
     from langsmith.schemas import Example
-    from psycopg_pool import AsyncConnectionPool
 
     from eval.config import EvalConfig
 
@@ -143,10 +136,11 @@ class ResultLike(SupportsAttrs, Protocol):
 
 
 def _configure_logging(experiment_name: str, log_dir: Path) -> None:
-    """Configure file-based logging for the evaluation run.
+    """Configure logging for the evaluation run.
 
-    Writes logs to ``<log_dir>/<experiment_name>.log`` using a file handler.
-    Preserves any existing console handlers for color-coded terminal output.
+    Attaches both a file handler (``<log_dir>/<experiment_name>.log``) and a
+    stderr stream handler so that progress is visible in the terminal as well
+    as persisted to disk.
 
     Args:
         experiment_name: Name of the current experiment, used as the log
@@ -157,18 +151,23 @@ def _configure_logging(experiment_name: str, log_dir: Path) -> None:
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"{experiment_name}.log"
 
+    formatter = logging.Formatter(
+        "%(asctime)s %(levelname)-8s [%(name)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
     file_handler = logging.FileHandler(log_path, encoding="utf-8")
     file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(
-        logging.Formatter(
-            "%(asctime)s %(levelname)-8s [%(name)s] %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        ),
-    )
+    file_handler.setFormatter(formatter)
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(logging.INFO)
+    stream_handler.setFormatter(formatter)
 
     root = logging.getLogger()
     root.setLevel(logging.INFO)
     root.addHandler(file_handler)
+    root.addHandler(stream_handler)
 
 
 def _sanitize_notes(notes: str) -> str:
@@ -308,36 +307,51 @@ def _has_rooms_cases(examples: Iterable[Example]) -> bool:
     return False
 
 
-async def _setup_eval_schema(
-    cfg: EvalConfig,
-) -> tuple[AsyncConnectionPool[Any], str, Token[str | None]]:
-    """Create a dedicated schema for the evaluation run.
+async def _setup_eval_schema(cfg: EvalConfig) -> None:
+    """Reset the Neon development branch and apply the database URL override.
 
-    Opens a connection pool, generates a unique schema name, loads baseline
-    room data into the new schema, and sets the ``EVAL_SCHEMA`` ContextVar so
-    that the rooms agent routes SQL there.
+    Applies any ``PGSQL_EVAL_DB_URL`` override, then calls the Neon management
+    API to restore the configured branch to its parent baseline.
 
     Args:
         cfg: The loaded evaluation configuration.
 
-    Returns:
-        A tuple of ``(pool, schema_name, token)`` for later teardown.
+    Raises:
+        RuntimeError: If the Neon branch reset fails.
 
     """
-    schema = generate_schema_name("eval")
-    logger.info("Setting up eval schema: %s", schema)
-    pool = await open_schema_pool(
-        load_app_config().pgsql_db_url,
-        max_size=cfg.reset_pool.max_size,
+    _override_eval_db_url()
+    logger.info(
+        "Resetting Neon branch %r in project %r.",
+        cfg.neon.branch_name,
+        cfg.neon.project_id,
     )
-    await create_case_schema(
-        pool=pool,
-        schema=schema,
-        data_path=str(cfg.rooms.data_path),
+    await reset_neon_branch(
+        project_id=cfg.neon.project_id,
+        branch_name=cfg.neon.branch_name,
     )
-    token = set_eval_schema(schema)
-    logger.info("Eval schema ready: %s", schema)
-    return pool, schema, token
+    logger.info("Eval schema ready (Neon branch reset complete).")
+
+
+def _override_eval_db_url() -> None:
+    """Override ``PGSQL_DB_URL`` with ``PGSQL_EVAL_DB_URL`` when the latter is set.
+
+    If ``PGSQL_EVAL_DB_URL`` is present in the environment, this function
+    writes its value to ``PGSQL_DB_URL`` and clears the ``load_app_config``
+    LRU cache so the next ``load_app_config()`` call picks up the overridden
+    URL.  This ensures the rooms agent inside ``OrchestrationManager`` connects
+    to the correct Neon branch database rather than the default application
+    database.
+
+    If ``PGSQL_EVAL_DB_URL`` is not set, this function is a no-op.
+
+    """
+    eval_db_url = load_eval_config().pgsql_eval_db_url
+    if not eval_db_url:
+        return
+    os.environ["PGSQL_DB_URL"] = eval_db_url
+    load_app_config.cache_clear()
+    logger.info("PGSQL_EVAL_DB_URL override applied: PGSQL_DB_URL updated.")
 
 
 def _write_summary(path: Path, summary: Mapping[str, object]) -> None:
@@ -853,7 +867,8 @@ async def main() -> None:
 
     examples = _load_dataset_examples(dataset_name, limit)
     has_rooms = _has_rooms_cases(examples)
-    schema_resources = await _setup_eval_schema(cfg) if has_rooms else None
+    if has_rooms:
+        await _setup_eval_schema(cfg)
 
     try:
         results = await aevaluate(run_example, examples, **aevaluate_kwargs)
@@ -887,12 +902,6 @@ async def main() -> None:
         summary = _build_error_summary(context, exc)
         _write_summary(artifacts.summary_path, summary)
         raise
-    finally:
-        if schema_resources is not None:
-            pool, schema, token = schema_resources
-            drop_err = await teardown_schema(token, pool, schema)
-            if drop_err:
-                logger.warning("Schema teardown error: %s", drop_err)
 
 
 if __name__ == "__main__":

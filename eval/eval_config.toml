@@ -1,10 +1,10 @@
 [experiment]
 # LangSmith dataset name to evaluate (required).
-dataset_name = "BlueHorizonEval_200"
+dataset_name = "BlueHorizonEval_20"
 # Prefix used when generating experiment names.
-experiment_prefix = "hotel-agent-eval-200"
+experiment_prefix = "hotel-agent-eval-20"
 # Optional run notes appended to experiment names.
-run_notes = "Full dataset with 200 cases"
+run_notes = "Small dataset with just 20 cases"
 # Maximum concurrent example evaluations.
 max_concurrency = 10
 # Base output directory for local evaluation artifacts.
@@ -46,30 +46,15 @@ rag_per_turn_json_max = 8000
 # Maximum number of injection tripwire hits to store.
 tripwire_hits_max = 200
 
-[rooms]
-# Filesystem path to the pickled rooms datasets used by eval resets.
-# Relative to level of "eval" directory.
-data_path = "data/pandas"
+[neon]
+# Neon project ID (visible in the console URL: console.neon.tech/app/projects/<project_id>).
+project_id = "orange-art-94985227"
+# Neon branch name to restore to its parent baseline before each eval run.
+branch_name = "development"
 
 [orchestration]
 # Time in seconds to wait for OrchestrationManager readiness.
 ready_timeout_s = 90.0
-
-[schema_slots]
-# Maximum active schemas (0 disables slot limiting).
-max_active_schemas = 0
-# Time in seconds before schema slots are considered stale.
-stale_after_s = 1800
-# Time in seconds to wait for a schema slot before failing.
-wait_timeout_s = 300.0
-# Poll interval in seconds while waiting for schema slots.
-poll_interval_s = 1.0
-
-[reset_pool]
-# Maximum number of connections in the schema reset pool.
-max_size = 12
-# Minimum number of connections in the schema reset pool.
-min_size = 2
 
 [judge]
 # Judge model name used for rubric grading (Gemini model unless code edited).
@@ -96,18 +81,12 @@ llm_max_tokens = 2048
 embedding_model = "gemini-embedding-001"
 
 [stress]
-# Optional database schema name override for stress runs (empty uses timestamp default).
-db_schema = ""
 # Number of concurrent simulated users.
-users = 50
+users = 5
 # Number of operations per user.
 ops_per_user = 5
 # Maximum number of users allowed to run concurrently.
 max_concurrency = 50
-# Baseline data directory for stress schema resets.
-baseline_data_path = "data/pandas"
-# Base output directory for stress artifacts.
-output_dir = "eval/outputs"
 # Nights per booking when generating targets.
 stay_nights = 2
 # Number of available targets to precompute.
@@ -122,3 +101,7 @@ start_date = "2025-02-01"
 horizon_days = 60
 # Maximum size of the stress-test database pool.
 pool_max = 10
+# Base output directory for stress artifacts.
+output_dir = "eval/outputs"
+# Directory for stress run logs.
+log_dir = "eval/logs"

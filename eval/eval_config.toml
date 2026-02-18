@@ -82,7 +82,7 @@ embedding_model = "gemini-embedding-001"
 
 [stress]
 # Number of concurrent simulated users.
-users = 5
+users = 50
 # Number of operations per user.
 ops_per_user = 5
 # Maximum number of users allowed to run concurrently.

@@ -84,13 +84,21 @@ llm_max_tokens = 2048
 # Gemini model used for Ragas embeddings.
 embedding_model = "gemini-embedding-001"
 
-[stress]
+[stress.workload]
 # Number of concurrent simulated users.
 users = 50
 # Number of operations per user.
 ops_per_user = 5
 # Maximum number of users allowed to run concurrently.
 max_concurrency = 50
+# Relative weight for BOOK operations in the op-type mix (need not sum to 1).
+book_weight = 0.5
+# Relative weight for MODIFY operations in the op-type mix.
+modify_weight = 0.25
+# Relative weight for CANCEL operations in the op-type mix.
+cancel_weight = 0.25
+
+[stress.targets]
 # Nights per booking when generating targets.
 stay_nights = 2
 # Number of available targets to precompute.
@@ -102,22 +110,20 @@ hot_target_probability = 0.8
 # Search start date for availability targets (YYYY-MM-DD).
 start_date = "2025-02-01"
 # Search horizon in days from the start date.
-horizon_days = 60
+horizon_days = 90
+
+[stress.db]
 # Maximum size of the stress-test database pool.
 pool_max = 10
-# Base output directory for stress artifacts.
-output_dir = "eval/outputs"
-# Directory for stress run logs.
-log_dir = "eval/logs"
 # Retry attempts on transient DB connection errors.
 db_retry_attempts = 3
 # Base delay in seconds between DB retry attempts.
 db_retry_delay_s = 2.0
 # Maximum entries in reconciliation failure detail lists.
 reconcile_max_detail = 10
-# Relative weight for BOOK operations in the op-type mix (need not sum to 1).
-book_weight = 0.5
-# Relative weight for MODIFY operations in the op-type mix.
-modify_weight = 0.25
-# Relative weight for CANCEL operations in the op-type mix.
-cancel_weight = 0.25
+
+[stress.output]
+# Base output directory for stress artifacts.
+output_dir = "eval/outputs"
+# Directory for stress run logs.
+log_dir = "eval/logs"

@@ -242,25 +242,13 @@ class RagasConfig(BaseModel):
         return max(1, value)
 
 
-class StressConfig(BaseModel):
-    """Configuration for stress-test runs.
+class StressWorkloadConfig(BaseModel):
+    """Workload and operation-mix parameters for stress-test runs.
 
     Attributes:
         users: Number of concurrent simulated users.
         ops_per_user: Number of operations per user.
         max_concurrency: Maximum concurrent users.
-        output_dir: Base output directory for stress artifacts.
-        log_dir: Directory for stress run logs.
-        stay_nights: Nights per booking in generated targets.
-        num_targets: Number of available targets to precompute.
-        hot_target_count: Hot contention target subset size.
-        hot_target_probability: Probability of selecting a hot target vs any target.
-        start_date: Search start date for availability targets.
-        horizon_days: Search horizon in days from start_date.
-        pool_max: Maximum size of the database connection pool.
-        db_retry_attempts: Retry attempts on transient DB connection errors.
-        db_retry_delay_s: Base delay in seconds between DB retry attempts.
-        reconcile_max_detail: Maximum entries in reconciliation failure detail lists.
         book_weight: Relative weight for BOOK operations in the op-type mix.
         modify_weight: Relative weight for MODIFY operations in the op-type mix.
         cancel_weight: Relative weight for CANCEL operations in the op-type mix.
@@ -272,34 +260,40 @@ class StressConfig(BaseModel):
     users: Annotated[int, Field(ge=1)]
     ops_per_user: Annotated[int, Field(ge=1)]
     max_concurrency: Annotated[int, Field(ge=1)]
-    output_dir: Path
-    log_dir: Path
+    book_weight: Annotated[float, Field(ge=0.0)] = 0.5
+    modify_weight: Annotated[float, Field(ge=0.0)] = 0.25
+    cancel_weight: Annotated[float, Field(ge=0.0)] = 0.25
+
+    @field_validator("users", "ops_per_user", "max_concurrency", mode="before")
+    @classmethod
+    def _clamp_to_one(cls, value: int) -> int:
+        """Ensure values are at least 1."""
+        return max(1, value)
+
+
+class StressTargetsConfig(BaseModel):
+    """Availability target discovery parameters for stress-test runs.
+
+    Attributes:
+        stay_nights: Nights per booking in generated targets.
+        num_targets: Number of available targets to precompute.
+        hot_target_count: Hot contention target subset size.
+        hot_target_probability: Probability of selecting a hot target vs any target.
+        start_date: Search start date for availability targets.
+        horizon_days: Search horizon in days from start_date.
+
+    """
+
+    model_config = {"frozen": True}
+
     stay_nights: Annotated[int, Field(ge=1)]
     num_targets: Annotated[int, Field(ge=1)]
     hot_target_count: Annotated[int, Field(ge=0)]
     hot_target_probability: Annotated[float, Field(ge=0.0, le=1.0)] = 0.8
     start_date: date
     horizon_days: Annotated[int, Field(ge=1)]
-    pool_max: Annotated[int, Field(ge=1)]
-    db_retry_attempts: Annotated[int, Field(ge=1)] = 3
-    db_retry_delay_s: Annotated[float, Field(ge=0.0)] = 2.0
-    reconcile_max_detail: Annotated[int, Field(ge=1)] = 10
-    book_weight: Annotated[float, Field(ge=0.0)] = 0.5
-    modify_weight: Annotated[float, Field(ge=0.0)] = 0.25
-    cancel_weight: Annotated[float, Field(ge=0.0)] = 0.25
 
-    @field_validator(
-        "users",
-        "ops_per_user",
-        "max_concurrency",
-        "stay_nights",
-        "num_targets",
-        "horizon_days",
-        "pool_max",
-        "db_retry_attempts",
-        "reconcile_max_detail",
-        mode="before",
-    )
+    @field_validator("stay_nights", "num_targets", "horizon_days", mode="before")
     @classmethod
     def _clamp_to_one(cls, value: int) -> int:
         """Ensure values are at least 1."""
@@ -311,11 +305,72 @@ class StressConfig(BaseModel):
         """Ensure hot_target_count is non-negative."""
         return max(0, value)
 
+
+class StressDbConfig(BaseModel):
+    """Database connection and retry parameters for stress-test runs.
+
+    Attributes:
+        pool_max: Maximum size of the database connection pool.
+        db_retry_attempts: Retry attempts on transient DB connection errors.
+        db_retry_delay_s: Base delay in seconds between DB retry attempts.
+        reconcile_max_detail: Maximum entries in reconciliation failure detail lists.
+
+    """
+
+    model_config = {"frozen": True}
+
+    pool_max: Annotated[int, Field(ge=1)]
+    db_retry_attempts: Annotated[int, Field(ge=1)] = 3
+    db_retry_delay_s: Annotated[float, Field(ge=0.0)] = 2.0
+    reconcile_max_detail: Annotated[int, Field(ge=1)] = 10
+
+    @field_validator(
+        "pool_max", "db_retry_attempts", "reconcile_max_detail", mode="before",
+    )
+    @classmethod
+    def _clamp_to_one(cls, value: int) -> int:
+        """Ensure values are at least 1."""
+        return max(1, value)
+
+
+class StressOutputConfig(BaseModel):
+    """Output path configuration for stress-test runs.
+
+    Attributes:
+        output_dir: Base output directory for stress artifacts.
+        log_dir: Directory for stress run logs.
+
+    """
+
+    model_config = {"frozen": True}
+
+    output_dir: Path
+    log_dir: Path
+
     @field_validator("output_dir", "log_dir", mode="before")
     @classmethod
     def _resolve_paths(cls, value: object) -> Path:
         """Resolve paths relative to repository root."""
         return _resolve_path(value, base_dir=_BASE_DIR)
+
+
+class StressConfig(BaseModel):
+    """Configuration for stress-test runs, composed from sub-sections.
+
+    Attributes:
+        workload: Workload and operation-mix parameters.
+        targets: Availability target discovery parameters.
+        db: Database connection and retry parameters.
+        output: Output path configuration.
+
+    """
+
+    model_config = {"frozen": True}
+
+    workload: StressWorkloadConfig
+    targets: StressTargetsConfig
+    db: StressDbConfig
+    output: StressOutputConfig
 
 
 class EvalConfig(BaseSettings):

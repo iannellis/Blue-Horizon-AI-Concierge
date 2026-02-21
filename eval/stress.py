@@ -1,11 +1,14 @@
 """Stress and race testing suite for the LangGraph hotel agent.
 
-This module creates a single shared Postgres schema for a stress run, loads
-baseline data, discovers bookable contention targets, and then drives
-concurrent end-to-end BOOK / MODIFY / CANCEL flows through the orchestrator.
-It records per-operation and per-user JSONL artifacts, computes summary
-statistics and database invariants, and emits LangSmith traces via tags and
-metadata passed to the orchestrator.
+This module resets the Neon development branch to a clean baseline, discovers
+bookable availability targets, and then drives concurrent simulated users
+through the orchestrator.  Each user executes a fixed number of operations
+whose types are sampled from configurable weights (BOOK / MODIFY / CANCEL).
+State constraints enforce a single-booking-per-user invariant: a user with no
+active booking always BOOKs; a user who already holds a booking and draws BOOK
+is promoted to MODIFY instead.  Per-operation and per-user JSONL artifacts are
+written, summary statistics and database invariants are computed, and LangSmith
+traces are emitted via tags and metadata.
 
 """
 

@@ -102,9 +102,9 @@ cancel_weight = 0.25
 # Nights per booking when generating targets.
 stay_nights = 2
 # Number of available targets to precompute.
-num_targets = 20
+num_targets = 500
 # Size of the hot contention target subset.
-hot_target_count = 5
+hot_target_count = 10
 # Probability of selecting a hot target vs any target (0.0-1.0).
 hot_target_probability = 0.8
 # Search start date for availability targets (YYYY-MM-DD).

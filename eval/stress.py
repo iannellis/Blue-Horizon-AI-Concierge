@@ -589,6 +589,7 @@ def _build_operation_request(
 
 def _build_trace_context(
     *,
+    run_id: str,
     user_idx: int,
     op_idx: int,
     op_type: str,
@@ -596,6 +597,8 @@ def _build_trace_context(
     """Build LangSmith tags and metadata for a stress operation.
 
     Args:
+        run_id: The unique identifier for the enclosing stress run, used to
+            group all traces from the same invocation in LangSmith.
         user_idx: The user index for the operation.
         op_idx: The operation index for the user.
         op_type: The operation type label.
@@ -606,11 +609,13 @@ def _build_trace_context(
     """
     tags = [
         "stress",
+        f"run:{run_id}",
         f"user:{user_idx}",
         f"op:{op_idx}",
         f"op_type:{op_type}",
     ]
     metadata = {
+        "run_id": run_id,
         "user_idx": user_idx,
         "op_idx": op_idx,
         "op_type": op_type,
@@ -889,6 +894,8 @@ async def _run_workload(
     cfg: StressRunConfig,
     targets: list[dict[str, object]],
     hot_targets: list[dict[str, object]],
+    *,
+    run_id: str,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     """Execute concurrent user workloads and collect operation logs.
 
@@ -897,6 +904,8 @@ async def _run_workload(
         cfg: The stress run configuration.
         targets: The full target pool.
         hot_targets: The hot contention target subset.
+        run_id: The unique identifier for this stress run, threaded into every
+            LangSmith trace tag so traces can be filtered by run in LangSmith.
 
     Returns:
         A tuple of ``(op_logs, user_logs)``.
@@ -931,6 +940,7 @@ async def _run_workload(
                     hot_target_probability=cfg.hot_target_probability,
                 )
                 tags, metadata = _build_trace_context(
+                    run_id=run_id,
                     user_idx=user_idx,
                     op_idx=op_idx,
                     op_type=build.op_type,
@@ -1548,6 +1558,7 @@ async def run_stress() -> None:
             cfg,
             targets,
             hot_targets,
+            run_id=f"stress_{ts}",
         )
         invariants = await _check_invariants(pool, cfg)
         reconciliation = await _reconcile_with_db(pool, op_logs, cfg)

@@ -490,6 +490,10 @@ def _build_operation_request(
 ) -> OperationBuildResult:
     """Build a prompt for the given operation and update user state.
 
+    If ``op_type`` is ``"BOOK"`` but the user already has an active booking,
+    the operation is silently promoted to ``"MODIFY"`` to avoid orphaned
+    bookings and keep the single-booking-per-user invariant intact.
+
     Args:
         op_type: The requested operation type label.
         state: The mutable per-user state to update.
@@ -501,6 +505,9 @@ def _build_operation_request(
         A structured operation build result.
 
     """
+    if op_type == "BOOK" and state.has_booking:
+        op_type = "MODIFY"
+
     old_room = state.last_room_number
     old_check_in = state.last_check_in
     old_check_out = state.last_check_out

@@ -794,7 +794,6 @@ def _build_op_entry(  # noqa: PLR0913
     old_room: int | None,
     old_check_in: str | None,
     old_check_out: str | None,
-    state: UserState,
     sql_calls: list[dict[str, object]],
 ) -> dict[str, object]:
     """Create a normalized operation log entry.
@@ -809,11 +808,13 @@ def _build_op_entry(  # noqa: PLR0913
         outcome: The classified outcome label.
         assistant_text: The assistant response text.
         err_text: Any error text encountered during invocation.
-        target_used: The target dict used for the operation, if any.
+        target_used: The target dict used for the operation, if any.  For
+            MODIFY ops this holds the *attempted* new target, which is the
+            correct source for ``new_room_number`` / ``new_check_in`` /
+            ``new_check_out`` regardless of whether the op succeeded or failed.
         old_room: The prior room number before the operation.
         old_check_in: The prior check-in date before the operation.
         old_check_out: The prior check-out date before the operation.
-        state: The current user state after the operation.
         sql_calls: Compact summaries of run_sql tool calls from the callback.
 
     Returns:
@@ -841,9 +842,15 @@ def _build_op_entry(  # noqa: PLR0913
                 "old_room_number": old_room,
                 "old_check_in": old_check_in,
                 "old_check_out": old_check_out,
-                "new_room_number": state.last_room_number,
-                "new_check_in": state.last_check_in,
-                "new_check_out": state.last_check_out,
+                "new_room_number": (
+                    target_used.get("room_number") if target_used else None
+                ),
+                "new_check_in": (
+                    target_used.get("check_in") if target_used else None
+                ),
+                "new_check_out": (
+                    target_used.get("check_out") if target_used else None
+                ),
             },
         )
     elif target_used:
@@ -989,7 +996,6 @@ async def _run_workload(
                     old_room=build.old_room,
                     old_check_in=build.old_check_in,
                     old_check_out=build.old_check_out,
-                    state=state,
                     sql_calls=sql_calls,
                 )
 

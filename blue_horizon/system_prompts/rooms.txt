@@ -538,7 +538,7 @@ overlap_prices AS (
     AND ra.price IS NOT NULL
 ),
 release_rows AS (
-  SELECT ra.id, ra.date
+  SELECT ra.id, ra.date, ra.price
   FROM room_availability ra
   JOIN to_release tr ON tr.date = ra.date
   WHERE ra.room_number = $5
@@ -578,6 +578,11 @@ acquired AS (
     AND (SELECT acquire_ok FROM counts) = (SELECT acquire_needed FROM counts)
   RETURNING ra.date, ra.price
 ),
+old_total AS (
+  SELECT
+    COALESCE((SELECT SUM(price) FROM release_rows), 0) +
+    COALESCE((SELECT SUM(price) FROM overlap_prices), 0) AS total_price
+),
 new_total AS (
   SELECT
     COALESCE((SELECT SUM(price) FROM acquired), 0) +
@@ -588,6 +593,7 @@ SELECT
   (SELECT acquire_needed FROM counts) AS acquire_needed,
   (SELECT COUNT(*) FROM released) AS nights_released,
   (SELECT COUNT(*) FROM acquired) AS nights_acquired,
+  (SELECT total_price FROM old_total) AS old_total_price,
   (SELECT total_price FROM new_total) AS new_total_price
 ```
 
@@ -648,7 +654,7 @@ overlap_prices AS (
     AND ra.price IS NOT NULL
 ),
 release_rows AS (
-  SELECT ra.id, ra.room_number, ra.date
+  SELECT ra.id, ra.room_number, ra.date, ra.price
   FROM room_availability ra
   JOIN requested_rooms rr ON rr.room_number = ra.room_number
   JOIN to_release tr ON tr.date = ra.date
@@ -691,6 +697,11 @@ acquired AS (
     AND (SELECT acquire_ok_total FROM counts) = (SELECT acquire_needed_total FROM counts)
   RETURNING ra.room_number, ra.date, ra.price
 ),
+old_total AS (
+  SELECT
+    COALESCE((SELECT SUM(price) FROM release_rows), 0) +
+    COALESCE((SELECT SUM(price) FROM overlap_prices), 0) AS total_price
+),
 new_total AS (
   SELECT
     COALESCE((SELECT SUM(price) FROM acquired), 0) +
@@ -702,6 +713,7 @@ SELECT
   (SELECT acquire_needed_total FROM counts) AS acquire_needed_total,
   (SELECT COUNT(*) FROM released) AS nights_released_total,
   (SELECT COUNT(*) FROM acquired) AS nights_acquired_total,
+  (SELECT total_price FROM old_total) AS old_total_price,
   (SELECT total_price FROM new_total) AS new_total_price
 ```
 

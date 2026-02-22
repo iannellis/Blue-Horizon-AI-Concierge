@@ -190,7 +190,7 @@ async def _start_orchestration() -> OrchestrationManager:
 
     """
     ready_timeout_s = load_eval_config().orchestration.ready_timeout_s
-    orchestration = OrchestrationManager(prune_tool_messages=False)
+    orchestration = OrchestrationManager()
     await orchestration.start()
 
     ready_deadline = time.perf_counter() + ready_timeout_s

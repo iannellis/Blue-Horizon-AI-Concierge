@@ -456,7 +456,7 @@ async def ensure_orchestration_ready() -> OrchestrationManager:
 
     async with _ORCHESTRATION_LOCK:
         if _ORCHESTRATION is None:
-            _ORCHESTRATION = OrchestrationManager(prune_tool_messages=False)
+            _ORCHESTRATION = OrchestrationManager()
         if _ORCHESTRATION.is_ready:
             return _ORCHESTRATION
         await _ORCHESTRATION.start()

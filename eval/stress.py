@@ -535,7 +535,7 @@ def _build_operation_request(
         book_check_out = target_used["check_out"]
         prompt = (
             f"Book room {book_room} from {book_check_in} "
-            f"to {book_check_out} for 2 adults."
+            f"to {book_check_out}."
         )
         state.last_room_number = book_room
         state.last_check_in = str(book_check_in)
@@ -567,7 +567,7 @@ def _build_operation_request(
         )
         modify_new = (
             f"Change it to room {new_room} from {new_check_in} "
-            f"to {new_check_out} for 2 adults."
+            f"to {new_check_out}."
         )
         prompt = f"{modify_old}{modify_new}"
         state.last_room_number = new_room

@@ -493,9 +493,14 @@ def _build_operation_request(
 ) -> OperationBuildResult:
     """Build a prompt for the given operation and update user state.
 
-    If ``op_type`` is ``"BOOK"`` but the user already has an active booking,
-    the operation is silently promoted to ``"MODIFY"`` to avoid orphaned
-    bookings and keep the single-booking-per-user invariant intact.
+    Two op-type promotions keep the single-booking-per-user invariant intact:
+
+    * ``"BOOK"`` with an active booking → promoted to ``"MODIFY"``.
+    * ``"MODIFY"`` or ``"CANCEL"`` with no active booking → normalised to
+      ``"BOOK"``.
+
+    In both cases ``OperationBuildResult.op_type`` reflects the effective
+    operation that was actually executed.
 
     Args:
         op_type: The requested operation type label.
@@ -516,6 +521,7 @@ def _build_operation_request(
     old_check_out = state.last_check_out
 
     if op_type == "BOOK" or not state.last_room_number:
+        op_type = "BOOK"  # normalise: MODIFY/CANCEL with no booking falls back to BOOK
         target_used = _choose_target(targets, hot_targets, hot_target_probability)
         book_room = cast("int", target_used["room_number"])
         book_check_in = target_used["check_in"]

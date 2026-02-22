@@ -157,21 +157,26 @@ async def _restore_neon_branch(  # noqa: PLR0913
     """
     url = f"{base_url}/projects/{project_id}/branches/{branch_id}/restore"
     body: dict[str, str] = {"source_branch_id": parent_id}
+    if lock_retry_attempts < 1:
+        msg = "lock_retry_attempts must be at least 1"
+        raise ValueError(msg)
     for attempt in range(lock_retry_attempts):
         response = await client.post(url, json=body)
         if response.status_code != _HTTP_LOCKED:
             response.raise_for_status()
             return
-        if attempt < lock_retry_attempts - 1:
-            logger.warning(
-                "Neon branch %r is locked (attempt %d/%d); waiting %.0fs.",
-                branch_id,
-                attempt + 1,
-                lock_retry_attempts,
-                lock_retry_delay_s,
-            )
-            await asyncio.sleep(lock_retry_delay_s)
-    response.raise_for_status()
+        is_last_attempt = attempt >= lock_retry_attempts - 1
+        if is_last_attempt:
+            response.raise_for_status()
+            return
+        logger.warning(
+            "Neon branch %r is locked (attempt %d/%d); waiting %.0fs.",
+            branch_id,
+            attempt + 1,
+            lock_retry_attempts,
+            lock_retry_delay_s,
+        )
+        await asyncio.sleep(lock_retry_delay_s)
 
 
 async def _main() -> None:

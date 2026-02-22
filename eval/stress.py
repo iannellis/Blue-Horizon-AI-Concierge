@@ -609,6 +609,12 @@ def _build_trace_context(
 ) -> tuple[list[str], dict[str, object]]:
     """Build LangSmith tags and metadata for a stress operation.
 
+    The stress run identifier is stored as ``stress_run_id`` rather than
+    ``run_id`` in the metadata dict.  LangGraph reserves ``run_id`` as an
+    internal run-deduplication key: passing the same value across multiple
+    ``ainvoke`` calls on the same thread causes subsequent calls to return the
+    cached checkpoint without re-executing the graph.
+
     Args:
         run_id: The unique identifier for the enclosing stress run, used to
             group all traces from the same invocation in LangSmith.
@@ -628,7 +634,7 @@ def _build_trace_context(
         f"op_type:{op_type}",
     ]
     metadata = {
-        "run_id": run_id,
+        "stress_run_id": run_id,
         "user_idx": user_idx,
         "op_idx": op_idx,
         "op_type": op_type,

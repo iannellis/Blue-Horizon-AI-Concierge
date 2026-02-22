@@ -1444,6 +1444,7 @@ def _is_failure_entry(op: dict[str, object]) -> bool:
 def _write_artifacts(
     cfg: StressRunConfig,
     *,
+    run_id: str,
     op_logs: list[dict[str, object]],
     user_logs: list[dict[str, object]],
     summary: dict[str, object],
@@ -1452,13 +1453,14 @@ def _write_artifacts(
 
     Args:
         cfg: The stress run configuration.
+        run_id: The unique run identifier, used as the output directory stem so
+            artifact paths match the ``run:{run_id}`` LangSmith tag.
         op_logs: The per-operation logs.
         user_logs: The per-user logs.
         summary: The computed summary dictionary.
 
     """
-    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-    run_dir = cfg.output_dir / f"stress_{ts}"
+    run_dir = cfg.output_dir / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
     ops_path = run_dir / "stress_ops.jsonl"
@@ -1585,6 +1587,7 @@ async def run_stress() -> None:
     )
     _write_artifacts(
         cfg,
+        run_id=f"stress_{ts}",
         op_logs=op_logs,
         user_logs=user_logs,
         summary=summary,

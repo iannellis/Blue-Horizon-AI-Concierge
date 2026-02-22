@@ -177,22 +177,29 @@ def _load_config() -> StressRunConfig:
 
 
 async def _start_orchestration() -> OrchestrationManager:
-    """Start the orchestrator and wait for readiness with a timeout.
+    """Start the orchestrator and wait for readiness with a configured timeout.
+
+    The timeout is read from ``eval_config.toml`` via
+    ``orchestration.ready_timeout_s``.
 
     Returns:
         A ready ``OrchestrationManager`` instance.
 
     Raises:
-        TimeoutError: If readiness is not reached within 30 seconds.
+        TimeoutError: If readiness is not reached within the configured timeout.
 
     """
+    ready_timeout_s = load_eval_config().orchestration.ready_timeout_s
     orchestration = OrchestrationManager(prune_tool_messages=False)
     await orchestration.start()
 
-    ready_deadline = time.perf_counter() + 30.0
+    ready_deadline = time.perf_counter() + ready_timeout_s
     while not orchestration.is_ready:
         if time.perf_counter() > ready_deadline:
-            msg = "OrchestrationManager did not become ready within 30s"
+            msg = (
+                f"OrchestrationManager did not become ready"
+                f" within {ready_timeout_s:.0f}s"
+            )
             raise TimeoutError(msg)
         await asyncio.sleep(0.1)
 
@@ -1538,7 +1545,8 @@ async def run_stress() -> None:
     user workloads, asserts database invariants, and writes JSON artifacts.
 
     Raises:
-        TimeoutError: If the orchestrator does not become ready within 30s.
+        TimeoutError: If the orchestrator does not become ready within the
+            configured ``orchestration.ready_timeout_s``.
         RuntimeError: If no bookable targets can be found after the branch reset.
 
     """

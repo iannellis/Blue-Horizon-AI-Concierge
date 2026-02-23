@@ -17,6 +17,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_PACKAGE = "eval"
 _EVAL_CONFIG_RESOURCE = "eval_config.toml"
+_STRESS_CONFIG_RESOURCE = "stress_config.toml"
 _BASE_DIR = Path(__file__).resolve().parents[1]
 
 
@@ -387,12 +388,11 @@ class EvalConfig(BaseSettings):
         orchestration: Orchestration readiness timing.
         judge: Judge model configuration.
         ragas: Ragas scoring configuration.
-        stress: Stress-test configuration values.
         pgsql_eval_db_url: PostgreSQL database URL override for eval runs.
             When set, takes precedence over ``PGSQL_DB_URL`` for the rooms
             agent and evaluator pool connections.
         neon_api_key: API key for authenticating with the Neon management API,
-            required when resetting a Neon branch before an eval or stress run.
+            required when resetting a Neon branch before an eval run.
 
     """
 
@@ -410,6 +410,43 @@ class EvalConfig(BaseSettings):
     orchestration: OrchestrationConfig
     judge: JudgeConfig
     ragas: RagasConfig
+    pgsql_eval_db_url: str | None = Field(
+        default=None,
+        validation_alias="PGSQL_EVAL_DB_URL",
+    )
+    neon_api_key: str | None = Field(
+        default=None,
+        validation_alias="NEON_API_KEY",
+    )
+
+
+class StressEvalConfig(BaseSettings):
+    """Parsed stress-test configuration container.
+
+    TOML configuration is loaded via ``load_stress_config()``.  Environment
+    variables are read from the process environment or a ``.env`` file.
+
+    Attributes:
+        neon: Neon branch reset configuration for stress runs.
+        orchestration: Orchestration readiness timing.
+        stress: Stress-test workload, target, and database parameters.
+        pgsql_eval_db_url: PostgreSQL database URL override for stress runs.
+            When set, takes precedence over ``PGSQL_DB_URL`` for the rooms
+            agent and pool connections.
+        neon_api_key: API key for authenticating with the Neon management API,
+            required when resetting a Neon branch before a stress run.
+
+    """
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        frozen=True,
+    )
+
+    neon: NeonConfig
+    orchestration: OrchestrationConfig
     stress: StressConfig
     pgsql_eval_db_url: str | None = Field(
         default=None,
@@ -453,6 +490,38 @@ def load_eval_config(path: Path | str | None = None) -> EvalConfig:
     toml_content = target_path.read_text(encoding="utf-8")
     toml_data = tomllib.loads(toml_content)
     return EvalConfig.model_validate(toml_data)
+
+
+@lru_cache(maxsize=1)
+def load_stress_config(path: Path | str | None = None) -> StressEvalConfig:
+    """Load stress-test configuration from a TOML file.
+
+    Args:
+        path: Optional explicit path to a TOML file; defaults to the packaged
+            stress_config.toml resource.
+
+    Returns:
+        Parsed StressEvalConfig instance.
+
+    Raises:
+        RuntimeError: If the provided path is invalid or TOML cannot be parsed.
+
+    """
+    if path is None:
+        toml_content = (
+            importlib_resources.files(BASE_PACKAGE)
+            .joinpath(_STRESS_CONFIG_RESOURCE)
+            .read_text(encoding="utf-8")
+        )
+        toml_data = tomllib.loads(toml_content)
+        return StressEvalConfig.model_validate(toml_data)
+    target_path = Path(path).expanduser().resolve()
+    if not target_path.exists() or not target_path.is_file():
+        msg = f"Config file not found: {target_path}"
+        raise RuntimeError(msg)
+    toml_content = target_path.read_text(encoding="utf-8")
+    toml_data = tomllib.loads(toml_content)
+    return StressEvalConfig.model_validate(toml_data)
 
 
 def _resolve_path(value: object, *, base_dir: Path) -> Path:

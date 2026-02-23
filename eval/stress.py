@@ -34,7 +34,7 @@ from psycopg_pool import PoolTimeout
 
 from blue_horizon.config import load_app_config
 from eval._utils import truncate as _truncate
-from eval.config import NeonConfig, load_eval_config
+from eval.config import load_stress_config
 from eval.langsmith_target import EvalCaptureCallback, OrchestrationManager
 from eval.rooms_db_manager import open_schema_pool, reset_neon_branch
 
@@ -42,6 +42,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from psycopg_pool import AsyncConnectionPool
+
+    from eval.config import NeonConfig
 
 load_dotenv()
 
@@ -137,7 +139,7 @@ class OperationBuildResult:
 
 
 def _load_config() -> StressRunConfig:
-    """Load stress configuration from eval_config.toml.
+    """Load stress configuration from stress_config.toml.
 
     Returns:
         A fully populated ``StressRunConfig`` instance.
@@ -146,9 +148,9 @@ def _load_config() -> StressRunConfig:
         RuntimeError: If a database URL cannot be determined.
 
     """
-    cfg = load_eval_config().stress
+    cfg = load_stress_config().stress
 
-    db_url = load_eval_config().pgsql_eval_db_url or load_app_config().pgsql_db_url
+    db_url = load_stress_config().pgsql_eval_db_url or load_app_config().pgsql_db_url
     if not db_url:
         msg = "Database URL is required but was not found"
         raise RuntimeError(msg)
@@ -189,7 +191,7 @@ async def _start_orchestration() -> OrchestrationManager:
         TimeoutError: If readiness is not reached within the configured timeout.
 
     """
-    ready_timeout_s = load_eval_config().orchestration.ready_timeout_s
+    ready_timeout_s = load_stress_config().orchestration.ready_timeout_s
     orchestration = OrchestrationManager()
     await orchestration.start()
 
@@ -341,6 +343,8 @@ async def _init_branch_and_targets(
     pool: AsyncConnectionPool,
     cfg: StressRunConfig,
     neon_cfg: NeonConfig,
+    *,
+    api_key: str | None,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     """Reset the Neon branch and discover bookable contention targets.
 
@@ -350,7 +354,8 @@ async def _init_branch_and_targets(
     Args:
         pool: The open database connection pool pointing at the Neon branch.
         cfg: The stress run configuration.
-        neon_cfg: Neon project and branch settings from eval config.
+        neon_cfg: Neon project and branch settings from the stress config.
+        api_key: Neon management API key sourced from the stress config.
 
     Returns:
         A tuple of ``(targets, hot_targets)``.
@@ -364,10 +369,7 @@ async def _init_branch_and_targets(
         neon_cfg.branch_name,
         neon_cfg.project_id,
     )
-    await reset_neon_branch(
-        project_id=neon_cfg.project_id,
-        branch_name=neon_cfg.branch_name,
-    )
+    await reset_neon_branch(neon_cfg, api_key=api_key)
 
     targets: list[dict[str, object]] = []
     for attempt in range(cfg.db_retry_attempts):
@@ -1565,7 +1567,9 @@ async def run_stress() -> None:
     cfg = _load_config()
     ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     _configure_logging(f"stress_{ts}", cfg.log_dir)
-    neon_cfg = load_eval_config().neon
+    stress_cfg = load_stress_config()
+    neon_cfg = stress_cfg.neon
+    neon_api_key = stress_cfg.neon_api_key
     pool: AsyncConnectionPool | None = None
     targets: list[dict[str, object]] = []
     hot_targets: list[dict[str, object]] = []
@@ -1579,7 +1583,7 @@ async def run_stress() -> None:
         orchestration = await _start_orchestration()
         pool = await open_schema_pool(cfg.db_url, max_size=cfg.pool_max)
         targets, hot_targets = await _init_branch_and_targets(
-            pool, cfg, neon_cfg,
+            pool, cfg, neon_cfg, api_key=neon_api_key,
         )
         op_logs, user_logs = await _run_workload(
             orchestration,

@@ -326,10 +326,7 @@ async def _setup_eval_schema(cfg: EvalConfig) -> None:
         cfg.neon.branch_name,
         cfg.neon.project_id,
     )
-    await reset_neon_branch(
-        project_id=cfg.neon.project_id,
-        branch_name=cfg.neon.branch_name,
-    )
+    await reset_neon_branch(cfg.neon, api_key=cfg.neon_api_key)
     logger.info("Eval schema ready (Neon branch reset complete).")
 
 

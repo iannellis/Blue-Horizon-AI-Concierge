@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import inspect
 import json
@@ -273,7 +274,7 @@ async def _setup_eval_schema(cfg: EvalConfig) -> None:
         RuntimeError: If the Neon branch reset fails.
 
     """
-    _override_eval_db_url()
+    _override_eval_db_url(cfg)
     logger.info(
         "Resetting Neon branch %r in project %r.",
         cfg.neon.branch_name,
@@ -283,20 +284,22 @@ async def _setup_eval_schema(cfg: EvalConfig) -> None:
     logger.info("Eval schema ready (Neon branch reset complete).")
 
 
-def _override_eval_db_url() -> None:
+def _override_eval_db_url(cfg: EvalConfig) -> None:
     """Override ``PGSQL_DB_URL`` with ``PGSQL_EVAL_DB_URL`` when the latter is set.
 
-    If ``PGSQL_EVAL_DB_URL`` is present in the environment, this function
-    writes its value to ``PGSQL_DB_URL`` and clears the ``load_app_config``
-    LRU cache so the next ``load_app_config()`` call picks up the overridden
-    URL.  This ensures the rooms agent inside ``OrchestrationManager`` connects
-    to the correct Neon branch database rather than the default application
-    database.
+    If ``PGSQL_EVAL_DB_URL`` is present in *cfg*, this function writes its
+    value to ``PGSQL_DB_URL`` and clears the ``load_app_config`` LRU cache so
+    the next ``load_app_config()`` call picks up the overridden URL.  This
+    ensures the rooms agent inside ``OrchestrationManager`` connects to the
+    correct Neon branch database rather than the default application database.
 
     If ``PGSQL_EVAL_DB_URL`` is not set, this function is a no-op.
 
+    Args:
+        cfg: The loaded evaluation configuration.
+
     """
-    eval_db_url = load_eval_config().pgsql_eval_db_url
+    eval_db_url = cfg.pgsql_eval_db_url
     if not eval_db_url:
         return
     os.environ["PGSQL_DB_URL"] = eval_db_url
@@ -331,9 +334,33 @@ def _write_jsonl(path: Path, rows: Iterable[Mapping[str, object]]) -> None:
             )
 
 
+def _parse_args() -> argparse.Namespace:
+    """Parse command-line arguments for the evaluation run.
+
+    Returns:
+        Parsed argument namespace.  The ``config`` attribute holds an optional
+        path string to a TOML configuration file, or ``None`` when omitted.
+
+    """
+    parser = argparse.ArgumentParser(
+        description="Run LangSmith evaluations for the hotel agent dataset.",
+    )
+    parser.add_argument(
+        "--config",
+        metavar="PATH",
+        default=None,
+        help=(
+            "Path to a TOML configuration file. "
+            "Defaults to eval/eval_config.toml when omitted."
+        ),
+    )
+    return parser.parse_args()
+
+
 async def main() -> None:
     """Run the LangSmith experiment and persist local artifacts."""
-    cfg = load_eval_config()
+    args = _parse_args()
+    cfg = load_eval_config(path=args.config)
     started_at = datetime.now(UTC)
     dataset_name = cfg.experiment.dataset_name
     experiment_prefix = cfg.experiment.experiment_prefix

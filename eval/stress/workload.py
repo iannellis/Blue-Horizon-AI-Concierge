@@ -399,8 +399,9 @@ async def _extract_last_assistant_text(result: object) -> str:
                     for part in content:
                         if isinstance(part, dict) and "text" in part:
                             parts.append(str(part["text"]))
-                        else:
-                            parts.append(str(part))
+                        elif isinstance(part, str):
+                            parts.append(part)
+                        # skip non-text blocks (type="reasoning", etc.)
                     return " ".join(parts).strip()
                 return str(content).strip()
     except (AttributeError, KeyError, TypeError, ValueError):

@@ -140,6 +140,16 @@ class RoomsSqlResources:
     async def execute_sql(self, query: str) -> dict[str, Any]:
         """Execute a single SQL statement and return rows.
 
+        Each attempt borrows a connection from the pool (which has already
+        been configured with ``SET search_path TO public`` and
+        ``SET statement_timeout`` via the pool's ``configure`` callback)
+        and executes *query* directly.
+
+        Write queries are not retried on transient errors by default because
+        the pool connection may have committed the write before the error
+        was surfaced to the client.  Set
+        ``retry_writes_on_transient_errors = true`` in config to override.
+
         Args:
             query: One SQL statement (no semicolons). May be SELECT or DML. If DML
                 uses RETURNING, returned rows are provided.
@@ -185,8 +195,6 @@ class RoomsSqlResources:
                     self.pool.connection(timeout=self.config.db.pool.timeout_s) as conn,
                     conn.cursor(row_factory=dict_row) as cur,
                 ):
-                    await cur.execute("SET search_path TO public;")
-
                     # NOTE: psycopg's type stubs expect a LiteralString for `execute()`.
                     # This cast is only to satisfy static type checkers. Runtime safety
                     # is provided by `validate_sql(...)` above.
@@ -295,15 +303,15 @@ class RoomsSqlResources:
             """
             await conn.set_autocommit(True)
 
-            if timeout_ms <= 0:
-                return
-
             async with conn.cursor() as cur:
-                await cur.execute(
-                    sql.SQL("SET statement_timeout = {}").format(
-                        sql.Literal(timeout_ms),
-                    ),
-                )
+                await cur.execute("SET search_path TO public;")
+
+                if timeout_ms > 0:
+                    await cur.execute(
+                        sql.SQL("SET statement_timeout = {}").format(
+                            sql.Literal(timeout_ms),
+                        ),
+                    )
 
         try:
             pool = AsyncConnectionPool(

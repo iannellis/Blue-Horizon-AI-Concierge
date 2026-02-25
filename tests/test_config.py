@@ -94,12 +94,16 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
         },
         "agent": {"top_k": EXPECTED_ROOMS_TOP_K},
         "db": {
-            "pool": {"min_size": 1, "max_size": 10, "timeout_s": 10.0},
+            "pool": {
+                "min_size": 0,
+                "max_size": 10,
+                "timeout_s": 10.0,
+                "max_idle_s": 240.0,
+            },
             "guardrails": {
                 "max_rows": EXPECTED_MAX_ROWS,
                 "allow_only_hotel_tables": True,
             },
-            "timeouts": {"statement_timeout_ms": 10000},
             "retry": {
                 "max_transient_retries": 1,
                 "transient_retry_backoff_s": 0.15,

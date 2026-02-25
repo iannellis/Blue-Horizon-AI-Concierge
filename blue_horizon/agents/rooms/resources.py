@@ -10,7 +10,6 @@ import logging
 from typing import TYPE_CHECKING, Any, LiteralString, cast
 
 import psycopg
-from psycopg import sql
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
@@ -140,10 +139,9 @@ class RoomsSqlResources:
     async def execute_sql(self, query: str) -> dict[str, Any]:
         """Execute a single SQL statement and return rows.
 
-        Each attempt borrows a connection from the pool (which has already
-        been configured with ``SET search_path TO public`` and
-        ``SET statement_timeout`` via the pool's ``configure`` callback)
-        and executes *query* directly.
+        Each attempt borrows a connection from the pool (``search_path`` and
+        ``statement_timeout`` are expected to be set at the database role
+        level rather than in code) and executes *query* directly.
 
         Write queries are not retried on transient errors by default because
         the pool connection may have committed the write before the error
@@ -285,6 +283,17 @@ class RoomsSqlResources:
     async def _open_pool(self) -> None:
         """Open the async connection pool.
 
+        ``search_path`` and ``statement_timeout`` are expected to be set at
+        the database role level (``ALTER ROLE … SET …``) so they apply
+        consistently under PgBouncer transaction pooling without any
+        per-connection ``SET`` commands.
+
+        A health-check (``SELECT 1``) is run each time a connection is
+        checked out from the pool so stale connections are discarded before
+        they reach ``execute_sql``.  Combined with ``max_idle``, this
+        ensures the pool never hands out connections that Neon has already
+        dropped due to compute suspension.
+
         Raises:
             OperationalError: If the pool cannot be opened.
 
@@ -292,10 +301,8 @@ class RoomsSqlResources:
         if self.pool is not None:
             return
 
-        timeout_ms = self.config.db.timeouts.statement_timeout_ms
-
         async def configure_connection(conn: psycopg.AsyncConnection[Any]) -> None:
-            """Configure each new connection on checkout.
+            """Enable autocommit on each new connection.
 
             Args:
                 conn: Newly created async psycopg connection.
@@ -303,23 +310,15 @@ class RoomsSqlResources:
             """
             await conn.set_autocommit(True)
 
-            async with conn.cursor() as cur:
-                await cur.execute("SET search_path TO public;")
-
-                if timeout_ms > 0:
-                    await cur.execute(
-                        sql.SQL("SET statement_timeout = {}").format(
-                            sql.Literal(timeout_ms),
-                        ),
-                    )
-
         try:
             pool = AsyncConnectionPool(
                 conninfo=self.pgsql_db_url,
                 min_size=self.config.db.pool.min_size,
                 max_size=self.config.db.pool.max_size,
                 timeout=self.config.db.pool.timeout_s,
+                max_idle=self.config.db.pool.max_idle_s,
                 configure=configure_connection,
+                check=AsyncConnectionPool.check_connection,
                 open=False,
             )
             await pool.open()

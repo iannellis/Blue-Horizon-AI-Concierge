@@ -185,9 +185,16 @@ class DbPoolConfig(BaseModel):
     """Client-side connection pool tuning.
 
     Attributes:
-        min_size: Minimum pool connections maintained.
+        min_size: Minimum pool connections maintained.  Use ``0`` for
+            on-demand-only connections (recommended for Neon serverless so
+            the pool does not proactively open connections that will idle
+            and be dropped by the server).
         max_size: Maximum pool connections allowed.
-        timeout_s: Timeout when acquiring a pooled connection.
+        timeout_s: Timeout in seconds when acquiring a pooled connection.
+        max_idle_s: Seconds after which an idle connection is closed and
+            discarded.  Set below the hosting provider's compute-suspend
+            threshold (e.g. ``240`` for Neon's 300-second window) so stale
+            connections are removed before the server drops them.
 
     """
 
@@ -196,6 +203,7 @@ class DbPoolConfig(BaseModel):
     min_size: int
     max_size: int
     timeout_s: float
+    max_idle_s: float
 
 
 class DbGuardrailsConfig(BaseModel):
@@ -211,19 +219,6 @@ class DbGuardrailsConfig(BaseModel):
 
     max_rows: int
     allow_only_hotel_tables: bool
-
-
-class DbTimeoutsConfig(BaseModel):
-    """Database-side timeout tuning.
-
-    Attributes:
-        statement_timeout_ms: PostgreSQL statement timeout in milliseconds.
-
-    """
-
-    model_config = {"frozen": True}
-
-    statement_timeout_ms: int
 
 
 class DbRetryConfig(BaseModel):
@@ -246,10 +241,15 @@ class DbRetryConfig(BaseModel):
 class RoomsDbConfig(BaseModel):
     """Combined database configuration for the rooms agent.
 
+    Note:
+        Statement timeout and search_path are set at the database role level
+        (``ALTER ROLE … SET …``) rather than in code, so they apply
+        consistently under connection pooling without any per-connection
+        ``SET`` commands.
+
     Attributes:
         pool: Client-side pool settings.
         guardrails: SQL validation constraints.
-        timeouts: Database statement timeout values.
         retry: Transient retry policy.
 
     """
@@ -258,7 +258,6 @@ class RoomsDbConfig(BaseModel):
 
     pool: DbPoolConfig
     guardrails: DbGuardrailsConfig
-    timeouts: DbTimeoutsConfig
     retry: DbRetryConfig
 
 

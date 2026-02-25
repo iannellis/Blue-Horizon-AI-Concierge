@@ -125,11 +125,16 @@ system_prompt_filename = "rooms.txt"
 top_k = 4
 
 [rooms.db.pool]
-# App-side pool. Even with Neon pooler, this provides sane backpressure.
-min_size = 1
+# App-side pool. Even with Neon pooler this provides sane backpressure.
+# min_size=0: don't proactively hold connections; open on demand only.
+min_size = 0
 max_size = 10
 # Seconds to wait when acquiring a pooled connection before failing.
 timeout_s = 10.0
+# Close idle connections after this many seconds. Neon serverless suspends
+# compute after ~300 s of inactivity; 240 s keeps us safely under that
+# threshold so stale connections are dropped before the server kills them.
+max_idle_s = 240.0
 
 [rooms.db.guardrails]
 # Prevent huge responses from drowning your LLM.
@@ -137,9 +142,10 @@ max_rows = 50
 # Restrict queries to known hotel tables. Good safety belt.
 allow_only_hotel_tables = true
 
-[rooms.db.timeouts]
-# Postgres statement timeout (ms). Prevents long-running queries.
-statement_timeout_ms = 10000
+# NOTE: statement_timeout and search_path are set at the database role level:
+#   ALTER ROLE <role> SET statement_timeout = '10s';
+#   ALTER ROLE <role> SET search_path = public;
+# This ensures they apply correctly under PgBouncer transaction pooling.
 
 [rooms.db.retry]
 # Retries for transient connection errors like connection closed unexpectedly.

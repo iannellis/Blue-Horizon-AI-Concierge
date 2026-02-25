@@ -6,7 +6,7 @@ required tool calls presence, rooms tool outcomes with database invariant checks
 LLM-as-judge rubric evaluation, and RAG metrics scoring.
 
 The evaluators are designed to emit LangSmith-compatible dicts and work with
-the compact run outputs produced by the evaluation target in eval/langsmith_target.py.
+the compact run outputs produced by the evaluation target in eval/langsmith_target.
 """
 
 from __future__ import annotations

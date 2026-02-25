@@ -1,41 +1,36 @@
-"""LangSmith evaluation target for multi-turn Blue Horizon orchestration runs.
+"""Async callback handler for capturing routing and tool artifacts.
 
-This module provides an async target function compatible with LangSmith
-evaluate/aevaluate APIs.  It runs a full multi-turn case through the shared
-OrchestrationManager, capturing per-turn routing decisions, tool summaries,
-and RAG context snippets for downstream evaluators.
+Contains ``RunSqlOutput`` (the typed SQL tool payload model) and
+``EvalCaptureCallback`` (the per-turn capture handler).
 """
 
 from __future__ import annotations
 
 import ast
-import asyncio
 import json
-import logging
 import re
 from collections.abc import Mapping
-from typing import Any
-from uuid import UUID, uuid4
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.callbacks import AsyncCallbackHandler
-from langchain_core.messages import (
-    AIMessage,
-    BaseMessage,
-    ToolMessage,
-)
+
+if TYPE_CHECKING:
+    from uuid import UUID
+from langchain_core.messages import ToolMessage
 from pydantic import BaseModel, ValidationError
 
-from blue_horizon.agents.orchestration import OrchestrationManager
-from eval._utils import (
-    coerce_float as _coerce_float,
+from eval._utils import coerce_int as _coerce_int
+from eval.langsmith_target._filter_utils import (
+    _INFO_FILTER_KEYS,
+    _normalize_info_filters_strict,
 )
-from eval._utils import (
-    coerce_int as _coerce_int,
+from eval.langsmith_target._text_utils import (
+    _get_tool_name,
+    _input_keys,
+    _preview,
 )
-from eval._utils import (
-    coerce_strict_bool as _coerce_strict_bool,
-)
-from eval.config import load_eval_config
+
+_ROUTE_KEY = "route"  # key from orchestration.py
 
 
 class RunSqlOutput(BaseModel):
@@ -50,7 +45,6 @@ class RunSqlOutput(BaseModel):
         status: Tool status string (e.g., "ok" or "error").
         rowcount: Number of rows returned or affected by the statement.
         rows: Result rows returned by the tool, when present.
-        rows: Result rows returned by the tool, when present.
         truncated: Whether the tool output was truncated by the agent guardrails.
         error: User-facing error message when the tool fails.
 
@@ -61,426 +55,6 @@ class RunSqlOutput(BaseModel):
     truncated: bool | None = None
     error: str | None = None
     rows: list[dict[str, Any]] | None = None
-
-
-logger = logging.getLogger(__name__)
-
-_ORCHESTRATION_LOCK = asyncio.Lock()
-_ORCHESTRATION: OrchestrationManager | None = None
-
-_ROUTE_KEY = "route"  # key from orchestration.py
-
-# Filter keys present in ParsedQuery that map to retrieval metadata filters.
-_INFO_FILTER_KEYS: frozenset[str] = frozenset(
-    {
-        "booking_required",
-        "min_price",
-        "max_price",
-        "min_notice_hours",
-        "max_notice_hours",
-        "min_duration_minutes",
-        "max_duration_minutes",
-    },
-)
-
-
-async def run_example(
-    example: dict[str, Any],
-) -> dict[str, Any]:
-    """Run a single LangSmith example through the orchestration pipeline.
-
-    Args:
-        example: LangSmith dataset example input containing case_id, turns, and tags.
-
-    Returns:
-        Dict containing turn outputs and case tags.
-
-    Raises:
-        KeyError: If required keys are missing from the example.
-
-    """
-    case_id = str(example["case_id"])
-    turns = example["turns"]
-    case_tags_raw = example.get("tags") or []
-    case_tags = list(case_tags_raw)
-
-    orchestration_mgr = await ensure_orchestration_ready()
-
-    thread_id = uuid4().hex
-
-    turn_outputs: list[dict[str, Any]] = []
-
-    for turn_index, turn in enumerate(turns):
-        user_text = str(turn["user"])
-        callback = EvalCaptureCallback()
-        tags = ["eval", f"case:{case_id}", f"turn:{turn_index}", *case_tags]
-        metadata = {
-            "case_id": case_id,
-            "turn_index": turn_index,
-        }
-
-        result = await orchestration_mgr.ainvoke(
-            thread_id=thread_id,
-            user_text=user_text,
-            callbacks=[callback],
-            tags=tags,
-            metadata=metadata,
-        )
-
-        messages_raw = result.get("messages", [])
-        messages = messages_raw if isinstance(messages_raw, list) else []
-        assistant_text = _extract_assistant_text(messages)
-
-        route_pred = callback.route_pred
-        if route_pred is None:
-            fallback_route = result.get(_ROUTE_KEY)
-            if isinstance(fallback_route, str):
-                route_pred = fallback_route
-
-        turn_outputs.append(
-            {
-                "assistant_text": assistant_text,
-                "route_pred": route_pred,
-                "tool_summary": callback.tool_summary,
-                "contexts_used": callback.contexts_used,
-            },
-        )
-
-    return {
-        "turn_outputs": turn_outputs,
-        "case_tags": case_tags,
-    }
-
-
-def _normalize_info_filters_strict(
-    filters: Mapping[str, object] | None,
-) -> tuple[dict[str, object] | None, list[str]]:
-    """Normalize amenity/service filters using strict canonical keys.
-
-    Args:
-        filters: Raw filters dict passed to an info tool, if any.
-
-    Returns:
-        Tuple of (normalized filters or None, unknown key list).
-
-    """
-    # Evaluators rely on these canonical keys to compare expected filters.
-    if not filters:
-        return None, []
-    if not isinstance(filters, dict):
-        return None, ["<non_dict_filters>"]
-
-    canonical_keys = {
-        "booking_required",
-        "min_price",
-        "max_price",
-        "min_notice_hours",
-        "max_notice_hours",
-        "min_duration_minutes",
-        "max_duration_minutes",
-    }
-
-    norm: dict[str, object] = {}
-    unknown_keys: list[str] = []
-
-    for key, value in filters.items():
-        canonical = _canonicalize_filter_key(str(key))
-        if canonical not in canonical_keys:
-            unknown_keys.append(str(key))
-            continue
-
-        coerced = _coerce_strict_filter_value(canonical, value)
-        if coerced is None:
-            unknown_keys.append(f"{key}:<bad_value>")
-            continue
-        norm[canonical] = coerced
-
-    _swap_range_if_needed(norm, "min_price", "max_price")
-    _swap_range_if_needed(norm, "min_notice_hours", "max_notice_hours")
-    _swap_range_if_needed(norm, "min_duration_minutes", "max_duration_minutes")
-
-    return (norm or None), unknown_keys
-
-
-def _canonicalize_filter_key(key: str) -> str:
-    """Normalize filter keys for strict comparisons.
-
-    Args:
-        key: Raw filter key.
-
-    Returns:
-        Canonicalized key string.
-
-    """
-    normalized = key.strip().lower().replace(" ", "_").replace("-", "_")
-    normalized = re.sub(r"_+", "_", normalized)
-    if normalized == "duration_mintues":
-        return "duration_minutes"
-    return normalized
-
-
-def _coerce_strict_filter_value(
-    canonical_key: str,
-    value: object,
-) -> object | None:
-    """Coerce filter values based on a strict canonical key.
-
-    Args:
-        canonical_key: Canonical filter key.
-        value: Raw filter value.
-
-    Returns:
-        Coerced value when parseable, otherwise None.
-
-    """
-    if canonical_key == "booking_required":
-        return _coerce_strict_bool(value)
-    if canonical_key.endswith("_price"):
-        return _coerce_float(value)
-    return _coerce_int(value)
-
-
-def _swap_range_if_needed(
-    norm: dict[str, object],
-    min_key: str,
-    max_key: str,
-) -> None:
-    """Swap min/max values if they are reversed.
-
-    Args:
-        norm: Normalized filters dict updated in place.
-        min_key: Minimum value key.
-        max_key: Maximum value key.
-
-    """
-    min_val = norm.get(min_key)
-    max_val = norm.get(max_key)
-    if (
-        isinstance(min_val, (int, float))
-        and not isinstance(min_val, bool)
-        and isinstance(max_val, (int, float))
-        and not isinstance(max_val, bool)
-        and float(min_val) > float(max_val)
-    ):
-        norm[min_key], norm[max_key] = norm[max_key], norm[min_key]
-
-
-def _extract_filters_from_tool_inputs(inputs: object) -> dict[str, object] | None:
-    """Extract a filters dict from tool inputs payloads.
-
-    Args:
-        inputs: Tool inputs payload, often a mapping.
-
-    Returns:
-        Filters dict if present, otherwise None.
-
-    """
-    if not isinstance(inputs, Mapping):
-        return None
-    raw_filters = inputs.get("filters")
-    if isinstance(raw_filters, Mapping):
-        return dict(raw_filters)
-
-    excluded_keys = {"query", "k", "top_k"}
-    extracted = {
-        str(key): value
-        for key, value in inputs.items()
-        if str(key) not in excluded_keys
-    }
-    return extracted or None
-
-
-def _preview(obj: object, max_len: int = 200) -> str:
-    """Create a short, redacted preview of a value.
-
-    Args:
-        obj: Value to preview.
-        max_len: Maximum preview length.
-
-    Returns:
-        Sanitized preview string.
-
-    """
-    if max_len <= 0:
-        return ""
-    text = _safe_str(obj)
-    text = _redact_secrets(text)
-    text = " ".join(text.split())
-    if len(text) <= max_len:
-        return text
-    return f"{text[: max_len - 1]}…"
-
-
-def _safe_str(obj: object) -> str:
-    """Safely convert an object to a string.
-
-    Args:
-        obj: Object to convert.
-
-    Returns:
-        String representation of the object.
-
-    """
-    if isinstance(obj, str):
-        return obj
-    try:
-        return json.dumps(obj, ensure_ascii=False, default=str)
-    except (TypeError, ValueError):
-        return repr(obj)
-
-
-def _redact_secrets(text: str) -> str:
-    """Redact obvious secret-like substrings from a text blob.
-
-    Args:
-        text: Input text to sanitize.
-
-    Returns:
-        Redacted text safe for logging.
-
-    """
-    redacted = re.sub(r"sk-[A-Za-z0-9]{10,}", "[REDACTED]", text)
-    redacted = re.sub(r"Bearer\\s+\\S+", "Bearer [REDACTED]", redacted)
-    redacted = re.sub(
-        r"(\\w+://)([^:@\\s]+):([^@\\s]+)@",
-        r"\\1[REDACTED]:[REDACTED]@",
-        redacted,
-    )
-    secret_keys = (
-        "OPENAI_API_KEY",
-        "GOOGLE_API_KEY",
-        "LANGSMITH_API_KEY",
-    )
-    for key in secret_keys:
-        if key in redacted:
-            redacted = redacted.replace(key, "[REDACTED]")
-    return redacted
-
-
-def _input_keys(obj: object, max_keys: int = 20) -> list[str]:
-    """Extract a capped list of input keys from a mapping.
-
-    Args:
-        obj: Tool input payload.
-        max_keys: Maximum number of keys to return.
-
-    Returns:
-        Sorted list of keys when available, otherwise an empty list.
-
-    """
-    if not isinstance(obj, Mapping):
-        return []
-    keys = sorted(str(k) for k in obj)
-    return keys[:max_keys]
-
-
-def _extract_assistant_text(messages: list[BaseMessage]) -> str:
-    """Extract the last assistant message content from a list of messages.
-
-    Args:
-        messages: Ordered list of LangChain messages.
-
-    Returns:
-        The last assistant message content, or an empty string if none found.
-
-    """
-    for message in reversed(messages):
-        if isinstance(message, AIMessage):
-            return str(message.content)
-    return ""
-
-
-def _extract_tool_payload(output: object) -> object:
-    """Extract the tool payload from LangChain tool outputs.
-
-    Args:
-        output: Tool output payload, which may be a ToolMessage.
-
-    Returns:
-        The raw payload content for downstream parsing.
-
-    """
-    if isinstance(output, ToolMessage):
-        if output.artifact is not None:
-            return output.artifact
-        return output.content
-    return output
-
-
-def _parse_tool_content(content: object) -> object:
-    """Parse tool message content into Python objects when possible.
-
-    Args:
-        content: Tool content payload, often a JSON string.
-
-    Returns:
-        Parsed object when JSON is detected, otherwise the original content.
-
-    """
-    parsed: object = content
-    if isinstance(content, str):
-        stripped = content.strip()
-        if stripped.startswith(("[", "{")) and stripped.endswith(("]", "}")):
-            try:
-                parsed = json.loads(stripped)
-            except json.JSONDecodeError:
-                parsed = content
-    elif isinstance(content, list):
-        for block in content:
-            if not isinstance(block, Mapping):
-                continue
-            if block.get("type") == "json" and "json" in block:
-                parsed = block.get("json")
-                break
-            if block.get("type") == "text" and "text" in block:
-                text = block.get("text")
-                if isinstance(text, str):
-                    parsed = _parse_tool_content(text)
-                    break
-    return parsed
-
-
-async def ensure_orchestration_ready() -> OrchestrationManager:
-    """Ensure the shared orchestration manager is initialized and ready.
-
-    The manager is constructed with ``pgsql_eval_db_url`` from the eval config
-    so that the rooms SQL agent writes to the same database that evaluator pool
-    connections read from.  When ``PGSQL_EVAL_DB_URL`` is not set the value is
-    ``None`` and the agent falls back to ``PGSQL_DB_URL``.
-
-    Returns:
-        The shared OrchestrationManager instance.
-
-    Raises:
-        RuntimeError: If the orchestration manager does not become ready in time.
-
-    """
-    global _ORCHESTRATION  # noqa: PLW0603
-    if _ORCHESTRATION is not None and _ORCHESTRATION.is_ready:
-        return _ORCHESTRATION
-
-    async with _ORCHESTRATION_LOCK:
-        if _ORCHESTRATION is None:
-            eval_cfg = load_eval_config()
-            _ORCHESTRATION = OrchestrationManager(
-                pgsql_db_url=eval_cfg.pgsql_eval_db_url,
-            )
-        if _ORCHESTRATION.is_ready:
-            return _ORCHESTRATION
-        await _ORCHESTRATION.start()
-
-        timeout_s = load_eval_config().orchestration.ready_timeout_s
-        start = asyncio.get_running_loop().time()
-        while not _ORCHESTRATION.is_ready:
-            if asyncio.get_running_loop().time() - start >= timeout_s:
-                msg = "OrchestrationManager did not become ready within timeout."
-                raise RuntimeError(msg)
-            await asyncio.sleep(0.2)
-
-    if _ORCHESTRATION is None:
-        msg = "OrchestrationManager was not initialized."
-        raise RuntimeError(msg)
-    return _ORCHESTRATION
 
 
 class EvalCaptureCallback(AsyncCallbackHandler):
@@ -928,24 +502,3 @@ class EvalCaptureCallback(AsyncCallbackHandler):
         if isinstance(value, (list, tuple, set)):
             return [EvalCaptureCallback._json_safe(item) for item in value]
         return str(value)
-
-
-def _get_tool_name(metadata: dict[str, Any]) -> str | None:
-    """Extract the tool name from callback metadata.
-
-    Args:
-        metadata: Callback metadata dict.
-
-    Returns:
-        Tool name string if available.
-
-    """
-    name = metadata.get("name") or metadata.get("tool_name")
-    if isinstance(name, str):
-        return name
-    serialized = metadata.get("serialized")
-    if isinstance(serialized, dict):
-        serialized_name = serialized.get("name")
-        if isinstance(serialized_name, str):
-            return serialized_name
-    return None

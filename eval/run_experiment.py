@@ -261,11 +261,12 @@ def _has_rooms_cases(examples: Iterable[Example]) -> bool:
     return False
 
 
-async def _setup_eval_schema(cfg: EvalConfig) -> None:
-    """Reset the Neon development branch and apply the database URL override.
+async def _prepare_eval_database(cfg: EvalConfig) -> None:
+    """Redirect the DB URL to the eval database and reset the Neon branch.
 
-    Applies any ``PGSQL_EVAL_DB_URL`` override, then calls the Neon management
-    API to restore the configured branch to its parent baseline.
+    Applies any ``PGSQL_EVAL_DB_URL`` override so the rooms agent connects to
+    the eval database, then calls the Neon management API to restore the
+    configured branch to its parent baseline.
 
     Args:
         cfg: The loaded evaluation configuration.
@@ -281,7 +282,7 @@ async def _setup_eval_schema(cfg: EvalConfig) -> None:
         cfg.neon.project_id,
     )
     await reset_neon_branch(cfg.neon, api_key=cfg.neon_api_key)
-    logger.info("Eval schema ready (Neon branch reset complete).")
+    logger.info("Eval database ready (Neon branch reset complete).")
 
 
 def _override_eval_db_url(cfg: EvalConfig) -> None:
@@ -407,7 +408,7 @@ async def main() -> None:
     examples = _load_dataset_examples(dataset_name, limit)
     has_rooms = _has_rooms_cases(examples)
     if has_rooms:
-        await _setup_eval_schema(cfg)
+        await _prepare_eval_database(cfg)
 
     try:
         results = await aevaluate(run_example, examples, **aevaluate_kwargs)

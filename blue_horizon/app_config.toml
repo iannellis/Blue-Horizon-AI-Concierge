@@ -143,7 +143,7 @@ statement_timeout_ms = 10000
 
 [rooms.db.retry]
 # Retries for transient connection errors like connection closed unexpectedly.
-max_transient_retries = 1
+max_transient_retries = 3
 # Small backoff (seconds) before retry.
 transient_retry_backoff_s = 0.15
 # WARNING: Retrying writes can cause duplicate effects if the write actually succeeded but connection died before you got the response.

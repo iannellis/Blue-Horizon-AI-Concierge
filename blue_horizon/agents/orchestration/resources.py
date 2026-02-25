@@ -76,7 +76,7 @@ class OrchestrationResources:
     _router: Runnable[list[BaseMessage], RouteDecision]
     _checkpointer: MemorySaver
 
-    def __init__(self) -> None:
+    def __init__(self, *, pgsql_db_url: str | None = None) -> None:
         """Initialize orchestration resources.
 
         This constructor performs only lightweight work: it reads the orchestration
@@ -84,6 +84,14 @@ class OrchestrationResources:
         and builds the router runnable.
 
         Heavy work (connectivity checks, agent compilation) occurs in startup_check().
+
+        Args:
+            pgsql_db_url: Optional database URL override for the rooms SQL agent.
+                When provided, takes precedence over the ``PGSQL_DB_URL`` value
+                from the application configuration.  Pass this when the caller
+                (e.g., the stress-test harness) operates against a separate
+                evaluation database and needs the agent to write to that same
+                database so that reconciliation queries see the changes.
 
         Raises:
             RuntimeError: If configuration or prompt resolution fails.
@@ -110,9 +118,10 @@ class OrchestrationResources:
         )
         self._info_agent = None
 
+        rooms_db_url = pgsql_db_url or app_config.pgsql_db_url
         self._rooms_config = app_config.rooms
         self._rooms_resources = RoomsSqlResources(
-            pgsql_db_url=app_config.pgsql_db_url,
+            pgsql_db_url=rooms_db_url,
             config=self._rooms_config,
         )
         self._rooms_agent = None

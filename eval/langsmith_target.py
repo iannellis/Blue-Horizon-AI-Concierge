@@ -443,6 +443,11 @@ def _parse_tool_content(content: object) -> object:
 async def ensure_orchestration_ready() -> OrchestrationManager:
     """Ensure the shared orchestration manager is initialized and ready.
 
+    The manager is constructed with ``pgsql_eval_db_url`` from the eval config
+    so that the rooms SQL agent writes to the same database that evaluator pool
+    connections read from.  When ``PGSQL_EVAL_DB_URL`` is not set the value is
+    ``None`` and the agent falls back to ``PGSQL_DB_URL``.
+
     Returns:
         The shared OrchestrationManager instance.
 
@@ -456,7 +461,10 @@ async def ensure_orchestration_ready() -> OrchestrationManager:
 
     async with _ORCHESTRATION_LOCK:
         if _ORCHESTRATION is None:
-            _ORCHESTRATION = OrchestrationManager()
+            eval_cfg = load_eval_config()
+            _ORCHESTRATION = OrchestrationManager(
+                pgsql_db_url=eval_cfg.pgsql_eval_db_url,
+            )
         if _ORCHESTRATION.is_ready:
             return _ORCHESTRATION
         await _ORCHESTRATION.start()

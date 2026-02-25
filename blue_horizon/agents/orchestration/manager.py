@@ -57,9 +57,18 @@ class OrchestrationManager:
     _lock: asyncio.Lock
     _stop_event: asyncio.Event
 
-    def __init__(self) -> None:
-        """Initialize the orchestration manager."""
-        self._resources = OrchestrationResources()
+    def __init__(self, *, pgsql_db_url: str | None = None) -> None:
+        """Initialize the orchestration manager.
+
+        Args:
+            pgsql_db_url: Optional database URL override forwarded to the rooms
+                SQL agent.  When set, the rooms agent uses this URL instead of
+                the ``PGSQL_DB_URL`` application setting.  Use this in test
+                harnesses that operate against a separate evaluation database so
+                that the agent's writes are visible to the reconciliation pool.
+
+        """
+        self._resources = OrchestrationResources(pgsql_db_url=pgsql_db_url)
         self._factory = OrchestrationAgentFactory(resources=self._resources)
 
         llm_concurrency = self._resources.get_config().orchestration.llm_concurrency

@@ -178,11 +178,20 @@ def _load_config() -> StressRunConfig:
     )
 
 
-async def _start_orchestration() -> OrchestrationManager:
+async def _start_orchestration(*, db_url: str) -> OrchestrationManager:
     """Start the orchestrator and wait for readiness with a configured timeout.
 
-    The timeout is read from ``eval_config.toml`` via
+    The timeout is read from ``stress_config.toml`` via
     ``orchestration.ready_timeout_s``.
+
+    The ``db_url`` is forwarded to :class:`OrchestrationManager` so that the
+    rooms SQL agent writes to the same database that the reconciliation pool
+    reads from.  When ``PGSQL_EVAL_DB_URL`` is set, ``db_url`` is that eval
+    URL; without it, ``db_url`` is ``PGSQL_DB_URL``.  Either way, agent
+    writes and reconciliation queries share one database.
+
+    Args:
+        db_url: Postgres connection URL used by the rooms SQL agent.
 
     Returns:
         A ready ``OrchestrationManager`` instance.
@@ -192,7 +201,7 @@ async def _start_orchestration() -> OrchestrationManager:
 
     """
     ready_timeout_s = load_stress_config().orchestration.ready_timeout_s
-    orchestration = OrchestrationManager()
+    orchestration = OrchestrationManager(pgsql_db_url=db_url)
     await orchestration.start()
 
     ready_deadline = time.perf_counter() + ready_timeout_s
@@ -1580,7 +1589,7 @@ async def run_stress() -> None:
 
     start_time = time.perf_counter()
     try:
-        orchestration = await _start_orchestration()
+        orchestration = await _start_orchestration(db_url=cfg.db_url)
         pool = await open_schema_pool(cfg.db_url, max_size=cfg.pool_max)
         targets, hot_targets = await _init_branch_and_targets(
             pool, cfg, neon_cfg, api_key=neon_api_key,

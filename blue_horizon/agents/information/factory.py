@@ -20,7 +20,7 @@ from blue_horizon.agents.information.models import (
 from blue_horizon.agents.information.retrieval import build_filters
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Sequence
 
     from langgraph.graph.state import CompiledStateGraph
 
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _latest_user_text(messages: list[BaseMessage]) -> str:
+def _latest_user_text(messages: Sequence[BaseMessage]) -> str:
     """Return the most recent user message content as a string.
 
     Args:

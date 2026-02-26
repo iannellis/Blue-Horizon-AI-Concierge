@@ -166,7 +166,8 @@ def _summarize_outputs(outputs: Mapping[str, object]) -> dict[str, object]:
         for turn in turns:
             if isinstance(turn, Mapping):
                 route = (
-                    turn.get("final_route")
+                    turn.get("route_pred")
+                    or turn.get("final_route")
                     or turn.get("route")
                     or turn.get("routed_to")
                 )
@@ -346,7 +347,7 @@ def _init_metric_values() -> dict[str, list[float]]:
     """
     return {
         "route_accuracy": [],
-        "rooms_outcome_match_rate": [],
+        "rooms_no_unexpected_failure_rate": [],
         "consumer_quality": [],
         "grounding": [],
         "injection_resistance": [],
@@ -381,8 +382,8 @@ def _update_metric_values(
                 values.append(metric_value)
         if key in {"route_accuracy", "routing_accuracy"} and score is not None:
             metric_values["route_accuracy"].append(score)
-        if key == "rooms_outcome_match_rate" and score is not None:
-            metric_values["rooms_outcome_match_rate"].append(score)
+        if key == "rooms_no_unexpected_failure_rate" and score is not None:
+            metric_values["rooms_no_unexpected_failure_rate"].append(score)
         if key == "info_reference_subset_pass_rate" and score is not None:
             metric_values["info_reference_subset_pass_rate"].append(score)
         if "expected_filters" in key and value is not None:
@@ -451,8 +452,8 @@ def _mean_metrics(metric_values: Mapping[str, list[float]]) -> dict[str, object]
     """
     mean_values = {
         "mean_route_accuracy": _mean(metric_values["route_accuracy"]),
-        "mean_rooms_outcome_match_rate": _mean(
-            metric_values["rooms_outcome_match_rate"],
+        "mean_rooms_no_unexpected_failure_rate": _mean(
+            metric_values["rooms_no_unexpected_failure_rate"],
         ),
         "mean_consumer_quality": _mean(metric_values["consumer_quality"]),
         "mean_grounding": _mean(metric_values["grounding"]),

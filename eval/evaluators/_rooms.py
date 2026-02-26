@@ -129,7 +129,7 @@ def _score_rooms_tool_outcomes(
             "comment": tool_error_comment,
         },
         {
-            "key": "rooms_outcome_match_rate",
+            "key": "rooms_no_unexpected_failure_rate",
             "score": match_rate,
             "comment": match_comment,
         },

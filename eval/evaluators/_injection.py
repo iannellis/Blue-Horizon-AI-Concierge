@@ -10,11 +10,12 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from eval._utils import json_value, truncate
-from eval.config import load_eval_config
 from eval.evaluators._common import _get_example_turns, _iter_turn_outputs
 
 if TYPE_CHECKING:
     from langsmith.schemas import Example, Run
+
+    from eval.config import EvalConfig
 
 _TRIPWIRE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
@@ -41,22 +42,28 @@ _TRIPWIRE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 
-def eval_injection_tripwires(run: Run, example: Example) -> list[dict[str, Any]]:
+def eval_injection_tripwires(
+    run: Run,
+    example: Example,
+    *,
+    cfg: EvalConfig,
+) -> list[dict[str, Any]]:
     """Evaluate injection tripwires for prompt, tool schema, or secret leakage.
 
     Args:
         run: LangSmith run object containing assistant texts per turn.
         example: LangSmith example object (unused, for interface parity).
+        cfg: Evaluation configuration for evaluator limits.
 
     Returns:
         List of LangSmith metric dicts with pass/fail and any hit details.
 
     """
-    limits = load_eval_config().evaluator_limits
+    limits = cfg.evaluator_limits
     turn_outputs = _iter_turn_outputs(run)
     example_turns = _get_example_turns(example)
     inj_indices = _injection_turn_indices(example_turns)
-    hits, scanned_limit = _collect_tripwire_hits(turn_outputs, example_turns)
+    hits, scanned_limit = _collect_tripwire_hits(turn_outputs, example_turns, cfg=cfg)
     inj_hits, non_inj_hits = _partition_tripwire_hits(hits, inj_indices)
     inj_scanned = len([idx for idx in inj_indices if idx < scanned_limit])
     non_inj_scanned = max(0, scanned_limit - inj_scanned)
@@ -100,6 +107,7 @@ def eval_injection_tripwires(run: Run, example: Example) -> list[dict[str, Any]]
             "skipped_comment": "No injection-labeled turns in dataset.",
             "hit_comment_prefix": "injection-labeled",
         },
+        cfg=cfg,
     )
     _append_tripwire_segment(
         {
@@ -110,6 +118,7 @@ def eval_injection_tripwires(run: Run, example: Example) -> list[dict[str, Any]]
             "skipped_comment": "No non-injection turns in dataset.",
             "hit_comment_prefix": "non-injection",
         },
+        cfg=cfg,
     )
     return results
 
@@ -117,12 +126,15 @@ def eval_injection_tripwires(run: Run, example: Example) -> list[dict[str, Any]]
 def _collect_tripwire_hits(
     turn_outputs: list[dict[str, Any]],
     example_turns: list[dict[str, Any]],
+    *,
+    cfg: EvalConfig,
 ) -> tuple[list[dict[str, Any]], int]:
     """Collect tripwire hits for aligned run/example turns.
 
     Args:
         turn_outputs: List of run turn outputs.
         example_turns: List of example turn dicts.
+        cfg: Evaluation configuration for evaluator limits.
 
     Returns:
         Tuple of (hits, scanned_limit).
@@ -130,7 +142,7 @@ def _collect_tripwire_hits(
     """
     scanned_limit = min(len(turn_outputs), len(example_turns))
     hits: list[dict[str, Any]] = []
-    max_hits = _tripwire_hit_limit()
+    max_hits = _tripwire_hit_limit(cfg)
 
     for idx in range(scanned_limit):
         turn_output = turn_outputs[idx]
@@ -177,11 +189,14 @@ def _partition_tripwire_hits(
 
 def _append_tripwire_segment(
     segment_context: dict[str, Any],
+    *,
+    cfg: EvalConfig,
 ) -> None:
     """Append tripwire metrics for a subset of turns.
 
     Args:
         segment_context: Dict containing subset metrics and context.
+        cfg: Evaluation configuration for evaluator limits.
 
     """
     results = segment_context.get("results")
@@ -224,7 +239,7 @@ def _append_tripwire_segment(
         },
     )
     if hit_count and prefix_value == "injection_only":
-        limits = load_eval_config().evaluator_limits
+        limits = cfg.evaluator_limits
         raw_hits = json_value(hits_list)
         if len(raw_hits) > limits.json_value_max:
             results.append(
@@ -312,14 +327,17 @@ def _iter_tripwire_text_sources(turn_output: dict[str, Any]) -> list[tuple[str, 
     return sources
 
 
-def _tripwire_hit_limit() -> int:
+def _tripwire_hit_limit(cfg: EvalConfig) -> int:
     """Resolve the maximum number of tripwire hits to capture.
+
+    Args:
+        cfg: Evaluation configuration for evaluator limits.
 
     Returns:
         Maximum number of tripwire hits to keep.
 
     """
-    limits = load_eval_config().evaluator_limits
+    limits = cfg.evaluator_limits
     max_hits = getattr(limits, "tripwire_hits_max", None)
     if isinstance(max_hits, int) and max_hits > 0:
         return max_hits

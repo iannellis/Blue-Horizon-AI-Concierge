@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any, TypeGuard
 from psycopg_pool import AsyncConnectionPool
 
 from eval._utils import coerce_int, json_value
-from eval.config import load_eval_config
 from eval.evaluators._common import (
     _get_example_turns,
     _iter_turn_outputs,
@@ -20,6 +19,8 @@ from eval.evaluators._common import (
 
 if TYPE_CHECKING:
     from langsmith.schemas import Example, Run
+
+    from eval.config import EvalConfig
 
 try:  # Optional app import for DB URL lookup.
     from blue_horizon.config import load_app_config as _load_app_config
@@ -36,12 +37,15 @@ _EVAL_POOL: AsyncConnectionPool[Any] | None = None
 async def eval_rooms_outcome_and_invariants(
     run: Run,
     example: Example,
+    *,
+    cfg: EvalConfig,
 ) -> list[dict[str, Any]]:
     """Evaluate rooms tool outcomes and DB invariants for rooms turns.
 
     Args:
         run: LangSmith run object containing tool summaries.
         example: LangSmith example with per-turn ``expected_success`` flags.
+        cfg: Evaluation configuration with DB URL and evaluator limits.
 
     Returns:
         List of LangSmith metric dicts for tool outcomes and DB invariants.
@@ -61,8 +65,8 @@ async def eval_rooms_outcome_and_invariants(
             },
         ]
 
-    outcome_metrics = _score_rooms_tool_outcomes(run, example)
-    invariants_results = await _check_rooms_db_invariants()
+    outcome_metrics = _score_rooms_tool_outcomes(run, example, cfg)
+    invariants_results = await _check_rooms_db_invariants(cfg)
     return [
         *outcome_metrics,
         *invariants_results,
@@ -72,19 +76,21 @@ async def eval_rooms_outcome_and_invariants(
 def _score_rooms_tool_outcomes(
     run: Run,
     example: Example,
+    cfg: EvalConfig,
 ) -> list[dict[str, Any]]:
     """Score rooms tool outcomes against expected results.
 
     Args:
         run: LangSmith run object containing tool summaries.
         example: LangSmith example with per-turn ``expected_success`` flags.
+        cfg: Evaluation configuration for evaluator limits.
 
     Returns:
         List of LangSmith metrics for tool errors, outcome match rate, and a
         soft rowcount presence check.
 
     """
-    limits = load_eval_config().evaluator_limits
+    limits = cfg.evaluator_limits
     turn_outputs = _iter_turn_outputs(run)
     example_turns = _get_example_turns(example)
 
@@ -433,14 +439,17 @@ def _format_rowcount_metric(counts: dict[str, int]) -> tuple[float, str]:
     return score, comment
 
 
-async def _check_rooms_db_invariants() -> list[dict[str, Any]]:
+async def _check_rooms_db_invariants(cfg: EvalConfig) -> list[dict[str, Any]]:
     """Check rooms DB invariants in the public schema.
+
+    Args:
+        cfg: Evaluation configuration with DB URL.
 
     Returns:
         List of LangSmith metric dicts for DB invariants.
 
     """
-    pool = await _ensure_eval_pool()
+    pool = await _ensure_eval_pool(cfg)
     double_booking_rows = 0
     null_status_count = 0
 
@@ -501,8 +510,11 @@ async def _check_rooms_db_invariants() -> list[dict[str, Any]]:
     ]
 
 
-async def _ensure_eval_pool() -> AsyncConnectionPool[Any]:
+async def _ensure_eval_pool(cfg: EvalConfig) -> AsyncConnectionPool[Any]:
     """Create or return the shared async connection pool for evaluator queries.
+
+    Args:
+        cfg: Evaluation configuration with DB URL.
 
     Returns:
         Open AsyncConnectionPool instance.
@@ -515,7 +527,7 @@ async def _ensure_eval_pool() -> AsyncConnectionPool[Any]:
     async with _EVAL_POOL_LOCK:
         if _EVAL_POOL is not None:
             return _EVAL_POOL
-        conninfo = await _get_eval_db_url()
+        conninfo = await _get_eval_db_url(cfg)
         pool = AsyncConnectionPool(
             conninfo=conninfo,
             min_size=1,
@@ -528,8 +540,11 @@ async def _ensure_eval_pool() -> AsyncConnectionPool[Any]:
         return pool
 
 
-async def _get_eval_db_url() -> str:
+async def _get_eval_db_url(cfg: EvalConfig) -> str:
     """Resolve the evaluation database URL.
+
+    Args:
+        cfg: Evaluation configuration with DB URL.
 
     Returns:
         Database URL string.
@@ -538,7 +553,7 @@ async def _get_eval_db_url() -> str:
         RuntimeError: If no database URL is available.
 
     """
-    env_url = load_eval_config().pgsql_eval_db_url
+    env_url = cfg.pgsql_eval_db_url
     if env_url:
         return env_url
 

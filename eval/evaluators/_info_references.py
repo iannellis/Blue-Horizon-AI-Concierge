@@ -9,24 +9,30 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from eval._utils import json_value, truncate
-from eval.config import load_eval_config
 
 if TYPE_CHECKING:
     from langsmith.schemas import Example, Run
 
+    from eval.config import EvalConfig
 
-def eval_info_reference_subset(run: Run, example: Example) -> list[dict[str, Any]]:
+
+def eval_info_reference_subset(
+    run: Run,
+    example: Example,
+    *,
+    cfg: EvalConfig,
+) -> list[dict[str, Any]]:
     """Evaluate whether expected reference snippets appear in retrieval contexts.
 
     Args:
         run: LangSmith run object containing turn outputs.
         example: LangSmith example object containing dataset turns.
+        cfg: Evaluation configuration for limits and Ragas parameters.
 
     Returns:
         List of LangSmith feedback dicts for subset reference checks.
 
     """
-    cfg = load_eval_config()
     limits = cfg.evaluator_limits
     max_reference_chars = cfg.ragas.reference_chars
     turn_outputs, example_turns, reference_answers = _rag_extract_turn_inputs(

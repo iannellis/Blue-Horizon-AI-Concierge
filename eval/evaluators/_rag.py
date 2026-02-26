@@ -27,10 +27,11 @@ from ragas.metrics.collections import (
 )
 
 from eval._utils import json_value
-from eval.config import load_eval_config
 
 if TYPE_CHECKING:
     from langsmith.schemas import Example, Run
+
+    from eval.config import EvalConfig, RagasConfig
 
 try:  # Optional dependency for Gemini clients used by Ragas.
     from google import genai as _genai
@@ -130,18 +131,20 @@ class AsyncFromSyncInstructorLLM(InstructorBaseRagasLLM):
 async def eval_rag_metrics_info_turns(
     run: Run,
     example: Example,
+    *,
+    cfg: EvalConfig,
 ) -> list[dict[str, Any]]:
     """Compute Ragas metrics for information turns in a run.
 
     Args:
         run: LangSmith run object containing turn outputs.
         example: LangSmith example object containing dataset turns.
+        cfg: Evaluation configuration with Ragas parameters.
 
     Returns:
         List of LangSmith feedback dicts with per-turn Ragas scores and means.
 
     """
-    cfg = load_eval_config()
     ragas_cfg = cfg.ragas
     limits = cfg.evaluator_limits
     max_turns = ragas_cfg.turns_max
@@ -165,7 +168,7 @@ async def eval_rag_metrics_info_turns(
             },
         ]
 
-    metrics = await _get_ragas_metrics()
+    metrics = await _get_ragas_metrics(ragas_cfg)
 
     per_turn: list[dict[str, Any]] = []
     faithfulness_scores: list[float] = []
@@ -307,10 +310,13 @@ def _rag_extract_turn_inputs(
     return turn_outputs, example_turns, reference_answers
 
 
-async def _get_ragas_metrics() -> tuple[
-    Faithfulness, AnswerRelevancy, ContextPrecision, ContextRecall,
-]:
+async def _get_ragas_metrics(
+    ragas_cfg: RagasConfig,
+) -> tuple[Faithfulness, AnswerRelevancy, ContextPrecision, ContextRecall]:
     """Lazily initialize and return Ragas metrics with configured models.
+
+    Args:
+        ragas_cfg: Ragas configuration for model initialization.
 
     Returns:
         Tuple of metric instances (faithfulness, answer_relevancy,
@@ -325,8 +331,8 @@ async def _get_ragas_metrics() -> tuple[
         if _RAGAS_METRICS is not None:
             return _RAGAS_METRICS
         _ensure_google_api_key_for_ragas()
-        ragas_llm = _build_ragas_llm()
-        ragas_embeddings = _ensure_base_embedding(_build_ragas_embeddings())
+        ragas_llm = _build_ragas_llm(ragas_cfg)
+        ragas_embeddings = _ensure_base_embedding(_build_ragas_embeddings(ragas_cfg))
         _RAGAS_METRICS = (
             Faithfulness(llm=ragas_llm),
             AnswerRelevancy(llm=ragas_llm, embeddings=ragas_embeddings),
@@ -350,15 +356,17 @@ def _ensure_google_api_key_for_ragas() -> None:
         os.environ["GOOGLE_API_KEY"] = gemini_key
 
 
-def _build_ragas_llm() -> InstructorBaseRagasLLM:
+def _build_ragas_llm(ragas_cfg: RagasConfig) -> InstructorBaseRagasLLM:
     """Build the Ragas LLM configured for Gemini.
+
+    Args:
+        ragas_cfg: Ragas configuration with model and token settings.
 
     Returns:
         Ragas LLM instance configured for the Gemini provider.
 
     """
     client = _get_google_genai_client()
-    ragas_cfg = load_eval_config().ragas
     sync_llm = llm_factory(
         model=ragas_cfg.llm_model,
         provider="google",
@@ -368,15 +376,19 @@ def _build_ragas_llm() -> InstructorBaseRagasLLM:
     return AsyncFromSyncInstructorLLM(sync_llm=sync_llm)
 
 
-def _build_ragas_embeddings() -> BaseRagasEmbeddings | BaseRagasEmbedding:
+def _build_ragas_embeddings(
+    ragas_cfg: RagasConfig,
+) -> BaseRagasEmbeddings | BaseRagasEmbedding:
     """Build the Ragas embeddings configured for Gemini.
+
+    Args:
+        ragas_cfg: Ragas configuration with embedding model settings.
 
     Returns:
         Ragas embeddings instance configured for the Gemini provider.
 
     """
     client = _get_google_genai_client()
-    ragas_cfg = load_eval_config().ragas
     return embedding_factory(
         provider="google",
         model=ragas_cfg.embedding_model,

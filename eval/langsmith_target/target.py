@@ -8,13 +8,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from blue_horizon.agents.orchestration import OrchestrationManager
-from eval.config import load_eval_config
 from eval.langsmith_target._callback import EvalCaptureCallback
 from eval.langsmith_target._text_utils import _extract_assistant_text
+
+if TYPE_CHECKING:
+    from eval.config import EvalConfig
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +28,14 @@ _ROUTE_KEY = "route"  # key from orchestration.py
 
 async def run_example(
     example: dict[str, Any],
+    *,
+    cfg: EvalConfig,
 ) -> dict[str, Any]:
     """Run a single LangSmith example through the orchestration pipeline.
 
     Args:
         example: LangSmith dataset example input containing case_id, turns, and tags.
+        cfg: Evaluation configuration for orchestration setup.
 
     Returns:
         Dict containing turn outputs and case tags.
@@ -44,7 +49,7 @@ async def run_example(
     case_tags_raw = example.get("tags") or []
     case_tags = list(case_tags_raw)
 
-    orchestration_mgr = await ensure_orchestration_ready()
+    orchestration_mgr = await ensure_orchestration_ready(cfg)
 
     thread_id = uuid4().hex
 
@@ -92,13 +97,16 @@ async def run_example(
     }
 
 
-async def ensure_orchestration_ready() -> OrchestrationManager:
+async def ensure_orchestration_ready(cfg: EvalConfig) -> OrchestrationManager:
     """Ensure the shared orchestration manager is initialized and ready.
 
     The manager is constructed with ``pgsql_eval_db_url`` from the eval config
     so that the rooms SQL agent writes to the same database that evaluator pool
     connections read from.  When ``PGSQL_EVAL_DB_URL`` is not set the value is
     ``None`` and the agent falls back to ``PGSQL_DB_URL``.
+
+    Args:
+        cfg: Evaluation configuration with orchestration settings and DB URL.
 
     Returns:
         The shared OrchestrationManager instance.
@@ -113,15 +121,14 @@ async def ensure_orchestration_ready() -> OrchestrationManager:
 
     async with _ORCHESTRATION_LOCK:
         if _ORCHESTRATION is None:
-            eval_cfg = load_eval_config()
             _ORCHESTRATION = OrchestrationManager(
-                pgsql_db_url=eval_cfg.pgsql_eval_db_url,
+                pgsql_db_url=cfg.pgsql_eval_db_url,
             )
         if _ORCHESTRATION.is_ready:
             return _ORCHESTRATION
         await _ORCHESTRATION.start()
 
-        timeout_s = load_eval_config().orchestration.ready_timeout_s
+        timeout_s = cfg.orchestration.ready_timeout_s
         start = asyncio.get_running_loop().time()
         while not _ORCHESTRATION.is_ready:
             if asyncio.get_running_loop().time() - start >= timeout_s:

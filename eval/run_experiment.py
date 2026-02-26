@@ -12,6 +12,7 @@ import platform
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from dotenv import load_dotenv
@@ -385,12 +386,12 @@ async def main() -> None:
 
     evaluators = [
         eval_routing_accuracy,
-        eval_injection_tripwires,
-        eval_rooms_outcome_and_invariants,
-        eval_llm_rubrics,
-        eval_rag_metrics_info_turns,
-        eval_info_reference_subset,
-        eval_info_expected_filters,
+        partial(eval_injection_tripwires, cfg=cfg),
+        partial(eval_rooms_outcome_and_invariants, cfg=cfg),
+        partial(eval_llm_rubrics, cfg=cfg),
+        partial(eval_rag_metrics_info_turns, cfg=cfg),
+        partial(eval_info_reference_subset, cfg=cfg),
+        partial(eval_info_expected_filters, cfg=cfg),
     ]
 
     aevaluate_kwargs: MutableMapping[str, Any] = {
@@ -411,7 +412,8 @@ async def main() -> None:
         await _prepare_eval_database(cfg)
 
     try:
-        results = await aevaluate(run_example, examples, **aevaluate_kwargs)
+        target = partial(run_example, cfg=cfg)
+        results = await aevaluate(target, examples, **aevaluate_kwargs)
         results_list: list[Any] = []
         if results is not None:
             results_list.extend([item async for item in results])

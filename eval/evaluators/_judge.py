@@ -11,7 +11,6 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from eval._utils import json_value, truncate
-from eval.config import load_eval_config
 from eval.evaluators._common import _get_example_turns, _iter_turn_outputs
 
 if TYPE_CHECKING:
@@ -19,6 +18,8 @@ if TYPE_CHECKING:
 
     from langchain_core.language_models.chat_models import BaseChatModel
     from langsmith.schemas import Example, Run
+
+    from eval.config import EvalConfig, EvaluatorLimitsConfig
 
 try:  # Optional dependency for LangChain Gemini integration.
     from langchain_google_genai import ChatGoogleGenerativeAI as _ChatGoogleGenerativeAI
@@ -33,12 +34,18 @@ _JUDGE_LLM: Any | None = None
 _JUDGE_LLM_MODEL: str | None = None
 
 
-async def eval_llm_rubrics(run: Run, example: Example) -> list[dict[str, Any]]:
+async def eval_llm_rubrics(
+    run: Run,
+    example: Example,
+    *,
+    cfg: EvalConfig,
+) -> list[dict[str, Any]]:
     """Evaluate the run using rubric grading.
 
     Args:
         run: LangSmith run object with turn outputs.
         example: LangSmith example object with dataset turns.
+        cfg: Evaluation configuration with judge model and evaluator limits.
 
     Returns:
         List of LangSmith metric dicts for each rubric dimension plus raw JSON.
@@ -47,11 +54,10 @@ async def eval_llm_rubrics(run: Run, example: Example) -> list[dict[str, Any]]:
         RuntimeError: If the judge model is unavailable on Developer API.
 
     """
-    cfg = load_eval_config()
     model = cfg.judge.model
     example_turns = _get_example_turns(example)
     run_turns = _iter_turn_outputs(run)
-    transcript = _format_transcript(example_turns, run_turns)
+    transcript = _format_transcript(example_turns, run_turns, cfg.evaluator_limits)
 
     prompt = (
         "You are an evaluation judge for a hotel concierge agent.\n"
@@ -201,6 +207,7 @@ async def eval_llm_rubrics(run: Run, example: Example) -> list[dict[str, Any]]:
 def _format_transcript(
     example_turns: Iterable[dict[str, Any]],
     run_turn_outputs: Iterable[dict[str, Any]],
+    limits: EvaluatorLimitsConfig,
 ) -> str:
     """Format a transcript for the judge prompt.
 
@@ -208,6 +215,7 @@ def _format_transcript(
         example_turns: Iterable of dataset turn dicts with user messages.
         run_turn_outputs: Iterable of run output dicts with assistant text,
             route predictions, tool summaries, and contexts.
+        limits: Evaluator limits for text truncation.
 
     Returns:
         Compact multi-line transcript string.
@@ -237,7 +245,6 @@ def _format_transcript(
                 tool_summary = list(output.get("tool_summary") or [])
                 contexts_used = list(output.get("contexts_used") or [])
 
-        limits = load_eval_config().evaluator_limits
         context_items = [
             truncate(str(c), limits.context_max_chars) for c in contexts_used
         ]

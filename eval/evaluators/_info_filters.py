@@ -10,19 +10,26 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from eval._utils import json_value, truncate
-from eval.config import load_eval_config
 from eval.evaluators._common import _get_example_turns, _iter_turn_outputs
 
 if TYPE_CHECKING:
     from langsmith.schemas import Example, Run
 
+    from eval.config import EvalConfig
 
-def eval_info_expected_filters(run: Run, example: Example) -> list[dict[str, Any]]:
+
+def eval_info_expected_filters(
+    run: Run,
+    example: Example,
+    *,
+    cfg: EvalConfig,
+) -> list[dict[str, Any]]:
     """Evaluate expected info-tool filters against logged tool usage.
 
     Args:
         run: LangSmith run object containing turn outputs.
         example: LangSmith example object containing dataset turns.
+        cfg: Evaluation configuration for evaluator limits.
 
     Returns:
         List of LangSmith feedback dicts for expected filter checks.
@@ -37,7 +44,7 @@ def eval_info_expected_filters(run: Run, example: Example) -> list[dict[str, Any
     failures: list[dict[str, Any]] = []
     divergence_checks = 0
     divergence_failures = 0
-    limits = load_eval_config().evaluator_limits
+    limits = cfg.evaluator_limits
 
     for idx in range(total_turns):
         example_turn = example_turns[idx]

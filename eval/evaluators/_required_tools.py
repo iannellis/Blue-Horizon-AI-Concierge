@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from eval._utils import json_value, truncate
-from eval.config import load_eval_config
 from eval.evaluators._common import (
     _INFO_REQUIRED_TOOLS,
     _SQL_TOOL_NAMES,
@@ -20,27 +19,33 @@ from eval.evaluators._common import (
 if TYPE_CHECKING:
     from langsmith.schemas import Example, Run
 
+    from eval.config import EvalConfig, EvaluatorLimitsConfig
+
 
 def eval_required_tool_calls_present(
     run: Run,
     example: Example,
+    *,
+    cfg: EvalConfig,
 ) -> list[dict[str, Any]]:
     """Verify required tool calls were present for rooms turns.
 
     Args:
         run: LangSmith run object containing turn outputs and tool summaries.
         example: LangSmith example object containing dataset turns.
+        cfg: Evaluation configuration for evaluator limits.
 
     Returns:
         List of LangSmith feedback dicts reporting required tool usage.
 
     """
-    limits = load_eval_config().evaluator_limits
+    limits = cfg.evaluator_limits
     turn_outputs = _iter_turn_outputs(run)
     example_turns = _get_example_turns(example)
     results = _collect_required_tool_results(
         turn_outputs=turn_outputs,
         example_turns=example_turns,
+        limits=limits,
     )
     total_scored = results["total_scored"]
     passing_turns = results["passing_turns"]
@@ -105,12 +110,14 @@ def _collect_required_tool_results(
     *,
     turn_outputs: list[dict[str, Any]],
     example_turns: list[dict[str, Any]],
+    limits: EvaluatorLimitsConfig,
 ) -> dict[str, Any]:
     """Collect aggregated required-tool results over all turns.
 
     Args:
         turn_outputs: Run turn outputs.
         example_turns: Example turn inputs.
+        limits: Evaluator limits for failure capture.
 
     Returns:
         Dict containing aggregate counts and failure details.
@@ -150,7 +157,7 @@ def _collect_required_tool_results(
             rooms_missing_sql += 1
         if failure_context:
             failure_context["failures"] = failures
-            _append_required_tool_failure(failure_context)
+            _append_required_tool_failure(failure_context, limits=limits)
 
     return {
         "total_scored": total_scored,
@@ -273,17 +280,19 @@ def _missing_info_tools(called_tools: set[str]) -> list[str]:
 
 def _append_required_tool_failure(
     failure_context: dict[str, Any],
+    *,
+    limits: EvaluatorLimitsConfig,
 ) -> None:
     """Append a required-tool failure record, respecting the cap.
 
     Args:
         failure_context: Dict containing failure details for reporting.
+        limits: Evaluator limits for failure capture cap.
 
     """
     failures = failure_context.get("failures")
     if not isinstance(failures, list):
         return
-    limits = load_eval_config().evaluator_limits
     if len(failures) >= limits.required_tool_failures_max:
         return
 

@@ -426,6 +426,7 @@ def _classify_outcome(text: str) -> str:
         "unavailable",
         "no availability",
         "already booked",
+        "you already have",  # "You already have room N booked for those dates."
         "couldn't",
         "cannot",
         "not available",

@@ -1,0 +1,129 @@
+# CI / Deploy workflow for Blue Horizon AI Concierge.
+#
+# On every push to main that touches relevant directories:
+#   1. Detect which path groups changed.
+#   2. If eval/ or blue_horizon/ changed: run the 20-case smoke eval and
+#      compare aggregated metric scores against the pinned baseline.
+#   3. If blue_horizon/, deploy/, assets/, ui/, Dockerfile, pyproject.toml,
+#      or poetry.lock changed, and the eval either passed or was skipped:
+#      push the repo to the HuggingFace Docker Space so HF rebuilds the
+#      container automatically.
+#
+# Required repository/environment secrets (CI environment):
+#   LANGSMITH_API_KEY   – LangSmith API key for dataset loading and tracing.
+#   GEMINI_API_KEY      – Google Gemini API key for the agent, judge, and Ragas.
+#   PGSQL_EVAL_DB_URL   – Full PostgreSQL connection string for the eval database.
+#   HF_TOKEN            – HuggingFace write token (Settings → Access Tokens).
+#
+# Required repository/environment variables (CI environment):
+#   LANGSMITH_TRACING   – Set to "true" to enable LangSmith tracing.
+#   LANGCHAIN_PROJECT   – LangSmith project name for trace grouping.
+#   HF_SPACE            – HuggingFace Space identifier, e.g. "username/blue-horizon".
+
+name: CI / Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "eval/**"
+      - "blue_horizon/**"
+      - "deploy/**"
+      - "assets/**"
+      - "ui/**"
+      - "Dockerfile"
+      - "pyproject.toml"
+      - "poetry.lock"
+
+jobs:
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      eval: ${{ steps.filter.outputs.eval }}
+      deploy: ${{ steps.filter.outputs.deploy }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            eval:
+              - 'eval/**'
+              - 'blue_horizon/**'
+            deploy:
+              - 'blue_horizon/**'
+              - 'deploy/**'
+              - 'assets/**'
+              - 'ui/**'
+              - 'Dockerfile'
+              - 'pyproject.toml'
+              - 'poetry.lock'
+
+  eval:
+    name: Smoke eval (20 cases)
+    needs: changes
+    if: needs.changes.outputs.eval == 'true'
+    runs-on: ubuntu-latest
+    environment: CI
+
+    steps:
+      - name: Checkout (with LFS for wheel and pkl files)
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          pip install --no-cache-dir assets/ml_dtypes-0.4.1-cp313-cp313-linux_x86_64.whl
+          pip install --no-cache-dir -r deploy/requirements.txt
+
+      - name: Run smoke eval
+        env:
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+          LANGSMITH_TRACING: ${{ vars.LANGSMITH_TRACING }}
+          LANGCHAIN_PROJECT: ${{ vars.LANGCHAIN_PROJECT }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PGSQL_EVAL_DB_URL: ${{ secrets.PGSQL_EVAL_DB_URL }}
+        run: python -m eval.run_experiment --config eval/eval_config_20.toml
+
+      - name: Check results against baseline
+        run: |
+          RESULTS_DIR=$(ls -dt eval/outputs/hotel-agent-eval-20_*/ 2>/dev/null | head -1)
+          if [ -z "$RESULTS_DIR" ]; then
+            echo "ERROR: No eval output directory found." >&2
+            exit 1
+          fi
+          python eval/ci_check.py "${RESULTS_DIR}results.jsonl"
+
+  deploy:
+    name: Push to HuggingFace Space
+    needs: [changes, eval]
+    if: |
+      needs.changes.outputs.deploy == 'true' &&
+      (needs.eval.result == 'success' || needs.eval.result == 'skipped')
+    runs-on: ubuntu-latest
+    environment: CI
+
+    steps:
+      - name: Checkout (with LFS and full history)
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+          fetch-depth: 0
+
+      - name: Push repo to HuggingFace Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE: ${{ vars.HF_SPACE }}
+        run: |
+          git config user.email "ci@github-actions"
+          git config user.name "GitHub Actions"
+          git remote add space "https://user:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}"
+          git push space main:main --force

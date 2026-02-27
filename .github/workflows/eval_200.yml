@@ -1,0 +1,50 @@
+# Full 200-case evaluation workflow for Blue Horizon AI Concierge.
+#
+# Triggered manually via the GitHub Actions "Run workflow" button.
+# Results are uploaded to LangSmith for inspection; no baseline check is
+# performed (pin a baseline and add a ci_check.py step once one exists).
+#
+# Required repository/environment secrets (Full Eval environment):
+#   LANGSMITH_API_KEY   – LangSmith API key for dataset loading and tracing.
+#   GEMINI_API_KEY      – Google Gemini API key for the agent, judge, and Ragas.
+#   PGSQL_EVAL_DB_URL   – Full PostgreSQL connection string for the eval database.
+#
+# Required repository/environment variables (Full Eval environment):
+#   LANGSMITH_TRACING   – Set to "true" to enable LangSmith tracing.
+#   LANGCHAIN_PROJECT   – LangSmith project name for trace grouping.
+
+name: Eval (200 cases)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  eval:
+    name: Full eval (200 cases)
+    runs-on: ubuntu-latest
+    environment: Full Eval
+
+    steps:
+      - name: Checkout (with LFS for wheel and pkl files)
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          pip install --no-cache-dir assets/ml_dtypes-0.4.1-cp313-cp313-linux_x86_64.whl
+          pip install --no-cache-dir -r deploy/requirements.txt
+
+      - name: Run full eval
+        env:
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+          LANGSMITH_TRACING: ${{ vars.LANGSMITH_TRACING }}
+          LANGCHAIN_PROJECT: ${{ vars.LANGCHAIN_PROJECT }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PGSQL_EVAL_DB_URL: ${{ secrets.PGSQL_EVAL_DB_URL }}
+        run: python -m eval.run_experiment --config eval/eval_config_200.toml

@@ -324,6 +324,11 @@ def _iter_tripwire_text_sources(turn_output: dict[str, Any]) -> list[tuple[str, 
             value = entry.get(field)
             if value:
                 sources.append((f"tool:{tool_name}:{field}", str(value)))
+        parsed_query = entry.get("parsed_query")
+        if isinstance(parsed_query, dict):
+            for i, q in enumerate(parsed_query.get("queries") or []):
+                if q:
+                    sources.append((f"tool:{tool_name}:queries[{i}]", str(q)))
     return sources
 
 

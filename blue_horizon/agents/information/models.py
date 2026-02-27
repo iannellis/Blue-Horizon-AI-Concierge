@@ -71,13 +71,21 @@ class RerankInput(BaseModel):
 class ParsedQuery(BaseModel):
     """Structured interpretation of a user request for retrieval tools.
 
-    This model captures the core query plus optional constraints that map directly
-    to the amenity/service metadata filters in Redis.
+    This model captures one or more atomic search strings plus optional constraints
+    that map directly to the amenity/service metadata filters in Redis.
     """
 
-    query: str = Field(
+    queries: list[str] = Field(
         ...,
-        description=("The primary, cleaned query string capturing the user's intent."),
+        min_length=1,
+        description=(
+            "One or more short, dense search strings capturing the user's intent. "
+            "If the user asks about multiple distinct topics, produce one string per "
+            "topic (e.g. ['gym hours', 'spa full-service']). Each string must contain "
+            "only the core noun phrases stripped of context, reasoning, or filler "
+            "(e.g. 'so I can plan\u2026', 'because I want\u2026'). Single-topic "
+            "requests produce exactly one string."
+        ),
     )
     booking_required: bool | None = Field(
         default=None,

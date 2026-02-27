@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import heapq
 import logging
 from typing import TYPE_CHECKING, Any, cast
@@ -158,13 +159,17 @@ class InfoAgentFactory:
             tool_name = f"query_{source.value}"
 
             async def _node(state: ParsedState) -> dict[str, Any]:
-                """Query a filtered catalog source and return results.
+                """Query a filtered catalog source for all parsed queries.
+
+                Each query string is retrieved independently against the same
+                filter set. Results are merged and deduplicated by text,
+                keeping the highest-scoring item for each unique text.
 
                 Args:
-                    state: Parsed state containing the query and constraints.
+                    state: Parsed state containing the query strings and constraints.
 
                 Returns:
-                    State patch with results for the given source.
+                    State patch with deduplicated results for the given source.
 
                 """
                 parsed = state["parsed"]
@@ -178,10 +183,18 @@ class InfoAgentFactory:
                     max_duration_minutes=parsed.max_duration_minutes,
                 )
                 try:
-                    results = await resources.retrieve_filtered_catalog_items(
-                        source=source,
-                        query=parsed.query,
-                        filters=filters,
+                    batches = cast(
+                        "list[list[RetrievalItem]]",
+                        await asyncio.gather(
+                            *[
+                                resources.retrieve_filtered_catalog_items(
+                                    source=source,
+                                    query=q,
+                                    filters=filters,
+                                )
+                                for q in parsed.queries
+                            ],
+                        ),
                     )
                 except OperationalError as exc:
                     logger.warning("%s operational failure: %s", tool_name, exc)
@@ -189,7 +202,12 @@ class InfoAgentFactory:
                 except Exception as exc:  # noqa: BLE001
                     _log_node_failure(tool_name, exc)
                     return {state_key: []}
-                return {state_key: results}
+                best: dict[str, RetrievalItem] = {}
+                for batch in batches:
+                    for item in batch:
+                        if item.text not in best or item.score > best[item.text].score:
+                            best[item.text] = item
+                return {state_key: list(best.values())}
 
             _node.__name__ = _node.__qualname__ = tool_name + "_node"
             _node.__doc__ = (
@@ -214,10 +232,18 @@ class InfoAgentFactory:
                         [
                             SystemMessage(
                                 content=(
-                                    "Extract a single query string plus any "
-                                    "constraints (booking, price, notice, duration) "
-                                    "from the full conversation. Prefer the latest "
-                                    "user request.\n\n"
+                                    "Decompose the user's request into one or more "
+                                    "short, dense search strings plus any constraints "
+                                    "(booking, price, notice, duration). Prefer the "
+                                    "latest user request.\n\n"
+                                    "Rules for search strings:\n"
+                                    "- Each string must be a tight noun phrase: core "
+                                    "concepts only, no context ('so I can\u2026'), "
+                                    "reasoning, or filler.\n"
+                                    "- If the user asks about multiple distinct "
+                                    "topics, produce one string per topic.\n"
+                                    "- Single-topic requests produce exactly one "
+                                    "string.\n\n"
                                     "Note: Service and amenity descriptions often "
                                     "include duration information. Do not extract "
                                     "these as user duration constraints unless the "
@@ -230,15 +256,19 @@ class InfoAgentFactory:
                 )
             except Exception as exc:  # noqa: BLE001
                 _log_node_failure("parse", exc)
-                parsed = ParsedQuery(query=_latest_user_text(state["messages"]))
+                parsed = ParsedQuery(queries=[_latest_user_text(state["messages"])])
 
             return {"parsed": parsed}
 
         async def query_faq_node(state: ParsedState) -> dict[str, Any]:
-            """Retrieve FAQ entries for the parsed query.
+            """Retrieve FAQ entries for all parsed queries, deduplicated by text.
+
+            Each query string is retrieved independently and results are merged,
+            keeping the highest-scoring item when the same text is returned by
+            multiple queries.
 
             Args:
-                state: Parsed state containing the query text.
+                state: Parsed state containing the query strings.
 
             Returns:
                 State patch with ``faq_results`` populated.
@@ -246,16 +276,25 @@ class InfoAgentFactory:
             """
             from blue_horizon.agents.exceptions import OperationalError  # noqa: PLC0415
 
-            query = state["parsed"].query
+            queries = state["parsed"].queries
             try:
-                results = await resources.retrieve_faq(query)
+                batches = cast(
+                    "list[list[RetrievalItem]]",
+                    await asyncio.gather(*[resources.retrieve_faq(q) for q in queries]),
+                )
             except OperationalError as exc:
                 logger.warning("query_faq operational failure: %s", exc)
                 return {"faq_results": []}
             except Exception as exc:  # noqa: BLE001
                 _log_node_failure("query_faq", exc)
                 return {"faq_results": []}
-            return {"faq_results": results}
+            best: dict[str, RetrievalItem] = {}
+            # The same item may appear in results from two different queries
+            for batch in batches:
+                for item in batch:
+                    if item.text not in best or item.score > best[item.text].score:
+                        best[item.text] = item
+            return {"faq_results": list(best.values())}
 
         query_amenities_node = _make_catalog_query_node(
             Source.AMENITIES,

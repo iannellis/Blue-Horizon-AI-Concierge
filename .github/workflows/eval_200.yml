@@ -47,6 +47,7 @@ jobs:
           LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           PGSQL_EVAL_DB_URL: ${{ secrets.PGSQL_EVAL_DB_URL }}
           REDIS_URL: ${{ secrets.REDIS_URL }}
         run: python -m eval.run_experiment --config eval/eval_config_200.toml

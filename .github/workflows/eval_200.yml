@@ -47,4 +47,5 @@ jobs:
           LANGCHAIN_PROJECT: ${{ vars.LANGCHAIN_PROJECT }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PGSQL_EVAL_DB_URL: ${{ secrets.PGSQL_EVAL_DB_URL }}
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
         run: python -m eval.run_experiment --config eval/eval_config_200.toml

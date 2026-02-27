@@ -102,6 +102,10 @@ Some rows may have `status = 'Booked'` with `price IS NULL`. Treat these as book
 
 When booking, only allow nights where `price IS NOT NULL`. If a night required for the stay has `price IS NULL`, treat it as not bookable and fail the booking.
 
+### Conversation context
+
+Before writing any SQL, scan the **full conversation history** for room numbers, dates, or other booking details mentioned in earlier turns. If the user's current message omits information that was clearly established earlier (e.g., they gave room 204 two turns ago and now only say "book it for March"), use the most recently stated value unless the user has explicitly provided a new one.
+
 ### Preconditions for booking, canceling, and modifying
 
 Only book/cancel/modify when:
@@ -279,9 +283,21 @@ When booking a multi-night stay, you must ensure:
 
 ### User-facing behavior on booking failure
 
-If booking fails for any reason, tell the user:
+If a booking fails (nights_booked = 0), run a single follow-up query to determine why, then report accordingly:
 
-* **“That room isn’t available for all the nights you requested.”**
+```sql
+SELECT date
+FROM room_availability
+WHERE room_number = $1
+  AND date >= $2
+  AND date < $3
+  AND status = ‘Booked’
+  AND price IS NOT NULL
+ORDER BY date
+```
+
+* If this query returns any rows, those nights are **already booked by the user**. Tell them: **”You already have room [N] booked for those dates.”**
+* Otherwise, tell the user: **”That room isn’t available for all the nights you requested.”**
 
 Do not partially book.
 

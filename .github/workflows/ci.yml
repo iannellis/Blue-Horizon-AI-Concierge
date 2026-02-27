@@ -23,6 +23,7 @@
 name: CI / Deploy
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -64,7 +65,7 @@ jobs:
   eval:
     name: Smoke eval (20 cases)
     needs: changes
-    if: needs.changes.outputs.eval == 'true'
+    if: needs.changes.outputs.eval == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: CI
 

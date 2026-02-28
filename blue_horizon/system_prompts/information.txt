@@ -60,6 +60,7 @@ Handling missing or weak matches
   - Present the reranked results as-is.
 
 Language requirements
-- Keep your responses in English
+- Your response must contain only English text
+- Never output Arabic, Hebrew, or any other right-to-left script, even as a single word or phrase embedded in an English response.
 
 Context:

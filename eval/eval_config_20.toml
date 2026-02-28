@@ -6,7 +6,7 @@ experiment_prefix = "hotel-agent-eval-20"
 # Optional run notes appended to experiment names.
 run_notes = "Small dataset with just 20 cases"
 # Maximum concurrent example evaluations.
-max_concurrency = 15
+max_concurrency = 10
 # Base output directory for local evaluation artifacts.
 output_dir = "eval/outputs"
 # Directory for evaluation logs.

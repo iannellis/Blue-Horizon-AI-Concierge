@@ -117,13 +117,13 @@ jobs:
     environment: CI
 
     steps:
-      - name: Checkout (with LFS and full history)
+      - name: Checkout (latest commit with LFS)
         uses: actions/checkout@v4
         with:
           lfs: true
-          fetch-depth: 0
+          fetch-depth: 1
 
-      - name: Push repo to HuggingFace Space
+      - name: Push snapshot to HuggingFace Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_SPACE: ${{ vars.HF_SPACE }}
@@ -131,4 +131,8 @@ jobs:
           git config user.email "ci@github-actions"
           git config user.name "GitHub Actions"
           git remote add space "https://user:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}"
-          git push space main:main --force
+          MAIN_SHA=$(git rev-parse --short HEAD)
+          git checkout --orphan hf-deploy
+          git add -A
+          git commit -m "Deploy from main@${MAIN_SHA}"
+          git push space hf-deploy:main --force

@@ -33,6 +33,25 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _sql_error_result(error: str) -> dict[str, Any]:
+    """Build a standard SQL tool error result dict.
+
+    Args:
+        error: The error message to include in the result.
+
+    Returns:
+        A result dict with ``status="error"`` and zero rows.
+
+    """
+    return {
+        "status": "error",
+        "rowcount": 0,
+        "rows": [],
+        "truncated": False,
+        "error": error,
+    }
+
+
 class RoomsSqlResources:
     """Own long-lived resources for the rooms SQL agent.
 
@@ -188,97 +207,110 @@ class RoomsSqlResources:
         attempts = self.config.db.retry.max_transient_retries + 1
 
         for attempt in range(attempts):
-            try:
-                async with (
-                    self.pool.connection(timeout=self.config.db.pool.timeout_s) as conn,
-                    conn.cursor(row_factory=dict_row) as cur,
-                ):
-                    # NOTE: psycopg's type stubs expect a LiteralString for `execute()`.
-                    # This cast is only to satisfy static type checkers. Runtime safety
-                    # is provided by `validate_sql(...)` above.
-                    await cur.execute(cast("LiteralString", query))
+            result = await self._try_execute_once(query, is_write, attempt, attempts)
+            if result is not None:
+                return result
 
-                    if cur.description is None:
-                        return {
-                            "status": "ok",
-                            "rows": [],
-                            "truncated": False,
-                            "rowcount": cur.rowcount,
-                        }
+        logger.warning("run_sql failed after retries")
+        return _sql_error_result(_user_facing_db_message())
 
-                    rows_raw = await cur.fetchall()
-                    rows = [dict(r) for r in rows_raw]
-                    rows, truncated = _truncate_rows(
-                        rows,
-                        max_rows=self.config.db.guardrails.max_rows,
-                    )
+    async def _try_execute_once(
+        self,
+        query: str,
+        is_write: bool,  # noqa: FBT001
+        attempt: int,
+        attempts: int,
+    ) -> dict[str, Any] | None:
+        """Attempt one SQL execution; return a result dict or None to signal retry.
+
+        Args:
+            query: The SQL statement to execute.
+            is_write: Whether the statement is a write (DML).
+            attempt: Zero-based index of the current attempt.
+            attempts: Total number of allowed attempts.
+
+        Returns:
+            A result dict on success or non-retryable failure, or ``None`` when
+            the caller should retry (transient connection error).
+
+        """
+        try:
+            async with (
+                self.pool.connection(timeout=self.config.db.pool.timeout_s) as conn,  # type: ignore[union-attr]
+                conn.cursor(row_factory=dict_row) as cur,
+            ):
+                # NOTE: psycopg's type stubs expect a LiteralString for `execute()`.
+                # This cast is only to satisfy static type checkers. Runtime safety
+                # is provided by `validate_sql(...)` above.
+                await cur.execute(cast("LiteralString", query))
+
+                if cur.description is None:
                     return {
                         "status": "ok",
-                        "rows": rows,
-                        "truncated": truncated,
-                        "rowcount": len(rows),
+                        "rows": [],
+                        "truncated": False,
+                        "rowcount": cur.rowcount,
                     }
 
-            except (
-                psycopg.OperationalError,
-                psycopg.InterfaceError,
-                PoolTimeout,
-                TimeoutError,
-            ) as exc:
-                can_retry = (
-                    _is_transient_conn_error(exc)
-                    and attempt < attempts - 1
-                    and (
-                        (not is_write)
-                        or self.config.db.retry.retry_writes_on_transient_errors
-                    )
+                rows_raw = await cur.fetchall()
+                rows = [dict(r) for r in rows_raw]
+                rows, truncated = _truncate_rows(
+                    rows,
+                    max_rows=self.config.db.guardrails.max_rows,
                 )
+                return {
+                    "status": "ok",
+                    "rows": rows,
+                    "truncated": truncated,
+                    "rowcount": len(rows),
+                }
 
-                if can_retry:
-                    logger.warning(
-                        "run_sql transient DB/pool error; retrying (attempt=%s/%s)",
-                        attempt + 1,
-                        attempts,
-                        exc_info=True,
-                    )
-                    await _sleep_backoff(
-                        self.config.db.retry.transient_retry_backoff_s,
-                        attempt,
-                    )
-                    continue
-
+        except (
+            psycopg.OperationalError,
+            psycopg.InterfaceError,
+            PoolTimeout,
+            TimeoutError,
+        ) as exc:
+            can_retry = (
+                _is_transient_conn_error(exc)
+                and attempt < attempts - 1
+                and (
+                    (not is_write)
+                    or self.config.db.retry.retry_writes_on_transient_errors
+                )
+            )
+            if can_retry:
                 logger.warning(
-                    "run_sql DB/pool operation failed (attempt=%s/%s)",
+                    "run_sql transient DB/pool error; retrying (attempt=%s/%s)",
                     attempt + 1,
                     attempts,
                     exc_info=True,
                 )
-                return {
-                    "status": "error",
-                    "rowcount": 0,
-                    "rows": [],
-                    "truncated": False,
-                    "error": _user_facing_db_message(),
-                }
+                await _sleep_backoff(
+                    self.config.db.retry.transient_retry_backoff_s,
+                    attempt,
+                )
+                return None
+            logger.warning(
+                "run_sql DB/pool operation failed (attempt=%s/%s)",
+                attempt + 1,
+                attempts,
+                exc_info=True,
+            )
+            return _sql_error_result(_user_facing_db_message())
 
-            except Exception:
-                logger.exception("run_sql unexpected failure")
-                return {
-                    "status": "error",
-                    "rowcount": 0,
-                    "rows": [],
-                    "truncated": False,
-                    "error": _user_facing_db_message(),
-                }
+        except psycopg.Error as exc:
+            # SQL-level errors (type mismatches, syntax errors, constraint
+            # violations, etc.) — expose the error text so the agent can
+            # diagnose and rewrite the query per its retry instructions.
+            logger.warning(
+                "run_sql SQL error (attempt=%s/%s): %s", attempt + 1, attempts, exc,
+            )
+            return _sql_error_result(f"SQL error: {exc}")
 
-        logger.warning("run_sql failed after retries")
-        return {
-            "status": "error",
-            "rowcount": 0,
-            "rows": [],
-            "truncated": False,
-            "error": _user_facing_db_message(),
-        }
+        except Exception:
+            logger.exception("run_sql unexpected failure")
+            return _sql_error_result(_user_facing_db_message())
 
     async def _open_pool(self) -> None:
         """Open the async connection pool.

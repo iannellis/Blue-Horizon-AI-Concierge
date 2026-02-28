@@ -1,0 +1,10 @@
+{
+  "experiment_name": "hotel-agent-eval-20_20260228_205616_Small_dataset_with_just_20_cases",
+  "dataset_name": "BlueHorizonEval_20",
+  "max_concurrency": 10,
+  "started_at": "2026-02-28T20:56:16.999132+00:00",
+  "finished_at": "2026-02-28T20:59:52.162339+00:00",
+  "upload_results": true,
+  "num_examples": 20,
+  "num_failed_runs": 0
+}

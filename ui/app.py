@@ -170,7 +170,8 @@ def _render_chat() -> None:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    if prompt := st.chat_input("Ask me about the hotel..."):
+    placeholder = "Ask about the hotel, or get help searching or booking rooms..."
+    if prompt := st.chat_input(placeholder):
         st.session_state.last_activity = datetime.now(UTC)
 
         st.session_state.messages.append({"role": "user", "content": prompt})

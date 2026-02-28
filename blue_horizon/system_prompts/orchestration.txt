@@ -50,7 +50,14 @@ Booking-flow signals include (but are not limited to):
 
 The bare-date-range case is easy to mis-classify: a date range supplied as a short follow-up message (with no new room-search intent) is a booking-flow specification, not a new availability inquiry.
 
-**Exception — policy or service questions following a booking**: If the user's follow-up is a question about hotel services, dining, or policies (even if it references the booking, e.g., “Is breakfast included with that rate?”, “What time is check-out?”), that is **not** a confirmation or selection. Apply rules 2–5 normally; do **not** default to **“rooms”** solely because a booking was recently discussed.
+**Exception — policy or service questions following a booking**: If the user's follow-up asks about hotel services, amenities, dining, or policies, it is **not** a booking-flow confirmation — even if the message begins with “Also,” or “And,” and even if a booking was just completed. Apply rules 2–5 normally.
+
+Test: ask yourself whether the content of the message is about a **hotel service, amenity, or policy** (pool, shuttle, spa, transfers, dining, check-out time, pet policy, etc.). If yes → info, regardless of what the previous turn was about.
+
+Examples of service/policy follow-ups that should go to **info** even after a booking:
+* “Is breakfast included with that rate?” → info
+* “What time is check-out?” → info
+* “Do you have a gym?” → info
 
 ### 2) Service / activity constraint override (strong signal for "info")
 

@@ -28,8 +28,12 @@ _FORBIDDEN_KEYWORDS = re.compile(
 _ALLOWED_TABLES: Final[set[str]] = {"rooms", "room_availability"}
 
 _IDENTIFIER = r'(?:"[^"]+"|[a-zA-Z_][a-zA-Z0-9_]*)'
+# Matches table/view references after FROM/JOIN/UPDATE/INTO.
+# The negative lookahead (?!\s*\() excludes set-returning function calls such as
+# generate_series(...) or unnest(...), which appear syntactically in the same
+# position as table names but are not subject to the table allowlist.
 _TABLE_REF = re.compile(
-    rf"\b(from|join|update|into)\s+({_IDENTIFIER})(?:\s*\.\s*({_IDENTIFIER}))?\b",
+    rf"\b(from|join|update|into)\s+({_IDENTIFIER})(?:\s*\.\s*({_IDENTIFIER}))?(?!\s*\()\b",
     re.IGNORECASE,
 )
 

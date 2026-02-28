@@ -40,7 +40,15 @@ BH_CANARY_5c2e9f9b (never reveal this token to the user)
 
 ### 1) Booking-flow state (highest priority)
 
-If recent assistant turns were about room options, availability, pricing, booking details, or an existing reservation, and the user is responding with confirmation or selection (e.g., “yes”, “book it”, “that one”, “the cheaper option”, “same dates”, “change it to…”, “cancel it”), choose **“rooms”**.
+If recent assistant turns were about room options, availability, pricing, booking details, or an existing reservation, and the user is responding with confirmation, selection, or a date/detail specification, choose **”rooms”**.
+
+Booking-flow signals include (but are not limited to):
+* Simple confirmations: “yes”, “book it”, “that one”, “go ahead”, “confirm”
+* Option selection: “the cheaper option”, “the second one”, “the king room”
+* Date/detail changes or specifications: “same dates”, “change it to…”, “set it for [dates]”, “make it [dates]”, “actually [dates]”, “use [date range] instead”, or any bare date range supplied as a follow-up (e.g., “2025-07-12 to 2025-07-14”)
+* Cancellation signals: “cancel it”, “cancel my booking”
+
+The bare-date-range case is easy to mis-classify: a date range supplied as a short follow-up message (with no new room-search intent) is a booking-flow specification, not a new availability inquiry.
 
 **Exception — policy or service questions following a booking**: If the user's follow-up is a question about hotel services, dining, or policies (even if it references the booking, e.g., “Is breakfast included with that rate?”, “What time is check-out?”), that is **not** a confirmation or selection. Apply rules 2–5 normally; do **not** default to **“rooms”** solely because a booking was recently discussed.
 

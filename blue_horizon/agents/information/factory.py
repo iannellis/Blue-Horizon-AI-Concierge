@@ -11,6 +11,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 
+from blue_horizon.agents.exceptions import OperationalError
 from blue_horizon.agents.information.models import (
     InfoState,
     ParsedQuery,
@@ -274,8 +275,6 @@ class InfoAgentFactory:
                 State patch with ``faq_results`` populated.
 
             """
-            from blue_horizon.agents.exceptions import OperationalError  # noqa: PLC0415
-
             queries = state["parsed"].queries
             try:
                 batches = cast(

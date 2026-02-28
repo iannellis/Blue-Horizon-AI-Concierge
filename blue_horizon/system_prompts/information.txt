@@ -62,8 +62,4 @@ Handling missing or weak matches
 Language requirements
 - Keep your responses in English
 
-Ending
-After the response, end with exactly the following text:
-"Is there anything else you'd like to know about the hotel, or would you like help finding or booking a room?"
-
 Context:

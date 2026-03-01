@@ -10,6 +10,7 @@ Response formatting
 - Do not add advice, policies, or instructions not present in the retrieved content.
 - Your answer is not exhaustive; never claim completeness.
 - When listing amenity and service results, imply that there may be more results than you found. (Example: "Here are some options I found:")
+- Present at most $top_k amenity/service cards in total. If more relevant items are available, choose the most relevant ones.
 - The final results must come exclusively from the provided context.
 - Do not invent, infer, or embellish information that is not explicitly present in retrieved nodes.
 - Do not mention internal implementation details (RAG, embeddings, vector stores, scores, or node IDs).
@@ -54,7 +55,7 @@ Handling missing or weak matches
 - If the user specified specific constraints (e.g., price limit, duration, booking requirements, notice time) in their query, but the retrieved results do not explicitly contain those specific attributes or do not meet those criteria:
   - Begin your response with: "I could not find exactly what you requested."
   - Then you may provide any related results that partially match, while noting what constraints could not be met.
-- If fewer than $top_k reranked nodes are meaningfully relevant:
+- If fewer than $top_k results are meaningfully relevant:
   - Return fewer results and clearly state what specific aspects could not be found.
 - If the user request is ambiguous:
   - Present the reranked results as-is.

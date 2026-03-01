@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import heapq
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
@@ -113,21 +112,21 @@ class InfoAgentFactory:
 
         """
         resources = self._resources
-        top_k = resources.top_k
+        max_context_items = self._config.retrieval.max_context_items
 
         llm_cfg = self._config.llm
         parser_llm = ChatOpenAI(
-            model=str(llm_cfg.model),
+            model=llm_cfg.model,
             temperature=0.0,
-            timeout=float(llm_cfg.timeout_s),
-            max_retries=int(llm_cfg.max_retries),
+            timeout=llm_cfg.timeout_s,
+            max_retries=llm_cfg.max_retries,
             reasoning={"effort": llm_cfg.reasoning_effort},
         ).with_structured_output(ParsedQuery, method="function_calling")
         responder_llm = ChatOpenAI(
-            model=str(llm_cfg.model),
-            temperature=float(llm_cfg.temperature),
-            timeout=float(llm_cfg.timeout_s),
-            max_retries=int(llm_cfg.max_retries),
+            model=llm_cfg.model,
+            temperature=llm_cfg.temperature,
+            timeout=llm_cfg.timeout_s,
+            max_retries=llm_cfg.max_retries,
             reasoning={"effort": llm_cfg.reasoning_effort},
         )
 
@@ -305,13 +304,17 @@ class InfoAgentFactory:
         )
 
         def rerank_node(state: InfoState) -> dict[str, Any]:
-            """Select the top-k results across FAQ, amenities, and services.
+            """Sort all retrieved results by score descending.
+
+            All deduplicated results from FAQ, amenities, and services are passed
+            to the LLM in score order. The LLM is instructed via the system prompt
+            to present at most top_k cards, selecting the most relevant ones.
 
             Args:
                 state: Current state with retrieval results.
 
             Returns:
-                State patch with ``top_results`` populated.
+                State patch with ``top_results`` populated, sorted by score.
 
             """
             all_results = [
@@ -319,8 +322,8 @@ class InfoAgentFactory:
                 *state.get("amenities_results", []),
                 *state.get("services_results", []),
             ]
-            ranked = heapq.nlargest(top_k, all_results, key=lambda x: x.score)
-            return {"top_results": ranked}
+            ranked = sorted(all_results, key=lambda x: x.score, reverse=True)
+            return {"top_results": ranked[:max_context_items]}
 
         async def respond_node(state: InfoState) -> dict[str, Any]:
             """Generate the final response using retrieved context.

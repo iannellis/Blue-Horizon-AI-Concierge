@@ -50,8 +50,12 @@ unavailable = "Sorry - the system isn't available at the moment. Please try agai
 # Single source of truth for all tunables used by the hotel RAG agent.
 # Keep this section under version control, and override secrets via env vars (e.g. REDIS_URL).
 [info.retrieval]
-# Number of candidates to retrieve per source tool call (faq/amenities/services) and return overall.
+# Number of candidates to retrieve per source tool call (faq/amenities/services)
+# and used as services/amenities card limit by the agent.
 top_k = 4
+# Safety ceiling on total retrieved items passed to the LLM (all sources combined).
+# Prevents runaway context growth from queries that parse into many sub-queries.
+max_context_items = 30
 # Embedding dimensionality used by your Redis vector field schema.
 # Must match the index schema in Redis (validated at startup via FT.INFO).
 vector_dims = 1536

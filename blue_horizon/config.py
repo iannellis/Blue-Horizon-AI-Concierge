@@ -21,6 +21,9 @@ class InfoRetrievalConfig(BaseModel):
 
     Attributes:
         top_k: Number of results returned per retriever invocation.
+        max_context_items: Hard ceiling on the total number of retrieved items
+            passed to the LLM after merging all sources. Acts as a safety cap
+            against runaway context growth when many sub-queries are parsed.
         vector_dims: Dimensionality expected by the Redis vector index schema.
         retriever_cache_max: Maximum cached retrievers kept per process.
 
@@ -29,6 +32,7 @@ class InfoRetrievalConfig(BaseModel):
     model_config = {"frozen": True}
 
     top_k: int
+    max_context_items: int
     vector_dims: int
     retriever_cache_max: int
 

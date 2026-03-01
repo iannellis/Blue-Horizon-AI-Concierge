@@ -109,10 +109,10 @@ class InfoRagResources:
 
         """
         self._config = config
-        self._top_k = int(config.retrieval.top_k)
-        self._vector_dims = int(config.retrieval.vector_dims)
-        self._embed_batch_size = int(config.embeddings.batch_size)
-        self._retriever_cache_max = max(1, int(config.retrieval.retriever_cache_max))
+        self._top_k = config.retrieval.top_k
+        self._vector_dims = config.retrieval.vector_dims
+        self._embed_batch_size = config.embeddings.batch_size
+        self._retriever_cache_max = max(1, config.retrieval.retriever_cache_max)
 
         self._init_llamaindex(config.embeddings)
 
@@ -120,9 +120,9 @@ class InfoRagResources:
         self.redis_async: AsyncRedis = AsyncRedis.from_url(
             redis_url,
             decode_responses=True,
-            socket_connect_timeout=float(config.redis.connect_timeout_s),
-            socket_timeout=float(config.redis.socket_timeout_s),
-            health_check_interval=int(config.redis.health_check_interval_s),
+            socket_connect_timeout=config.redis.connect_timeout_s,
+            socket_timeout=config.redis.socket_timeout_s,
+            health_check_interval=config.redis.health_check_interval_s,
             retry=retry,
         )
 
@@ -161,12 +161,12 @@ class InfoRagResources:
 
         """
         backoff = ExponentialBackoff(
-            base=float(config.retry_backoff_base_s),
-            cap=float(config.retry_backoff_max_s),
+            base=config.retry_backoff_base_s,
+            cap=config.retry_backoff_max_s,
         )
         return Retry(
             backoff=backoff,
-            retries=int(config.retry_max_retries),
+            retries=config.retry_max_retries,
             supported_errors=(
                 RedisConnectionError,
                 RedisTimeoutError,
@@ -351,9 +351,9 @@ class InfoRagResources:
         """
         Settings.embed_model = OpenAIEmbedding(
             model=cfg.model,
-            embed_batch_size=int(cfg.batch_size),
-            timeout=float(cfg.timeout_s),
-            max_retries=int(cfg.max_retries),
+            embed_batch_size=cfg.batch_size,
+            timeout=cfg.timeout_s,
+            max_retries=cfg.max_retries,
         )
 
     @staticmethod

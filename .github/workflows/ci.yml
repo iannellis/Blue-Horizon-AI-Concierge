@@ -111,6 +111,8 @@ jobs:
     name: Push to HuggingFace Space
     needs: [changes, eval]
     if: |
+      always() &&
+      needs.changes.result == 'success' &&
       needs.changes.outputs.deploy == 'true' &&
       (needs.eval.result == 'success' || needs.eval.result == 'skipped')
     runs-on: ubuntu-latest

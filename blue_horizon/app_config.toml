@@ -55,7 +55,7 @@ unavailable = "Sorry - the system isn't available at the moment. Please try agai
 top_k = 4
 # Safety ceiling on total retrieved items passed to the LLM (all sources combined).
 # Prevents runaway context growth from queries that parse into many sub-queries.
-max_context_items = 30
+max_context_items = 20
 # Embedding dimensionality used by your Redis vector field schema.
 # Must match the index schema in Redis (validated at startup via FT.INFO).
 vector_dims = 1536

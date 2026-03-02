@@ -30,7 +30,7 @@ schema_version = ""
 # Maximum characters per context snippet passed to the judge LLM.
 context_max_chars = 1200
 # Maximum number of context snippets passed to the judge LLM per turn.
-context_max_items = 30
+context_max_items = 20
 # Maximum characters from assistant messages passed to the judge LLM.
 assistant_max_chars = 2000
 # Maximum characters from user messages passed to the judge LLM.
@@ -71,7 +71,7 @@ info_cards_max = 4
 # Maximum number of turns to score with Ragas.
 turns_max = 10
 # Maximum number of retrieved contexts per turn.
-contexts_max = 30
+contexts_max = 20
 # Maximum characters per retrieved context.
 context_chars = 1200
 # Maximum characters for the user query.

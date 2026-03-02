@@ -102,13 +102,17 @@ class MetadataConfig(BaseModel):
 
 
 class EvaluatorLimitsConfig(BaseModel):
-    """Limits for evaluator summaries and expected filter checks.
+    """Limits controlling judge LLM inputs and stored evaluator output sizes.
 
     Attributes:
-        context_max_chars: Maximum characters per context snippet.
-        context_max_items: Maximum number of context snippets to include.
-        assistant_max_chars: Maximum characters from assistant text.
-        user_max_chars: Maximum characters from user text.
+        context_max_chars: Maximum characters per context snippet passed to the
+            judge LLM.
+        context_max_items: Maximum number of context snippets passed to the
+            judge LLM per turn.
+        assistant_max_chars: Maximum characters from assistant text passed to
+            the judge LLM.
+        user_max_chars: Maximum characters from user text passed to the judge
+            LLM.
         info_filter_failures_max: Max stored failures for info filter checks.
         required_tool_failures_max: Max stored failures for required tool checks.
         json_value_max: Maximum characters for JSON-encoded evaluator values.

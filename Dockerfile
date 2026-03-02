@@ -2,7 +2,7 @@ FROM python:3.13-slim
 
 # ── System packages ────────────────────────────────────────────────────────────
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends nginx supervisor \
+    && apt-get install -y --no-install-recommends git nginx supervisor \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

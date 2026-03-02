@@ -30,9 +30,9 @@ schema_version = ""
 # Maximum characters per context snippet passed to the judge LLM.
 context_max_chars = 1200
 # Maximum number of context snippets passed to the judge LLM per turn.
-context_max_items = 6
+context_max_items = 30
 # Maximum characters from assistant messages passed to the judge LLM.
-assistant_max_chars = 1200
+assistant_max_chars = 2000
 # Maximum characters from user messages passed to the judge LLM.
 user_max_chars = 800
 # Max stored failures included in evaluator outputs for info expected filters.

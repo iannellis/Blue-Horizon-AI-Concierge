@@ -1,10 +1,10 @@
 [experiment]
 # LangSmith dataset name to evaluate (required).
-dataset_name = "BlueHorizonEval_20"
+dataset_name = "Case_0174"
 # Prefix used when generating experiment names.
-experiment_prefix = "hotel-agent-eval-20"
+experiment_prefix = "hotel-agent"
 # Optional run notes appended to experiment names.
-run_notes = "Small dataset with just 20 cases"
+run_notes = "Small dataset with just case 174"
 # Maximum concurrent example evaluations.
 max_concurrency = 10
 # Base output directory for local evaluation artifacts.

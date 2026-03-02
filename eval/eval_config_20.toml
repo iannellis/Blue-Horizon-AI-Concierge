@@ -71,7 +71,7 @@ info_cards_max = 4
 # Maximum number of turns to score with Ragas.
 turns_max = 10
 # Maximum number of retrieved contexts per turn.
-contexts_max = 4
+contexts_max = 30
 # Maximum characters per retrieved context.
 context_chars = 5000
 # Maximum characters for the user query.

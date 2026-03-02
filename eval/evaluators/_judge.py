@@ -287,6 +287,9 @@ def _format_transcript(
 def _safe_json_loads(payload: str) -> dict[str, Any] | None:
     """Parse a JSON string into a dict, returning None on failure.
 
+    Handles responses wrapped in markdown code fences (e.g. ``````json ... ``````),
+    including cases where the closing fence is missing due to response truncation.
+
     Args:
         payload: Raw JSON text, possibly wrapped in markdown code fences.
 
@@ -294,17 +297,22 @@ def _safe_json_loads(payload: str) -> dict[str, Any] | None:
         Parsed dict if the JSON is valid and a dict, otherwise None.
 
     """
-    # Strip markdown code fences if present
     text = payload.strip()
+
+    # Strip markdown code fences when present.  The closing fence may be absent
+    # if the LLM response was truncated, so we strip it only when present rather
+    # than requiring it.
     if text.startswith("```"):
-        # Remove opening fence (```json or ```)
         lines = text.split("\n")
+        # Remove opening fence line (e.g. ```json or ```)
         if lines[0].startswith("```"):
             lines = lines[1:]
-        # Remove closing fence
+        # Remove trailing empty lines, then the closing fence if present
+        while lines and lines[-1].strip() == "":
+            lines = lines[:-1]
         if lines and lines[-1].strip() == "```":
             lines = lines[:-1]
-        text = "\n".join(lines)
+        text = "\n".join(lines).strip()
 
     try:
         parsed = json.loads(text)
@@ -384,6 +392,7 @@ async def _get_judge_llm(model: str) -> BaseChatModel:
         _JUDGE_LLM = _ChatGoogleGenerativeAI(
             model=model,
             temperature=0,
+            max_output_tokens=1024,
         )
         _JUDGE_LLM_MODEL = model
         return _JUDGE_LLM

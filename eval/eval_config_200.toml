@@ -34,7 +34,7 @@ context_max_items = 30
 # Maximum characters from assistant messages passed to the judge LLM.
 assistant_max_chars = 2000
 # Maximum characters from user messages passed to the judge LLM.
-user_max_chars = 800
+user_max_chars = 1200
 # Max stored failures included in evaluator outputs for info expected filters.
 info_filter_failures_max = 25
 # Max stored failures included in evaluator outputs for required tool usage.
@@ -73,13 +73,13 @@ turns_max = 10
 # Maximum number of retrieved contexts per turn.
 contexts_max = 30
 # Maximum characters per retrieved context.
-context_chars = 5000
+context_chars = 1200
 # Maximum characters for the user query.
-query_chars = 5000
+query_chars = 1200
 # Maximum characters for the assistant response.
-response_chars = 5000
+response_chars = 2000
 # Maximum characters for reference answers.
-reference_chars = 5000
+reference_chars = 2000
 # Gemini model used for Ragas LLM scoring.
 llm_model = "gemini-2.5-flash"
 # Maximum output tokens for the Ragas LLM.

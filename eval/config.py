@@ -190,12 +190,16 @@ class JudgeConfig(BaseModel):
 
     Attributes:
         model: Judge model name.
+        info_cards_max: Maximum number of amenity/service cards the information
+            agent is instructed to present per response. The judge uses this to
+            avoid penalising the agent for not listing every valid option.
 
     """
 
     model_config = {"frozen": True}
 
     model: str
+    info_cards_max: Annotated[int, Field(ge=1)]
 
 
 class RagasConfig(BaseModel):

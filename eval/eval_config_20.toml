@@ -63,6 +63,9 @@ ready_timeout_s = 90.0
 [judge]
 # Judge model name used for rubric grading (Gemini model unless code edited).
 model = "gemini-2.5-flash"
+# Maximum cards the information agent presents per response (matches info.retrieval.top_k).
+# The judge uses this to avoid penalising the agent for omitting additional valid options.
+info_cards_max = 4
 
 [ragas]
 # Maximum number of turns to score with Ragas.

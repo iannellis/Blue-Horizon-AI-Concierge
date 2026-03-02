@@ -392,7 +392,6 @@ async def _get_judge_llm(model: str) -> BaseChatModel:
         _JUDGE_LLM = _ChatGoogleGenerativeAI(
             model=model,
             temperature=0,
-            max_output_tokens=1024,
         )
         _JUDGE_LLM_MODEL = model
         return _JUDGE_LLM

@@ -109,8 +109,9 @@ class ParsedQuery(BaseModel):
     min_notice_hours: int | None = Field(
         default=None,
         description=(
-            "Minimum advance notice required in hours (inclusive). "
-            "Only set if explicitly mentioned (e.g., 'need at least X hours notice')."
+            "Minimum advance notice required by user in hours (inclusive). "
+            "Only set if explicitly mentioned (e.g., 'I need to give at least X hours "
+            "notice'). This parameter should almost never be used."
         ),
     )
     max_notice_hours: int | None = Field(
@@ -126,9 +127,14 @@ class ParsedQuery(BaseModel):
         default=None,
         description=(
             "Minimum duration in minutes (inclusive). "
-            "Set BOTH min and max to X when the user requests a structured service "
-            "with a specific duration (e.g., 'X-minute massage/spa/class/tour'). "
-            "Structured services typically have fixed durations. "
+            "Determined by counting ALL distinct services/activities in the request: "
+            "if exactly ONE service is requested with an explicit duration, "
+            "min = that duration; "
+            "if TWO OR MORE services are requested and ALL carry explicit durations, "
+            "min = the SMALLEST value across all of them; "
+            "if TWO OR MORE services are requested and ANY lacks an explicit duration, "
+            "min = null. "
+            "Never apply per-item logic — evaluate the whole request together. "
             "Only set min alone for 'at least X minutes' phrases."
         ),
     )
@@ -136,11 +142,16 @@ class ParsedQuery(BaseModel):
         default=None,
         description=(
             "Maximum duration in minutes (inclusive). "
-            "For structured services (massage, spa, class, tour): "
-            "set BOTH min and max to the same value (exact duration). "
-            "For flexible services (food, quick activities) or time constraints: "
-            "set ONLY max (e.g., '15-minute bite' → max=15, min=None). "
-            "Use context to determine if duration is exact or a limit."
+            "Determined by counting ALL distinct services/activities in the request: "
+            "if exactly ONE service is requested with an explicit duration, "
+            "max = that duration; "
+            "if TWO OR MORE services are requested and ALL carry explicit durations, "
+            "max = the LARGEST value across all of them; "
+            "if TWO OR MORE services are requested and ANY lacks an explicit duration, "
+            "max = null. "
+            "Never apply per-item logic — evaluate the whole request together. "
+            "Do not estimate durations for items that have none stated. "
+            "Only set max alone for 'at most X minutes' or overall time-cap phrases."
         ),
     )
 

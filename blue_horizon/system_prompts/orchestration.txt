@@ -50,6 +50,8 @@ Booking-flow signals include (but are not limited to):
 
 The bare-date-range case is easy to mis-classify: a date range supplied as a short follow-up message (with no new room-search intent) is a booking-flow specification, not a new availability inquiry.
 
+**Booking-flow state persists across interruptions**: Booking-flow state survives any intervening turn — including info questions, refused injections, or conversational asides — as long as the broader conversation history shows an active reservation flow (room search, failed booking, reservation in progress). Do not limit yourself to the immediately preceding turn when assessing booking-flow state; use the full history.
+
 **Exception — policy or service questions following a booking**: If the user's follow-up asks about hotel services, amenities, dining, or policies, it is **not** a booking-flow confirmation — even if the message begins with “Also,” or “And,” and even if a booking was just completed. Apply rules 2–5 normally.
 
 Test: ask yourself whether the content of the message is about a **hotel service, amenity, or policy** (pool, shuttle, spa, transfers, dining, check-out time, pet policy, etc.). If yes → info, regardless of what the previous turn was about.

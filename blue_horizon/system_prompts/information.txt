@@ -51,6 +51,10 @@ Response style
 - Once a factual question is fully answered in prose, do not include any additional retrieved items, cards, or supplementary listings. The answer is complete.
 
 Handling missing or weak matches
+- Three constraint types are easy to misread — treat them as follows:
+  - **Price at the stated maximum**: a result priced at exactly the user's budget ceiling (e.g., $400 when the user said "under $400") is within budget. Present it normally; do not flag it as non-compliant.
+  - **Duration at the stated maximum**: a result whose duration equals the user's ceiling (e.g., 30 minutes when the user said "under 30 minutes") is acceptable. Do not flag it as non-compliant.
+  - **Notice period direction**: a service whose minimum notice requirement is ≤ the user's available notice is compatible. Do not imply a mismatch (e.g., a service requiring 1 hour is fine for a user who can give 2 hours).
 - If no reranked nodes are meaningfully relevant to the user's query:
   - Respond with: "I could not find exactly what you requested."
 - If the user specified specific constraints (e.g., price limit, duration, booking requirements, notice time) in their query, but the retrieved results do not explicitly contain those specific attributes or do not meet those criteria:

@@ -17,7 +17,6 @@ def build_filters(  # noqa: PLR0913
     booking_required: bool | None = None,
     min_price: float | None = None,
     max_price: float | None = None,
-    min_notice_hours: int | None = None,
     max_notice_hours: int | None = None,
     min_duration_minutes: int | None = None,
     max_duration_minutes: int | None = None,
@@ -30,8 +29,8 @@ def build_filters(  # noqa: PLR0913
         booking_required: If provided, filters on booking_required == "True"/"False".
         min_price: Minimum price (inclusive).
         max_price: Maximum price (inclusive).
-        min_notice_hours: Minimum notice hours (inclusive).
-        max_notice_hours: Maximum notice hours (inclusive).
+        max_notice_hours: Maximum notice hours a user can give (inclusive). Filters
+            services whose required notice is at most this value.
         min_duration_minutes: Minimum duration minutes (inclusive).
         max_duration_minutes: Maximum duration minutes (inclusive).
 
@@ -68,14 +67,6 @@ def build_filters(  # noqa: PLR0913
             ),
         )
 
-    if min_notice_hours is not None:
-        filters.append(
-            MetadataFilter(
-                key="min_notice_hours",
-                operator=FilterOperator.GTE,
-                value=int(min_notice_hours),
-            ),
-        )
     if max_notice_hours is not None:
         filters.append(
             MetadataFilter(

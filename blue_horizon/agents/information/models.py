@@ -106,14 +106,6 @@ class ParsedQuery(BaseModel):
         default=None,
         description=("Maximum acceptable price in USD (inclusive)."),
     )
-    min_notice_hours: int | None = Field(
-        default=None,
-        description=(
-            "Minimum advance notice required by user in hours (inclusive). "
-            "Only set if explicitly mentioned (e.g., 'I need to give at least X hours "
-            "notice'). This parameter should almost never be used."
-        ),
-    )
     max_notice_hours: int | None = Field(
         default=None,
         description=(

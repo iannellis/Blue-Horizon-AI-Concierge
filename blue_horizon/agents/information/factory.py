@@ -177,7 +177,6 @@ class InfoAgentFactory:
                     booking_required=parsed.booking_required,
                     min_price=parsed.min_price,
                     max_price=parsed.max_price,
-                    min_notice_hours=parsed.min_notice_hours,
                     max_notice_hours=parsed.max_notice_hours,
                     min_duration_minutes=parsed.min_duration_minutes,
                     max_duration_minutes=parsed.max_duration_minutes,
@@ -234,7 +233,8 @@ class InfoAgentFactory:
                                 content=(
                                     "Decompose the user's request into one or more "
                                     "short, dense search strings plus any constraints "
-                                    "(booking, price, notice, duration). Prefer the "
+                                    "(booking, price, max notice, duration). "
+                                    "Prefer the "
                                     "latest user request.\n\n"
                                     "Rules for search strings:\n"
                                     "- Each string must be a tight noun phrase: core "

@@ -133,56 +133,54 @@ async def eval_llm_rubrics(
 
     parsed = _safe_json_loads(raw_text)
     if parsed is None:
-        snippet = truncate(raw_text, 200)
         return [
             {
                 "key": "judge_consumer_quality",
                 "score": 0.0,
-                "comment": f"Judge JSON parse failure. Raw: {snippet}",
+                "comment": f"Judge JSON parse failure. Raw: {raw_text}",
             },
             {
                 "key": "judge_injection_resistance",
                 "score": 0.0,
-                "comment": f"Judge JSON parse failure. Raw: {snippet}",
+                "comment": f"Judge JSON parse failure. Raw: {raw_text}",
             },
             {
                 "key": "judge_grounding_faithfulness",
                 "score": 0.0,
-                "comment": f"Judge JSON parse failure. Raw: {snippet}",
+                "comment": f"Judge JSON parse failure. Raw: {raw_text}",
             },
             {
                 "key": "judge_raw_json",
                 "value": json_value(
-                    {"error": "parse_failure", "raw_snippet": snippet},
+                    {"error": "parse_failure", "raw_text": raw_text},
                 ),
             },
         ]
 
     valid, error_message = _validate_rubric_payload(parsed)
     if not valid:
-        snippet = truncate(raw_text, 200)
         return [
             {
                 "key": "judge_consumer_quality",
                 "score": 0.0,
-                "comment": f"Judge JSON invalid: {error_message}. Raw: {snippet}",
+                "comment": f"Judge JSON invalid: {error_message}. Raw: {raw_text}",
             },
             {
                 "key": "judge_injection_resistance",
                 "score": 0.0,
-                "comment": f"Judge JSON invalid: {error_message}. Raw: {snippet}",
+                "comment": f"Judge JSON invalid: {error_message}. Raw: {raw_text}",
             },
             {
                 "key": "judge_grounding_faithfulness",
                 "score": 0.0,
-                "comment": f"Judge JSON invalid: {error_message}. Raw: {snippet}",
+                "comment": f"Judge JSON invalid: {error_message}. Raw: {raw_text}",
             },
             {
                 "key": "judge_raw_json",
                 "value": json_value(
                     {
                         "error": error_message,
-                        "raw_snippet": snippet,
+                        "raw_text": raw_text,
                         "payload": parsed,
                     },
                 ),

@@ -25,7 +25,6 @@ _INFO_FILTER_KEYS: frozenset[str] = frozenset(
         "booking_required",
         "min_price",
         "max_price",
-        "min_notice_hours",
         "max_notice_hours",
         "min_duration_minutes",
         "max_duration_minutes",
@@ -54,7 +53,6 @@ def _normalize_info_filters_strict(
         "booking_required",
         "min_price",
         "max_price",
-        "min_notice_hours",
         "max_notice_hours",
         "min_duration_minutes",
         "max_duration_minutes",
@@ -76,7 +74,6 @@ def _normalize_info_filters_strict(
         norm[canonical] = coerced
 
     _swap_range_if_needed(norm, "min_price", "max_price")
-    _swap_range_if_needed(norm, "min_notice_hours", "max_notice_hours")
     _swap_range_if_needed(norm, "min_duration_minutes", "max_duration_minutes")
 
     return (norm or None), unknown_keys

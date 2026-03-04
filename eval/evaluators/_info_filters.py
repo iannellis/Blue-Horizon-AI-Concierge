@@ -203,7 +203,6 @@ def _canon_expected_filters(raw_filters: dict[str, Any]) -> dict[str, Any]:
         "booking_required",
         "min_price",
         "max_price",
-        "min_notice_hours",
         "max_notice_hours",
         "min_duration_minutes",
         "max_duration_minutes",

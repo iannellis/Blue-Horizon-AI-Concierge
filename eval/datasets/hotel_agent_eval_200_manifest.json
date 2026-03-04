@@ -25,7 +25,6 @@
     "booking_required": 5,
     "min_price": 0,
     "max_price": 38,
-    "min_notice_hours": 0,
     "max_notice_hours": 31,
     "min_duration_minutes": 32,
     "max_duration_minutes": 39

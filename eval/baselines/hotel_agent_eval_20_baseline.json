@@ -1,5 +1,5 @@
 {
-  "generated_from": "hotel-agent-eval-20_20260228_205616_Small_dataset_with_just_20_cases",
+  "generated_from": "hotel-agent-eval-20_20260304_004507_Small_dataset_with_just_20_cases",
   "description": "Baseline metric thresholds for the 20-case smoke eval. strict=true metrics require every individual case score to equal 1.0; strict=false metrics require the mean across cases to be >= min_allowed.",
   "metrics": {
     "route_accuracy": {
@@ -28,17 +28,17 @@
       "strict": false
     },
     "info_reference_subset_pass_rate": {
-      "baseline": 0.9815,
-      "min_allowed": 0.85,
-      "strict": false
-    },
-    "info_expected_filters_pass_rate": {
       "baseline": 1.0,
       "min_allowed": 0.85,
       "strict": false
     },
+    "info_expected_filters_pass_rate": {
+      "baseline": 0.9667,
+      "min_allowed": 0.85,
+      "strict": false
+    },
     "judge_consumer_quality": {
-      "baseline": 4.95,
+      "baseline": 4.85,
       "min_allowed": 4.0,
       "strict": false
     },
@@ -53,22 +53,22 @@
       "strict": false
     },
     "rag_faithfulness_mean": {
-      "baseline": 0.9538,
+      "baseline": 0.9563,
       "min_allowed": 0.80,
       "strict": false
     },
     "rag_answer_relevancy_mean": {
-      "baseline": 0.6436,
+      "baseline": 0.6306,
       "min_allowed": 0.55,
       "strict": false
     },
     "rag_context_precision_mean": {
-      "baseline": 0.9011,
+      "baseline": 0.8486,
       "min_allowed": 0.75,
       "strict": false
     },
     "rag_context_recall_mean": {
-      "baseline": 0.9902,
+      "baseline": 1.0,
       "min_allowed": 0.85,
       "strict": false
     }

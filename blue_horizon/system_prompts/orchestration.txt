@@ -56,7 +56,7 @@ The bare-date-range case is easy to mis-classify: a date range supplied as a sho
 
 **Exception — policy or service questions following a booking**: If the user's follow-up asks about hotel services, amenities, dining, or policies, it is **not** a booking-flow confirmation — even if the message begins with “Also,” or “And,” and even if a booking was just completed. Apply rules 2–5 normally.
 
-Test: ask yourself whether the content of the message is about a **hotel service, amenity, or policy** (pool, shuttle, spa, transfers, dining, check-out time, pet policy, etc.). If yes → info, regardless of what the previous turn was about.
+Test: ask yourself whether the content of the message is about a **hotel service, amenity, or policy** (pool, shuttle, spa, yoga, fitness, transfers, dining, check-out time, pet policy, etc.). If yes → info, regardless of what the previous turn was about. A timing reference such as "check-in time" or "after check-in" in the context of a service question indicates *when* a service is wanted, not a booking action.
 
 Examples of service/policy follow-ups that should go to **info** even after a booking:
 * “Is breakfast included with that rate?” → info

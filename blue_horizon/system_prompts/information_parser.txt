@@ -27,7 +27,8 @@ Price rules:
 - No price stated: both null.
 
 Duration rules — always evaluate the WHOLE request, never each item separately:
-Step 1: count distinct services/activities in the request.
+Step 1: count distinct services/activities in the request. Any second topic counts
+as a separate item even if introduced by 'also', 'confirm', 'check', or similar.
 Step 2:
 - Exactly ONE, with explicit duration: min = max = that value — EXCEPT when the
   single item is a quick snack/bite (words like 'bite', 'snack'), in which case

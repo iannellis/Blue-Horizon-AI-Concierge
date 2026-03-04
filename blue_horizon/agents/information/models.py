@@ -94,7 +94,9 @@ class ParsedQuery(BaseModel):
             "is OK or they're fine with booking required), set True (will almost "
             "never happen). If the user explicitly wants no booking "
             "(e.g., 'no booking', 'no reservation', 'walk-in'), set False. "
-            "Do not set otherwise."
+            "For multi-item requests: set False only if ALL requested items carry "
+            "a no-booking constraint; leave null if signals are mixed or absent. "
+            "Do not set otherwise. "
             "Do not infer notice requirements from booking status."
         ),
     )
@@ -123,9 +125,13 @@ class ParsedQuery(BaseModel):
     max_notice_hours: int | None = Field(
         default=None,
         description=(
-            "Maximum acceptable advance notice in hours (inclusive). "
+            "Maximum advance notice the user can give, in hours (inclusive). "
             "Only set if explicitly mentioned (e.g., 'can only give X hours notice'). "
-            "Do not infer from 'walk-in' or 'no booking' - "
+            "For multi-item requests sharing a single notice cap, "
+            "max_notice_hours = that cap. "
+            "For multi-item requests with different per-item notice constraints, "
+            "max_notice_hours = largest value (avoids over-filtering). "
+            "Do not infer from 'walk-in' or 'no booking' — "
             "those only affect booking_required."
         ),
     )

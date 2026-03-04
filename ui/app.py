@@ -164,11 +164,21 @@ def _render_sidebar() -> None:
             st.rerun()
 
 
+def _md(text: str) -> None:
+    """Render text as Markdown with dollar signs escaped to prevent LaTeX parsing.
+
+    Args:
+        text: Text to render as Markdown.
+
+    """
+    st.markdown(text.replace("$", r"\$"))
+
+
 def _render_chat() -> None:
     """Render the chat message history and handle new user input."""
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+            _md(msg["content"])
 
     placeholder = "Ask about the hotel, or get help searching or booking rooms..."
     if prompt := st.chat_input(placeholder):
@@ -176,12 +186,12 @@ def _render_chat() -> None:
 
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
-            st.markdown(prompt)
+            _md(prompt)
 
         with st.chat_message("assistant"):
             with st.spinner(""):
                 reply = _send_message(st.session_state.thread_id, prompt)
-            st.markdown(reply)
+            _md(reply)
 
         st.session_state.messages.append({"role": "assistant", "content": reply})
 

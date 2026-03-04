@@ -28,6 +28,7 @@ from blue_horizon.agents.exceptions import OperationalError
 from blue_horizon.agents.information.config import build_system_prompt
 from blue_horizon.agents.information.models import RetrievalItem, Source
 from blue_horizon.agents.information.retrieval import build_index_schema
+from blue_horizon.agents.prompt_utils import load_packaged_text
 
 if TYPE_CHECKING:
     from llama_index.core.vector_stores.types import MetadataFilters
@@ -68,11 +69,13 @@ class InfoRagResources:
         "_config",
         "_embed_batch_size",
         "_faq_retriever",
+        "_parser_prompt_resource",
         "_retriever_cache_max",
         "_system_prompt_resource",
         "_top_k",
         "_vector_dims",
         "indexes",
+        "parser_prompt",
         "redis_async",
         "system_prompt",
     )
@@ -90,7 +93,9 @@ class InfoRagResources:
         VectorIndexRetriever,
     ]
     _system_prompt_resource: str
+    _parser_prompt_resource: str
     system_prompt: str | None
+    parser_prompt: str | None
 
     def __init__(
         self,
@@ -145,9 +150,14 @@ class InfoRagResources:
             self._system_prompt_resource = (
                 f"{prompts_folder}/{config.prompts.system_prompt_filename}"
             )
+            self._parser_prompt_resource = (
+                f"{prompts_folder}/{config.prompts.parser_prompt_filename}"
+            )
         else:
             self._system_prompt_resource = config.prompts.system_prompt_filename
+            self._parser_prompt_resource = config.prompts.parser_prompt_filename
         self.system_prompt: str | None = None
+        self.parser_prompt: str | None = None
 
     @staticmethod
     def _build_redis_retry(config: InfoRedisConfig) -> Retry:
@@ -202,6 +212,12 @@ class InfoRagResources:
             msg = "Failed to render system prompt"
             raise OperationalError(msg) from exc
 
+        try:
+            self.parser_prompt = await asyncio.to_thread(self._load_parser_prompt)
+        except Exception as exc:
+            msg = "Failed to load parser prompt"
+            raise OperationalError(msg) from exc
+
     async def aclose(self) -> None:
         """Close network resources owned by this instance.
 
@@ -228,6 +244,18 @@ class InfoRagResources:
             top_k=self._top_k,
             prompt_resource=self._system_prompt_resource,
         )
+
+    def _load_parser_prompt(self) -> str:
+        """Load and return the parser system prompt from its packaged resource.
+
+        Returns:
+            str: Parser system prompt text.
+
+        Raises:
+            RuntimeError: If the prompt resource cannot be found or read.
+
+        """
+        return load_packaged_text(self._parser_prompt_resource)
 
     async def _validate_vector_dims(self) -> None:
         """Validate that Redis vector index dimensions match the configured value.
@@ -473,6 +501,28 @@ class InfoRagResources:
             )
             raise RuntimeError(msg)
         return self.system_prompt
+
+    def get_parser_prompt(self) -> str:
+        """Return the parser system prompt.
+
+        The parser prompt is loaded during ``startup_check()`` and cached on the
+        instance. Callers should use this getter rather than accessing the internal
+        attribute directly.
+
+        Returns:
+            str: Parser system prompt text.
+
+        Raises:
+            RuntimeError: If the parser prompt has not been loaded yet.
+
+        """
+        if self.parser_prompt is None:
+            msg = (
+                "Parser prompt is not initialized; call "
+                "await InfoRagResources.startup_check() first"
+            )
+            raise RuntimeError(msg)
+        return self.parser_prompt
 
     async def retrieve_faq(self, query: str) -> list[RetrievalItem]:
         """Retrieve FAQ nodes relevant to a query.

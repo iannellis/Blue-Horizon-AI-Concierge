@@ -106,6 +106,7 @@ class InfoPromptsConfig(BaseModel):
     Attributes:
         folder: Directory relative to the package root that contains prompts.
         system_prompt_filename: Filename for the information agent system prompt.
+        parser_prompt_filename: Filename for the query-parser system prompt.
 
     """
 
@@ -113,6 +114,7 @@ class InfoPromptsConfig(BaseModel):
 
     folder: str
     system_prompt_filename: str
+    parser_prompt_filename: str
 
 
 class InfoRagConfig(BaseModel):

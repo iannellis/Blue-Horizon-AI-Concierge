@@ -104,6 +104,7 @@ retry_backoff_max_s = 1.0
 folder = "system_prompts"
 # File name ONLY (no path). The code assumes all prompts live in one folder.
 system_prompt_filename = "information.txt"
+parser_prompt_filename = "information_parser.txt"
 
 # Non-secret configuration for the Rooms Agent.
 [rooms.llm]

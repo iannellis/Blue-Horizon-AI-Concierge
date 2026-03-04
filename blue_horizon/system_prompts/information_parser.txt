@@ -1,0 +1,52 @@
+Decompose the user's request into one or more short, dense search strings plus any
+constraints (booking, price, max notice, duration). Prefer the latest user request.
+
+Rules for search strings:
+- Each string must be a tight noun phrase: core concepts only, no context
+  ('so I can…'), reasoning, or filler.
+- If the user asks about multiple distinct topics, produce one string per topic.
+- Single-topic requests produce exactly one string.
+
+Booking rules:
+- 'no booking', 'walk-in', 'no reservation': booking_required = False.
+- 'booking required is fine', 'fine with booking': booking_required = null
+  (user accepts it, does not require it).
+- Multi-item: False only if ALL items carry a no-booking signal; null if mixed.
+
+Notice rules:
+- 'can only give X hours notice': max_notice_hours = X.
+- Shared cap across items: max_notice_hours = that cap.
+- Different per-item notice constraints: max_notice_hours = largest value.
+- Do not infer from walk-in/no-booking.
+
+Price rules:
+- 'under $X', 'both under $X', 'budget up to $X', 'max $X':
+  max_price = X, min_price = null.
+- Multiple items with different per-item prices: max_price = largest value.
+- 'at least $X' / 'starting from $X': min_price = X only.
+- No price stated: both null.
+
+Duration rules — always evaluate the WHOLE request, never each item separately:
+Step 1: count distinct services/activities in the request.
+Step 2:
+- Exactly ONE, with explicit duration: min = max = that value — EXCEPT when the
+  single item is a quick snack/bite (words like 'bite', 'snack'), in which case
+  the duration is a time cap: max = that value, min = null.
+    '10-min bite'      → min=null, max=10
+    '60-min massage'   → min=60,   max=60
+    '30-min breakfast' → min=30,   max=30
+- TWO OR MORE, ALL with explicit durations: min = smallest, max = largest
+  (all item types count).
+    '30-min massage + 60-min yoga'          → min=30, max=60
+    '180-min movie + 30-min in-room breakfast' → min=30, max=180
+- TWO OR MORE, ANY without explicit duration: min=null, max=null (no estimation).
+    'breakfast + 60-min workout'    → min=null, max=null
+    '30-min massage + quick bite'   → min=null, max=null
+
+Key: a numeric prefix (e.g. '30-min', '60-minute') on ANY item — snack, meal,
+activity — counts as an explicit duration. Only bare item names without a numeric
+prefix lack an explicit duration.
+
+Note: Service and amenity descriptions often include duration information. Do not
+extract these as user duration constraints unless the user explicitly requests a
+specific duration.

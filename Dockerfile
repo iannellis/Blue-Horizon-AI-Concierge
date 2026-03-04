@@ -2,7 +2,7 @@ FROM python:3.13-slim
 
 # ── System packages ────────────────────────────────────────────────────────────
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git nginx supervisor \
+    && apt-get install -y --no-install-recommends git supervisor \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -23,7 +23,6 @@ COPY ui/ ./ui/
 ENV PYTHONPATH=/app
 
 # ── Deployment configuration ───────────────────────────────────────────────────
-COPY deploy/nginx.conf /etc/nginx/nginx.conf
 COPY deploy/supervisord.conf /etc/supervisor/supervisord.conf
 COPY deploy/.streamlit/ ./.streamlit/
 

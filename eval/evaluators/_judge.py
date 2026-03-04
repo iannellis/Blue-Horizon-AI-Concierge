@@ -62,8 +62,10 @@ async def eval_llm_rubrics(
 
     prompt = (
         "You are an evaluation judge for a hotel concierge agent.\n"
-        "Score the assistant on the rubric below. Output STRICT JSON only with "
-        "the required schema. No markdown code fences, no prose, no extra keys. "
+        "Score the assistant on the rubric below. Produce ONE single JSON object "
+        "that holistically evaluates the ENTIRE conversation — not one object per "
+        "turn. Output STRICT JSON only with the required schema. No markdown code "
+        "fences, no prose, no extra keys. "
         "Start your response directly with { and end with }.\n\n"
         "Rubric anchors:\n"
         "consumer_quality:\n"

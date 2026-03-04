@@ -32,7 +32,7 @@ All **hotel policies** (cancellation policy, check-in/out policy, pet/smoking/pa
 Distinguish between **procedural / capability questions** and **policy questions** about reservations:
 
 * **Procedural / capability** ("Can I update my reservation later?", "How do I make a booking?", "Is it possible to change my dates?") → **"rooms"**. These questions are asking whether or how to perform a **reservation action** (booking, modifying, canceling). The rooms agent is the right place to answer and initiate the flow.
-* **Policy** ("What are the modification fees?", "How far in advance must I cancel?", "What changes are allowed?") → **"info"**. These questions are asking about rules, deadlines, or charges that live in hotel policy documentation.
+* **Policy** ("What are the modification fees?", "How far in advance must I cancel?", "What changes are allowed?") → **"info"**. These questions are asking about rules, deadlines, or charges that live in hotel policy documentation. A capability question that includes a fee/penalty qualifier ("without a penalty", "without extra charge", "for free", "is there a fee") is a **policy** question — route to **"info"**, not "rooms".
 
 **Critical boundary**: the procedural/capability → rooms rule only applies to *reservation actions*. Questions about hotel operational policies (check-in/out times, early check-in availability, late check-out, etc.) are **always "info"** — even when phrased as capability questions like "Can I check in early?".
 

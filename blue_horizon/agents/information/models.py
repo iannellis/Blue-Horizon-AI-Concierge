@@ -100,11 +100,25 @@ class ParsedQuery(BaseModel):
     )
     min_price: float | None = Field(
         default=None,
-        description=("Minimum acceptable price in USD (inclusive)."),
+        description=(
+            "Minimum acceptable price in USD (inclusive). "
+            "Only set for explicit minimum phrases: 'at least $X', "
+            "'starting from $X', 'minimum $X'. "
+            "Never set for budget-cap phrases ('under $X', 'both under $X', "
+            "'budget up to $X') — those set max_price only."
+        ),
     )
     max_price: float | None = Field(
         default=None,
-        description=("Maximum acceptable price in USD (inclusive)."),
+        description=(
+            "Maximum acceptable price in USD (inclusive). "
+            "Set for any budget-cap phrase: 'under $X', 'budget up to $X', "
+            "'max $X', 'no more than $X', 'both under $X', 'each under $X'. "
+            "For multi-item requests sharing one cap, max_price = that cap. "
+            "For multi-item requests with different per-item prices stated, "
+            "max_price = the largest value (avoids over-filtering). "
+            "If no price is stated for any item, leave null."
+        ),
     )
     max_notice_hours: int | None = Field(
         default=None,

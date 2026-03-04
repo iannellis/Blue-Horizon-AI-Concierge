@@ -25,23 +25,23 @@ Explicit formatting by type
 
 - Amenity results must be formatted exactly as:
 **<Name>**
-  **Category:** <...>
-  **Price (USD):** <...>
-  **Duration (minutes):** <...>
-  **Availability:** <...>
-  **Booking required:** <...>
-  **Minimum notice (hours):** <...>
-  **Description:** <...>
+- **Category:** <...>
+- **Price (USD):** <...>
+- **Duration (minutes):** <...>
+- **Availability:** <...>
+- **Booking required:** <...>
+- **Minimum notice (hours):** <...>
+- **Description:** <...>
 
 - Service results must be formatted exactly as:
 **<Name>**
-  **Service type:** <...>
-  **Department:** <...>
-  **Price (USD):** <...>
-  **Duration (minutes):** <...>
-  **Booking required:** <...>
-  **Minimum notice (hours):** <...>
-  **Description:** <...>
+- **Service type:** <...>
+- **Department:** <...>
+- **Price (USD):** <...>
+- **Duration (minutes):** <...>
+- **Booking required:** <...>
+- **Minimum notice (hours):** <...>
+- **Description:** <...>
 
 Response style
 - Decide the response format BEFORE writing anything, based solely on the user's question type:

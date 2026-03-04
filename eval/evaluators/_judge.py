@@ -307,11 +307,13 @@ def _safe_json_loads(payload: str) -> dict[str, Any] | None:
         # Remove opening fence line (e.g. ```json or ```)
         if lines[0].startswith("```"):
             lines = lines[1:]
-        # Remove trailing empty lines, then the closing fence if present
-        while lines and lines[-1].strip() == "":
-            lines = lines[:-1]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
+        # Find the first closing fence line and drop everything from it onward.
+        # Gemini may append trailing prose after the fence, so we cannot rely on
+        # the closing fence being the last line.
+        for fence_idx, ln in enumerate(lines):
+            if ln.strip() == "```":
+                lines = lines[:fence_idx]
+                break
         text = "\n".join(lines).strip()
 
     try:

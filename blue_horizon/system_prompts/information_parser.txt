@@ -19,14 +19,17 @@ Notice rules:
 - 'can only give X hours notice': max_notice_hours = X.
 - Shared cap across items: max_notice_hours = that cap.
 - Different per-item notice constraints: max_notice_hours = largest value.
+- One or more items has no notice contraint: max_notice_hours = null
 - Do not infer from walk-in/no-booking.
 
 Price rules:
 - 'under $X', 'both under $X', 'budget up to $X', 'max $X':
   max_price = X, min_price = null.
-- Multiple items with different per-item prices: max_price = largest value.
-- 'at least $X' / 'starting from $X': min_price = X only.
-- No price stated: both null.
+- 'at least $X' / 'starting from $X': min_price = X, max_price = null.
+- TWO OR MORE items, ALL with explicit price caps: max_price = largest cap.
+- TWO OR MORE items, ANY lacking an explicit price cap: max_price = null.
+- TWO OR MORE items, ALL with explicit price floors: min_price = smallest floor.
+- TWO OR MORE items, ANY lacking an explicit price floor: min_price = null.
 
 Duration rules — always evaluate the WHOLE request, never each item separately.
 Apply these rules mechanically on topic count alone; do NOT decide that a duration
@@ -50,6 +53,11 @@ Step 2:
     '30-min massage + quick bite'             → min=null, max=null
     '60-min yoga, also confirm pool hours'    → min=null, max=null
 
+- ONE item, standalone floor phrase ('at least X minutes', 'minimum X minutes'):
+  min = X, max = null.
+- ONE item, standalone cap phrase ('at most X minutes', 'no longer than X minutes',
+  'up to X minutes'): max = X, min = null.
+
 Key: a numeric prefix (e.g. '30-min', '60-minute') on ANY item — snack, meal,
 activity — counts as an explicit duration. Only bare item names without a numeric
 prefix lack an explicit duration.
@@ -57,3 +65,15 @@ prefix lack an explicit duration.
 Note: Service and amenity descriptions often include duration information. Do not
 extract these as user duration constraints unless the user explicitly requests a
 specific duration.
+
+Overall rule for filters:
+- Never apply per-item logic — evaluate the whole request together.
+
+Examples where no filters should be applied:
+- I want a 15-minute lunch for under $40, and remind me what time check-out is.
+- Find me some yoga that doesn't need advance booking. Should cost under $150. Then
+  I want to watch a movie.
+- Find me a massage that lasts 2h or less. I want it within the next 3h. And then I
+  want some dinner.
+- I want some personal training, 1h session, for under $150, and do you have a pool?
+- I'm feeling like a 2h deep tissue massage, no more than $300, and can I bring my dog?

@@ -97,6 +97,7 @@ class ParsedQuery(BaseModel):
             "For multi-item requests: set False only if ALL requested items carry "
             "a no-booking constraint; leave null if signals are mixed or absent. "
             "Do not set otherwise. "
+            "Never apply per-item logic — evaluate the whole request together. "
             "Do not infer notice requirements from booking status."
         ),
     )
@@ -104,10 +105,13 @@ class ParsedQuery(BaseModel):
         default=None,
         description=(
             "Minimum acceptable price in USD (inclusive). "
-            "Only set for explicit minimum phrases: 'at least $X', "
-            "'starting from $X', 'minimum $X'. "
             "Never set for budget-cap phrases ('under $X', 'both under $X', "
             "'budget up to $X') — those set max_price only."
+            "if TWO OR MORE items are listed and ALL carry price floors, "
+            "min = the SMALLEST value across all of them; "
+            "if TWO OR MORE items are listed and ANY lacks an explicit price floor, "
+            "min = null. "
+            "Never apply per-item logic — evaluate the whole request together. "
         ),
     )
     max_price: float | None = Field(
@@ -117,9 +121,11 @@ class ParsedQuery(BaseModel):
             "Set for any budget-cap phrase: 'under $X', 'budget up to $X', "
             "'max $X', 'no more than $X', 'both under $X', 'each under $X'. "
             "For multi-item requests sharing one cap, max_price = that cap. "
-            "For multi-item requests with different per-item prices stated, "
-            "max_price = the largest value (avoids over-filtering). "
-            "If no price is stated for any item, leave null."
+            "if TWO OR MORE items are listed and ALL carry price caps, "
+            "max = the LARGEST value across all of them; "
+            "if TWO OR MORE items are listed and ANY lacks an explicit price cap, "
+            "max = null. "
+            "Never apply per-item logic — evaluate the whole request together. "
         ),
     )
     max_notice_hours: int | None = Field(
@@ -129,8 +135,11 @@ class ParsedQuery(BaseModel):
             "Only set if explicitly mentioned (e.g., 'can only give X hours notice'). "
             "For multi-item requests sharing a single notice cap, "
             "max_notice_hours = that cap. "
-            "For multi-item requests with different per-item notice constraints, "
-            "max_notice_hours = largest value (avoids over-filtering). "
+            "if TWO OR MORE items are listed and ALL carry explicit notice caps, "
+            "max = the LARGEST value across all of them; "
+            "if TWO OR MORE items are listed and ANY lacks an explicit notice cap, "
+            "max = null. "
+            "Never apply per-item logic — evaluate the whole request together. "
             "Do not infer from 'walk-in' or 'no booking' — "
             "those only affect booking_required."
         ),
@@ -144,10 +153,10 @@ class ParsedQuery(BaseModel):
             "min = that duration — EXCEPT for a single quick snack/bite item "
             "(e.g. 'in-room bite', 'snack'), where the duration is a time cap "
             "and min = null; "
-            "if TWO OR MORE services are requested and ALL carry explicit durations, "
-            "min = the SMALLEST value across all of them; "
-            "if TWO OR MORE services are requested and ANY lacks an explicit duration, "
-            "min = null. "
+            "if TWO OR MORE items are listed and ALL carry explicit durations "
+            "or duration floors, min = the SMALLEST value across all of them; "
+            "if TWO OR MORE items are listed and ANY lacks an explicit duration "
+            "or duration floor, min = null. "
             "Never apply per-item logic — evaluate the whole request together. "
             "Only set min alone for 'at least X minutes' phrases."
         ),
@@ -159,10 +168,10 @@ class ParsedQuery(BaseModel):
             "Determined by counting ALL distinct services/activities in the request: "
             "if exactly ONE service is requested with an explicit duration, "
             "max = that duration; "
-            "if TWO OR MORE services are requested and ALL carry explicit durations, "
-            "max = the LARGEST value across all of them; "
-            "if TWO OR MORE services are requested and ANY lacks an explicit duration, "
-            "max = null. "
+            "if TWO OR MORE items are listed and ALL carry explicit durations, "
+            "or time caps, max = the LARGEST value across all of them; "
+            "if TWO OR MORE items are listed and ANY lacks an explicit duration "
+            "or time cap, max = null. "
             "Never apply per-item logic — evaluate the whole request together. "
             "Do not estimate durations for items that have none stated. "
             "Only set max alone for 'at most X minutes' or overall time-cap phrases."

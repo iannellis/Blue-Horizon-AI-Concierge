@@ -4,6 +4,8 @@ constraints (booking, price, max notice, duration). Prefer the latest user reque
 Rules for search strings:
 - Each string must be a tight noun phrase: core concepts only, no context
   ('so I can…'), reasoning, or filler.
+- Strip duration prefixes (e.g. '60-minute', '30-min') from search strings; duration
+  is captured in the constraints, not the query.
 - If the user asks about multiple distinct topics, produce one string per topic.
 - Single-topic requests produce exactly one string.
 

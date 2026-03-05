@@ -26,9 +26,12 @@ Price rules:
 - 'at least $X' / 'starting from $X': min_price = X only.
 - No price stated: both null.
 
-Duration rules — always evaluate the WHOLE request, never each item separately:
-Step 1: count distinct services/activities in the request. Any second topic counts
-as a separate item even if introduced by 'also', 'confirm', 'check', or similar.
+Duration rules — always evaluate the WHOLE request, never each item separately.
+Apply these rules mechanically on topic count alone; do NOT decide that a duration
+constraint "only applies to" one topic while ignoring another.
+Step 1: count distinct topics in the request. Any second topic counts
+as a separate item even if introduced by 'also', 'confirm', 'check', or similar,
+and even if that topic seems like an availability check rather than a service request.
 Step 2:
 - Exactly ONE, with explicit duration: min = max = that value — EXCEPT when the
   single item is a quick snack/bite (words like 'bite', 'snack'), in which case
@@ -41,8 +44,9 @@ Step 2:
     '30-min massage + 60-min yoga'          → min=30, max=60
     '180-min movie + 30-min in-room breakfast' → min=30, max=180
 - TWO OR MORE, ANY without explicit duration: min=null, max=null (no estimation).
-    'breakfast + 60-min workout'    → min=null, max=null
-    '30-min massage + quick bite'   → min=null, max=null
+    'breakfast + 60-min workout'              → min=null, max=null
+    '30-min massage + quick bite'             → min=null, max=null
+    '60-min yoga, also confirm pool hours'    → min=null, max=null
 
 Key: a numeric prefix (e.g. '30-min', '60-minute') on ANY item — snack, meal,
 activity — counts as an explicit duration. Only bare item names without a numeric

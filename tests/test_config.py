@@ -17,7 +17,6 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
     "orchestration": {
         "llm": {
             "model": "gpt-5-nano",
-            "temperature": 0.0,
             "reasoning_effort": "low",
             "timeout_s": 15.0,
             "max_retries": 2,
@@ -62,7 +61,6 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
         },
         "llm": {
             "model": "gpt-5.2",
-            "temperature": 0.0,
             "reasoning_effort": "medium",
             "timeout_s": 20.0,
             "max_retries": 2,
@@ -83,7 +81,6 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
     "rooms": {
         "llm": {
             "model": "gpt-5-mini",
-            "temperature": 0.0,
             "reasoning_effort": "low",
             "timeout_s": 20.0,
             "max_retries": 2,

@@ -61,7 +61,6 @@ class InfoLlmConfig(BaseModel):
 
     Attributes:
         model: Chat model identifier.
-        temperature: Sampling temperature for generation calls.
         timeout_s: Client-side request timeout in seconds.
         max_retries: Retry budget for transient LLM failures.
         reasoning_effort: Reasoning effort hint (e.g., low, medium, high).
@@ -71,7 +70,6 @@ class InfoLlmConfig(BaseModel):
     model_config = {"frozen": True}
 
     model: str
-    temperature: float
     timeout_s: float
     max_retries: int
     reasoning_effort: str
@@ -143,7 +141,6 @@ class RoomsLlmConfig(BaseModel):
 
     Attributes:
         model: Chat model identifier.
-        temperature: Sampling temperature for SQL generation.
         reasoning_effort: Reasoning effort hint metadata.
         timeout_s: Timeout in seconds for LLM requests.
         max_retries: Retry count for transient LLM failures.
@@ -153,7 +150,6 @@ class RoomsLlmConfig(BaseModel):
     model_config = {"frozen": True}
 
     model: str
-    temperature: float
     reasoning_effort: str
     timeout_s: float
     max_retries: int
@@ -332,7 +328,6 @@ class OrchestrationLlmConfig(BaseModel):
 
     Attributes:
         model: Router chat model identifier.
-        temperature: Sampling temperature.
         reasoning_effort: Reasoning effort hint.
         timeout_s: Network timeout for router LLM calls.
         max_retries: Retry budget for transient router failures.
@@ -342,7 +337,6 @@ class OrchestrationLlmConfig(BaseModel):
     model_config = {"frozen": True}
 
     model: str
-    temperature: float
     reasoning_effort: str
     timeout_s: float
     max_retries: int

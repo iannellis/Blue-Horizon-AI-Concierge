@@ -9,8 +9,6 @@
 [orchestration.llm]
 # Model identifier passed to ChatOpenAI
 model = "gpt-5-mini"
-# Sampling temperature
-temperature = 0.0
 # Reasoning effort hint for reasoning models (passed as reasoning={"effort": ...})
 # Typical values: "minimal", "low", "medium", "high"
 reasoning_effort = "low"
@@ -76,8 +74,6 @@ max_retries = 2
 [info.llm]
 # Chat model used by LangChain ChatOpenAI.
 model = "gpt-5.2"
-# Temperature for responses (0 is deterministic-ish).
-temperature = 0.0
 # Reasoning effort. Medium works well for information agent.
 reasoning_effort = "medium"
 # Network timeout for chat requests (seconds).
@@ -110,8 +106,6 @@ parser_prompt_filename = "information_parser.txt"
 [rooms.llm]
 # Chat model name.
 model = "gpt-5.2"
-# 0.0 is best for deterministic SQL generation.
-temperature = 0.0
 # OpenAI reasoning effort hint (if supported by your model).
 reasoning_effort = "low"
 # Network timeout for LLM requests (seconds).

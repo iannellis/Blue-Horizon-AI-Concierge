@@ -54,7 +54,6 @@ class RoomsAgentFactory:
 
         llm = ChatOpenAI(
             model=self.config.llm.model,
-            temperature=self.config.llm.temperature,
             reasoning={"effort": self.config.llm.reasoning_effort},
             timeout=self.config.llm.timeout_s,
             max_retries=self.config.llm.max_retries,

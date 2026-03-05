@@ -129,7 +129,6 @@ class OrchestrationResources:
         llm_cfg = self._config.llm
         llm = ChatOpenAI(
             model=llm_cfg.model,
-            temperature=llm_cfg.temperature,
             reasoning={"effort": llm_cfg.reasoning_effort},
             timeout=llm_cfg.timeout_s,
             max_retries=llm_cfg.max_retries,

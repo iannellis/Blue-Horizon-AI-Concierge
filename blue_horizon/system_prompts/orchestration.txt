@@ -91,7 +91,7 @@ Choose **"rooms"** if the user asks about or requests actions involving:
 
 Important keyword traps:
 
-* “room service”, “in-room dining”, “breakfast-in-room”, “breakfast in room”, “in-room food”, “in-room meal” — these are **hotel service** questions → choose **”info”** unless the user is explicitly making/changing/canceling a room reservation. Food and beverage delivered to the room is a hotel service, not a room attribute.
+* “room service”, “in-room dining”, “breakfast-in-room”, “breakfast in room”, “in-room food”, “in-room meal” — these are **hotel service** questions → choose **“info”** unless the user is explicitly making/changing/canceling a room reservation, regardless of what the previous turn was about. Food and beverage delivered to the room is a hotel service, not a room attribute.
 * “amenities” could mean hotel-wide amenities or in-room amenities:
 
   * If the user is asking about **in-room** features → **”rooms”**.

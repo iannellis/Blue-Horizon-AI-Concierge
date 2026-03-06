@@ -60,3 +60,11 @@ jobs:
           fi
           python -m eval.ci_check "${RESULTS_DIR}results.jsonl" \
             --baseline eval/baselines/hotel_agent_eval_200_baseline.json
+
+      - name: Upload eval logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-logs-200
+          path: eval/logs/
+          if-no-files-found: ignore

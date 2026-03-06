@@ -107,6 +107,14 @@ jobs:
           fi
           python -m eval.ci_check "${RESULTS_DIR}results.jsonl"
 
+      - name: Upload eval logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-logs-20
+          path: eval/logs/
+          if-no-files-found: ignore
+
   deploy:
     name: Push to HuggingFace Space
     needs: [changes, eval]

@@ -2,7 +2,7 @@ FROM python:3.13-slim
 
 # ── System packages ────────────────────────────────────────────────────────────
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git supervisor \
+    && apt-get install -y --no-install-recommends git supervisor curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -27,6 +27,8 @@ COPY deploy/supervisord.conf /etc/supervisor/supervisord.conf
 COPY deploy/.streamlit/ ./.streamlit/
 
 # HuggingFace Spaces exposes exactly one port.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:7860/ >/dev/null || exit 1
 EXPOSE 7860
 
 CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]

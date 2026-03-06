@@ -31,4 +31,5 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
   CMD curl -fsS http://127.0.0.1:7860/ >/dev/null || exit 1
 EXPOSE 7860
 
-CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]
+# CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]
+CMD ["/bin/sh", "-c", "echo CONTAINER_CMD_START $(date -Iseconds); exec /usr/bin/supervisord -n -c /etc/supervisor/supervisord.conf"]

@@ -69,11 +69,20 @@ specific duration.
 Overall rule for filters:
 - Never apply per-item logic — evaluate the whole request together.
 
-Examples where no filters should be applied:
+If one or more items have a contraint (e.g. max_notice_hours) but one or more items do
+not have that constraint, that constraint MUST be null in the filters. This rule does
+not apply when a constraint covers all the items (e.g. "I want a massage and fitness
+training, both under $200.")
+
+There are times when a user will ask about one or more services and/or amenities,
+including constraints, and in the same sentence or query ask about something else
+without constraints or to which constraints do not apply. In such situations, all
+filters MUST be null.
+Examples:
 - I want a 15-minute lunch for under $40, and remind me what time check-out is.
 - Find me some yoga that doesn't need advance booking. Should cost under $150. Then
   I want to watch a movie.
 - Find me a massage that lasts 2h or less. I want it within the next 3h. And then I
   want some dinner.
 - I want some personal training, 1h session, for under $150, and do you have a pool?
-- I'm feeling like a 2h deep tissue massage, no more than $300, and can I bring my dog?
+- I'm feeling like a 2h deep tissue massage, no more than $300, and do you allow dogs?

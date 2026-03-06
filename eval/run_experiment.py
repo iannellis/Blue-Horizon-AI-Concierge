@@ -24,6 +24,8 @@ from eval._result_utils import (
     _build_error_summary,
     _build_results_row,
     _summarize_results,
+    compute_latency_summary,
+    format_latency_table,
 )
 from eval._utils import json_safe
 from eval.config import MetadataConfig, load_eval_config
@@ -35,6 +37,7 @@ from eval.evaluators import (
     eval_rag_metrics_info_turns,
     eval_rooms_outcome_and_invariants,
     eval_routing_accuracy,
+    eval_turn_latency,
 )
 from eval.langsmith_target import run_example
 from eval.rooms_db_manager import reset_neon_branch
@@ -359,6 +362,19 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _log_latency_table(latency: dict[str, object]) -> None:
+    """Log per-route p50/p95/p99 latency quantiles as an INFO table.
+
+    Args:
+        latency: Dict returned by ``compute_latency_summary``, containing
+            a ``"latency_quantiles_ms"`` key with per-route quantile data.
+
+    """
+    table = format_latency_table(latency)
+    if table:
+        logger.info(table)
+
+
 async def main() -> None:
     """Run the LangSmith experiment and persist local artifacts."""
     args = _parse_args()
@@ -392,6 +408,7 @@ async def main() -> None:
         partial(eval_rag_metrics_info_turns, cfg=cfg),
         partial(eval_info_reference_subset, cfg=cfg),
         partial(eval_info_expected_filters, cfg=cfg),
+        eval_turn_latency,
     ]
 
     aevaluate_kwargs: MutableMapping[str, Any] = {
@@ -430,6 +447,10 @@ async def main() -> None:
             upload_results=upload_results,
         )
         summary = _summarize_results(result_rows, context)
+        latency = compute_latency_summary(artifacts.results_path)
+        if latency:
+            summary = {**summary, **latency}
+            _log_latency_table(latency)
         _write_summary(artifacts.summary_path, summary)
     except Exception as exc:
         finished_at = datetime.now(UTC)

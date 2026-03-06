@@ -64,6 +64,7 @@ async def run_example(
             "turn_index": turn_index,
         }
 
+        _t0 = asyncio.get_running_loop().time()
         result = await orchestration_mgr.ainvoke(
             thread_id=thread_id,
             user_text=user_text,
@@ -71,6 +72,7 @@ async def run_example(
             tags=tags,
             metadata=metadata,
         )
+        latency_ms = (asyncio.get_running_loop().time() - _t0) * 1000.0
 
         messages_raw = result.get("messages", [])
         messages = messages_raw if isinstance(messages_raw, list) else []
@@ -88,6 +90,7 @@ async def run_example(
                 "route_pred": route_pred,
                 "tool_summary": callback.tool_summary,
                 "contexts_used": callback.contexts_used,
+                "latency_ms": latency_ms,
             },
         )
 

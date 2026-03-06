@@ -7,10 +7,17 @@ aggregating summary statistics across all results.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable, Mapping
-from typing import Any, Protocol, cast
+from contextlib import suppress
+from typing import TYPE_CHECKING, Any, Protocol, cast
+
+import pandas as pd
 
 from eval._utils import json_safe
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Structural protocols for LangSmith result objects
@@ -306,6 +313,88 @@ def _as_attr_source(
 # ---------------------------------------------------------------------------
 # Summary aggregation
 # ---------------------------------------------------------------------------
+
+
+def compute_latency_summary(results_path: Path) -> dict[str, object]:
+    """Compute p50/p95/p99 per-route latency quantiles from results.jsonl.
+
+    Reads ``latency_per_turn`` JSON value fields from every row in the file,
+    flattens all ``{route, latency_ms}`` records, and computes quantiles
+    grouped by orchestration route.
+
+    Args:
+        results_path: Path to the ``results.jsonl`` file written by
+            ``run_experiment.py``.
+
+    Returns:
+        Dict with a single ``"latency_quantiles_ms"`` key whose value is a
+        mapping of route name → ``{p50_ms, p95_ms, p99_ms}``.  Returns an
+        empty dict when no latency data is present.
+
+    """
+    records: list[dict[str, object]] = []
+    with results_path.open(encoding="utf-8") as fh:
+        for raw_line in fh:
+            stripped = raw_line.strip()
+            if not stripped:
+                continue
+            case = json.loads(stripped)
+            feedback_items: list[list[Any]] = (
+                case.get("evaluators", {}).get("results", {}).get("value") or []
+            )
+            for item in feedback_items:
+                item_dict = dict(item)
+                if item_dict.get("key") != "latency_per_turn":
+                    continue
+                raw_val = item_dict.get("value")
+                if not raw_val:
+                    continue
+                with suppress(json.JSONDecodeError, TypeError):
+                    turn_records = json.loads(raw_val)
+                    if isinstance(turn_records, list):
+                        records.extend(turn_records)
+
+    if not records:
+        return {}
+
+    df = pd.DataFrame(records)
+    df["route"] = df["route"].fillna("unknown")
+    grp = df.groupby("route")["latency_ms"]
+    result: dict[str, object] = {
+        str(route): {
+            "p50_ms": round(float(series.quantile(0.50)), 1),
+            "p95_ms": round(float(series.quantile(0.95)), 1),
+            "p99_ms": round(float(series.quantile(0.99)), 1),
+        }
+        for route, series in grp
+    }
+    return {"latency_quantiles_ms": result}
+
+
+def format_latency_table(latency: dict[str, object]) -> str:
+    """Format per-route p50/p95/p99 latency quantiles as a plain-text table.
+
+    Args:
+        latency: Dict returned by ``compute_latency_summary``, containing
+            a ``"latency_quantiles_ms"`` key with per-route quantile data.
+
+    Returns:
+        Multi-line string with a header and one row per route, or an empty
+        string when ``latency`` contains no quantile data.
+
+    """
+    quantiles = latency.get("latency_quantiles_ms")
+    if not isinstance(quantiles, dict) or not quantiles:
+        return ""
+    header = f"  {'Route':<12} {'p50 ms':>8} {'p95 ms':>8} {'p99 ms':>8}"
+    lines = ["\nPer-route latency (ms):", header, "  " + "-" * (len(header) - 2)]
+    for route, stats in sorted(quantiles.items()):
+        if isinstance(stats, dict):
+            lines.append(
+                f"  {route:<12} {stats['p50_ms']:>8.0f}"
+                f" {stats['p95_ms']:>8.0f} {stats['p99_ms']:>8.0f}",
+            )
+    return "\n".join(lines)
 
 
 def _summarize_results(

@@ -22,6 +22,8 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from eval._result_utils import compute_latency_summary, format_latency_table
+
 _DEFAULT_BASELINE = (
     Path(__file__).parent / "baselines" / "hotel_agent_eval_20_baseline.json"
 )
@@ -34,6 +36,7 @@ _SKIP_KEYS: frozenset[str] = frozenset(
         "info_reference_subset_failures",
         "info_expected_filters_failures",
         "rag_per_turn",
+        "latency_per_turn",
     },
 )
 
@@ -59,6 +62,7 @@ def main() -> None:
     scores = _collect_scores(results_path)
     baseline = _load_baseline(baseline_path)
     passed = _run_checks(scores, baseline)
+    _print_latency_stats(results_path)
     sys.exit(0 if passed else 1)
 
 
@@ -221,6 +225,19 @@ def _evaluate_metric(
         actual_str = f"{mean:.4f}"
 
     return passed, actual_str
+
+
+def _print_latency_stats(results_path: Path) -> None:
+    """Print p50/p95/p99 per-route latency quantiles from results.jsonl.
+
+    Args:
+        results_path: Path to the results JSONL file produced by
+            ``run_experiment.py``.
+
+    """
+    latency = compute_latency_summary(results_path)
+    table = format_latency_table(latency)
+    print(table if table else "\nNo latency data found.")
 
 
 if __name__ == "__main__":

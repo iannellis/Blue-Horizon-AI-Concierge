@@ -25,8 +25,8 @@ CREATE TABLE rooms (
   accessibility BOOLEAN, -- Whether handicapped accessible
   status room_status_type, -- Enum with options $room_status_type, do not return
   last_renovation DATE, -- Do not provide unless asked for
-  base_rate NUMERIC(10, 2), -- Do not provide to the user
-  max_rate NUMERIC(10, 2) -- Do not provide to the user
+  base_rate NUMERIC(10, 2), -- Do not use
+  max_rate NUMERIC(10, 2) -- Do not use
   -- The table lists details about all the rooms in the hotel.
 )
 

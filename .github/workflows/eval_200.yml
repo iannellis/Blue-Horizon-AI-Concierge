@@ -1,8 +1,7 @@
 # Full 200-case evaluation workflow for Blue Horizon AI Concierge.
 #
 # Triggered manually via the GitHub Actions "Run workflow" button.
-# Results are uploaded to LangSmith for inspection; no baseline check is
-# performed (pin a baseline and add a ci_check.py step once one exists).
+# Results are uploaded to LangSmith and compared against the 200-case baseline.
 #
 # Required repository/environment secrets (Full Eval environment):
 #   LANGSMITH_API_KEY   – LangSmith API key for dataset loading and tracing.
@@ -51,3 +50,13 @@ jobs:
           PGSQL_EVAL_DB_URL: ${{ secrets.PGSQL_EVAL_DB_URL }}
           REDIS_URL: ${{ secrets.REDIS_URL }}
         run: python -m eval.run_experiment --config eval/eval_config_200.toml
+
+      - name: Check results against baseline
+        run: |
+          RESULTS_DIR=$(ls -dt eval/outputs/hotel-agent-eval-200_*/ 2>/dev/null | head -1)
+          if [ -z "$RESULTS_DIR" ]; then
+            echo "ERROR: No eval output directory found." >&2
+            exit 1
+          fi
+          python -m eval.ci_check "${RESULTS_DIR}results.jsonl" \
+            --baseline eval/baselines/hotel_agent_eval_200_baseline.json

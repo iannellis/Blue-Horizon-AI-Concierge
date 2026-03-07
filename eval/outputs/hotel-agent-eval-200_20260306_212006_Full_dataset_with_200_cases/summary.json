@@ -1,0 +1,27 @@
+{
+  "experiment_name": "hotel-agent-eval-200_20260306_212006_Full_dataset_with_200_cases",
+  "dataset_name": "BlueHorizonEval_200",
+  "max_concurrency": 10,
+  "started_at": "2026-03-06T21:20:06.506721+00:00",
+  "finished_at": "2026-03-06T21:50:34.481207+00:00",
+  "upload_results": true,
+  "num_examples": 200,
+  "num_failed_runs": 0,
+  "latency_quantiles_ms": {
+    "info": {
+      "p50_ms": 5832.9,
+      "p95_ms": 12737.0,
+      "p99_ms": 16353.9
+    },
+    "refuse": {
+      "p50_ms": 2218.5,
+      "p95_ms": 5833.2,
+      "p99_ms": 7482.1
+    },
+    "rooms": {
+      "p50_ms": 8716.3,
+      "p95_ms": 19789.7,
+      "p99_ms": 24141.3
+    }
+  }
+}

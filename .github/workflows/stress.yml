@@ -5,9 +5,11 @@
 # checks DB invariants, and uploads logs and results as artifacts.
 #
 # Required repository/environment secrets (Full Eval environment):
+#   LANGSMITH_API_KEY   – LangSmith API key for tracing.
 #   GEMINI_API_KEY      – Google Gemini API key for the agent.
-#   PGSQL_EVAL_DB_URL   – Full PostgreSQL connection string for the eval database.
+#   OPENAI_API_KEY      – OpenAI API key for the information agent and embeddings.
 #   NEON_API_KEY        – Neon management API key for branch reset.
+#   PGSQL_EVAL_DB_URL   – Full PostgreSQL connection string for the eval database.
 #   REDIS_URL           – Redis connection URL for the agent's cache.
 #
 # Required repository/environment variables (Full Eval environment):

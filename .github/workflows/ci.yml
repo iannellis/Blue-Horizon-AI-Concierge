@@ -115,6 +115,14 @@ jobs:
           path: eval/logs/
           if-no-files-found: ignore
 
+      - name: Upload eval results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results-20
+          path: eval/outputs/
+          if-no-files-found: ignore
+
   deploy:
     name: Push to HuggingFace Space
     needs: [changes, eval]

@@ -1,0 +1,70 @@
+# Stress test workflow for Blue Horizon AI Concierge.
+#
+# Triggered manually via the GitHub Actions "Run workflow" button.
+# Runs 50 concurrent simulated users against the Neon development branch,
+# checks DB invariants, and uploads logs and results as artifacts.
+#
+# Required repository/environment secrets (Full Eval environment):
+#   GEMINI_API_KEY      – Google Gemini API key for the agent.
+#   PGSQL_EVAL_DB_URL   – Full PostgreSQL connection string for the eval database.
+#   NEON_API_KEY        – Neon management API key for branch reset.
+#   REDIS_URL           – Redis connection URL for the agent's cache.
+#
+# Required repository/environment variables (Full Eval environment):
+#   LANGSMITH_TRACING   – Set to "true" to enable LangSmith tracing.
+#   LANGCHAIN_PROJECT   – LangSmith project name for trace grouping.
+
+name: Stress test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  stress:
+    name: Stress test (50 users)
+    runs-on: ubuntu-latest
+    environment: Full Eval
+
+    steps:
+      - name: Checkout (with LFS for wheel and pkl files)
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          pip install --no-cache-dir assets/ml_dtypes-0.4.1-cp313-cp313-linux_x86_64.whl
+          pip install --no-cache-dir -r eval/requirements.txt
+
+      - name: Run stress test
+        env:
+          LANGSMITH_TRACING: ${{ vars.LANGSMITH_TRACING }}
+          LANGCHAIN_PROJECT: ${{ vars.LANGCHAIN_PROJECT }}
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PGSQL_EVAL_DB_URL: ${{ secrets.PGSQL_EVAL_DB_URL }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+        run: python -m eval.stress
+
+      - name: Upload stress logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stress-logs
+          path: eval/logs/
+          if-no-files-found: ignore
+
+      - name: Upload stress results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stress-results
+          path: eval/outputs/
+          if-no-files-found: ignore

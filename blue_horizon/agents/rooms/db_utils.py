@@ -6,7 +6,6 @@ row truncation, and user-facing error messages.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any, Final
 
 import psycopg
@@ -83,17 +82,6 @@ async def fetch_rooms_metadata(
 
     else:
         return enum_values, basic_amenities, additional_amenities, view_types
-
-
-async def _sleep_backoff(base_s: float, attempt: int) -> None:
-    """Sleep using exponential backoff.
-
-    Args:
-        base_s: Base backoff in seconds.
-        attempt: Zero-based attempt index.
-
-    """
-    await asyncio.sleep(base_s * (2**attempt))
 
 
 def _is_transient_conn_error(exc: BaseException) -> bool:

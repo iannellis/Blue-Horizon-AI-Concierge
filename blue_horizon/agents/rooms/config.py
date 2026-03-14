@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from blue_horizon.agents.prompt_utils import load_prompt_template
 from blue_horizon.config import RoomsSqlConfig, load_app_config
 
 if TYPE_CHECKING:
@@ -64,18 +63,3 @@ def render_system_prompt(  # noqa: PLR0913
     )
 
 
-def load_prompt_template_for_rooms(resource: str) -> Template:
-    """Load the rooms system prompt template from package resources.
-
-    Args:
-        resource: Package resource path to the prompt template file.
-
-    Returns:
-        Loaded string Template.
-
-    Raises:
-        FileNotFoundError: If the resource cannot be located.
-        RuntimeError: If the template cannot be loaded.
-
-    """
-    return load_prompt_template(resource)

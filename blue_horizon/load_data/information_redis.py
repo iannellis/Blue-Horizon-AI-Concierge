@@ -17,14 +17,17 @@ from llama_index.core import Settings, StorageContext, VectorStoreIndex
 from llama_index.core.schema import TextNode
 from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.vector_stores.redis import RedisVectorStore
-from redisvl.schema import IndexSchema
 
+from blue_horizon.agents.information.models import Source
+from blue_horizon.agents.information.retrieval import build_index_schema
 from blue_horizon.config import load_app_config
 from blue_horizon.load_data import _repo_root
 
 if TYPE_CHECKING:
     from collections.abc import Hashable
     from pathlib import Path
+
+    from redisvl.schema import IndexSchema
 
 
 logging.basicConfig(
@@ -307,130 +310,84 @@ def main() -> None:
     via separate vector store indices.
 
     """
-    redis_conn_string = load_app_config().redis_url
-    Settings.embed_model = OpenAIEmbedding(model="text-embedding-3-small")
+    cfg = load_app_config()
+    embeddings_cfg = cfg.info.embeddings
+    vector_dims = cfg.info.retrieval.vector_dims
+
+    Settings.embed_model = OpenAIEmbedding(
+        model=embeddings_cfg.model,
+        embed_batch_size=embeddings_cfg.batch_size,
+        timeout=embeddings_cfg.timeout_s,
+        max_retries=embeddings_cfg.max_retries,
+    )
 
     data_path = get_data_path()
+    redis_conn_string = cfg.redis_url
 
     # ============================
     # Load FAQ data into Redis
     # ============================
 
-    faq_schema = IndexSchema.from_dict(
-        {
-            "index": {"name": "faq", "prefix": "faq"},
-            # customize fields that are indexed
-            "fields": [
-                # required fields for llamaindex
-                {"type": "tag", "name": "id"},
-                {"type": "tag", "name": "doc_id"},
-                {"type": "text", "name": "text"},
-                # custom for metadata filtering
-                {"type": "tag", "name": "category"},
-                # custom vector field for text-embedding-3-small
-                {
-                    "type": "vector",
-                    "name": "vector",
-                    "attrs": {
-                        "dims": 1536,
-                        "algorithm": "hnsw",
-                        "distance_metric": "cosine",
-                    },
-                },
-            ],
-        },
+    faq_schema = build_index_schema(
+        name=Source.FAQ.value,
+        prefix=Source.FAQ.value,
+        extra_fields=[{"type": "tag", "name": "category"}],
+        vector_dims=vector_dims,
     )
-
     df_faq = load_dataframe(
-        "FAQ",
-        data_path / "faq_knowledge_base.pkl",
-        FAQ_REQUIRED_COLUMNS,
+        "FAQ", data_path / "faq_knowledge_base.pkl", FAQ_REQUIRED_COLUMNS,
     )
     faq_nodes = get_faq_nodes(df_faq)
-    build_index(faq_schema, faq_nodes, "faq", redis_conn_string)
+    build_index(faq_schema, faq_nodes, Source.FAQ.value, redis_conn_string)
 
     # ============================
     # Load amenities data into Redis
     # ============================
 
-    amenities_schema = IndexSchema.from_dict(
-        {
-            "index": {"name": "amenities", "prefix": "amenities"},
-            # customize fields that are indexed
-            "fields": [
-                # required fields for llamaindex
-                {"type": "tag", "name": "id"},
-                {"type": "tag", "name": "doc_id"},
-                {"type": "text", "name": "text"},
-                # custom fields for filtering
-                {"type": "tag", "name": "category"},
-                {"type": "numeric", "name": "price"},
-                {"type": "numeric", "name": "duration"},
-                {"type": "numeric", "name": "min_notice_hours"},
-                {"type": "tag", "name": "booking_required"},
-                # custom vector field for text-embedding-3-small embeddings
-                {
-                    "type": "vector",
-                    "name": "vector",
-                    "attrs": {
-                        "dims": 1536,
-                        "algorithm": "hnsw",
-                        "distance_metric": "cosine",
-                    },
-                },
-            ],
-        },
+    amenities_schema = build_index_schema(
+        name=Source.AMENITIES.value,
+        prefix=Source.AMENITIES.value,
+        extra_fields=[
+            {"type": "tag", "name": "category"},
+            {"type": "numeric", "name": "price"},
+            {"type": "numeric", "name": "duration"},
+            {"type": "numeric", "name": "min_notice_hours"},
+            {"type": "tag", "name": "booking_required"},
+        ],
+        vector_dims=vector_dims,
     )
-
     df_amenities = load_dataframe(
-        "Amenities",
-        data_path / "amenities.pkl",
-        AMENITIES_REQUIRED_COLUMNS,
+        "Amenities", data_path / "amenities.pkl", AMENITIES_REQUIRED_COLUMNS,
     )
     amenities_nodes = get_amenities_nodes(df_amenities)
-    build_index(amenities_schema, amenities_nodes, "amenities", redis_conn_string)
+    build_index(
+        amenities_schema, amenities_nodes, Source.AMENITIES.value, redis_conn_string,
+    )
 
     # ============================
     # Load services data into Redis
     # ============================
 
-    services_schema = IndexSchema.from_dict(
-        {
-            "index": {"name": "services", "prefix": "services"},
-            # customize fields that are indexed
-            "fields": [
-                # required fields for llamaindex
-                {"type": "tag", "name": "id"},
-                {"type": "tag", "name": "doc_id"},
-                {"type": "text", "name": "text"},
-                # custom fields for filtering
-                {"type": "tag", "name": "service_type"},
-                {"type": "numeric", "name": "price"},
-                {"type": "numeric", "name": "duration"},
-                {"type": "numeric", "name": "min_notice_hours"},
-                {"type": "tag", "name": "department"},
-                {"type": "tag", "name": "booking_required"},
-                # custom vector field for text-embedding-3-small embeddings
-                {
-                    "type": "vector",
-                    "name": "vector",
-                    "attrs": {
-                        "dims": 1536,
-                        "algorithm": "hnsw",
-                        "distance_metric": "cosine",
-                    },
-                },
-            ],
-        },
+    services_schema = build_index_schema(
+        name=Source.SERVICES.value,
+        prefix=Source.SERVICES.value,
+        extra_fields=[
+            {"type": "tag", "name": "service_type"},
+            {"type": "numeric", "name": "price"},
+            {"type": "numeric", "name": "duration"},
+            {"type": "numeric", "name": "min_notice_hours"},
+            {"type": "tag", "name": "department"},
+            {"type": "tag", "name": "booking_required"},
+        ],
+        vector_dims=vector_dims,
     )
-
     df_services = load_dataframe(
-        "Services",
-        data_path / "services.pkl",
-        SERVICES_REQUIRED_COLUMNS,
+        "Services", data_path / "services.pkl", SERVICES_REQUIRED_COLUMNS,
     )
     services_nodes = get_services_nodes(df_services)
-    build_index(services_schema, services_nodes, "services", redis_conn_string)
+    build_index(
+        services_schema, services_nodes, Source.SERVICES.value, redis_conn_string,
+    )
 
 
 if __name__ == "__main__":

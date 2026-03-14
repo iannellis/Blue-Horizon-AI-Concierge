@@ -57,18 +57,36 @@ def _build_context_block(items: list[RetrievalItem]) -> str:
         Context block string with one section per item.
 
     """
-    lines = [
-        "\n".join(
-            [
-                f"source={item.source}",
-                f"score={item.score}",
-                f"text={item.text}",
-                f"metadata={item.metadata}",
-            ],
-        )
+    return "\n\n".join(
+        "\n".join([
+            f"source={item.source}",
+            f"score={item.score}",
+            f"text={item.text}",
+            f"metadata={item.metadata}",
+        ])
         for item in items
-    ]
-    return "\n\n".join(lines)
+    )
+
+
+def _best_by_text(batches: list[list[RetrievalItem]]) -> list[RetrievalItem]:
+    """Merge batched retrieval results, keeping the highest-scoring item per text.
+
+    When the same text appears across multiple query batches, the item with the
+    highest score is retained and duplicates are discarded.
+
+    Args:
+        batches: List of per-query retrieval result lists.
+
+    Returns:
+        Deduplicated list of retrieval items, one per unique text.
+
+    """
+    best: dict[str, RetrievalItem] = {}
+    for batch in batches:
+        for item in batch:
+            if item.text not in best or item.score > best[item.text].score:
+                best[item.text] = item
+    return list(best.values())
 
 
 class InfoAgentFactory:
@@ -152,8 +170,6 @@ class InfoAgentFactory:
                 Async node function suitable for LangGraph.
 
             """
-            from blue_horizon.agents.exceptions import OperationalError  # noqa: PLC0415
-
             tool_name = f"query_{source.value}"
 
             async def _node(state: ParsedState) -> dict[str, Any]:
@@ -199,12 +215,7 @@ class InfoAgentFactory:
                 except Exception as exc:  # noqa: BLE001
                     _log_node_failure(tool_name, exc)
                     return {state_key: []}
-                best: dict[str, RetrievalItem] = {}
-                for batch in batches:
-                    for item in batch:
-                        if item.text not in best or item.score > best[item.text].score:
-                            best[item.text] = item
-                return {state_key: list(best.values())}
+                return {state_key: _best_by_text(batches)}
 
             _node.__name__ = _node.__qualname__ = tool_name + "_node"
             _node.__doc__ = (
@@ -264,13 +275,7 @@ class InfoAgentFactory:
             except Exception as exc:  # noqa: BLE001
                 _log_node_failure("query_faq", exc)
                 return {"faq_results": []}
-            best: dict[str, RetrievalItem] = {}
-            # The same item may appear in results from two different queries
-            for batch in batches:
-                for item in batch:
-                    if item.text not in best or item.score > best[item.text].score:
-                        best[item.text] = item
-            return {"faq_results": list(best.values())}
+            return {"faq_results": _best_by_text(batches)}
 
         query_amenities_node = _make_catalog_query_node(
             Source.AMENITIES,

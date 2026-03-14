@@ -10,6 +10,8 @@ from __future__ import annotations
 import re
 from typing import Final
 
+import sqlparse
+
 _FORBIDDEN_TOKENS: Final[tuple[str, ...]] = (
     "pg_sleep",
     "information_schema",
@@ -148,93 +150,18 @@ def _normalize_identifier(identifier: str) -> str:
     return token.lower()
 
 
-def _contains_statement_separator(query: str) -> bool:  # noqa: C901, PLR0912, PLR0915
+def _contains_statement_separator(query: str) -> bool:
     """Detect whether a SQL string contains a statement separator.
 
-    A semicolon is treated as a statement separator only when it appears outside
-    of:
-    - Single-quoted string literals.
-    - Double-quoted identifiers.
-    - Line comments (starting with ``--``).
-    - Block comments (between ``/*`` and ``*/``).
-
-    This is a lightweight scanner intended to avoid false rejections (e.g., a
-    semicolon inside a string literal) while still enforcing the single-statement
-    rule.
+    Delegates to ``sqlparse.split`` which correctly handles semicolons inside
+    string literals, quoted identifiers, line comments (``--``), and block
+    comments (``/* … */``).
 
     Args:
         query: Raw SQL string.
 
     Returns:
-        True if an unquoted/uncommented semicolon is present; otherwise False.
+        True if more than one non-empty statement is found; otherwise False.
 
     """
-    in_single = False
-    in_double = False
-    in_line_comment = False
-    in_block_comment = False
-
-    i = 0
-    n = len(query)
-    while i < n:
-        ch = query[i]
-        nxt = query[i + 1] if i + 1 < n else ""
-
-        if in_line_comment:
-            if ch == "\n":
-                in_line_comment = False
-            i += 1
-            continue
-
-        if in_block_comment:
-            if ch == "*" and nxt == "/":
-                in_block_comment = False
-                i += 2
-            else:
-                i += 1
-            continue
-
-        if not in_single and not in_double:
-            if ch == "-" and nxt == "-":
-                in_line_comment = True
-                i += 2
-                continue
-            if ch == "/" and nxt == "*":
-                in_block_comment = True
-                i += 2
-                continue
-
-        if in_single:
-            if ch == "'":
-                if nxt == "'":
-                    i += 2
-                    continue
-                in_single = False
-            i += 1
-            continue
-
-        if in_double:
-            if ch == '"':
-                if nxt == '"':
-                    i += 2
-                    continue
-                in_double = False
-            i += 1
-            continue
-
-        if ch == "'":
-            in_single = True
-            i += 1
-            continue
-
-        if ch == '"':
-            in_double = True
-            i += 1
-            continue
-
-        if ch == ";":
-            return True
-
-        i += 1
-
-    return False
+    return len([s for s in sqlparse.split(query) if s.strip()]) > 1

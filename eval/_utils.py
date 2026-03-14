@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Iterable, Mapping
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def truncate(text: object, limit: int) -> str:
@@ -155,3 +160,37 @@ def json_value(obj: object, *, max_len: int | None = None) -> str:
     if max_len is not None and max_len > 0 and len(payload) > max_len:
         return f"{payload[:max_len]}..."
     return payload
+
+
+def configure_logging(run_name: str, log_dir: Path) -> None:
+    """Configure file and stderr logging for an evaluation or stress run.
+
+    Attaches both a file handler (``<log_dir>/<run_name>.log``) and a stderr
+    stream handler so that progress is visible in the terminal as well as
+    persisted to disk.
+
+    Args:
+        run_name: Name of the current run, used as the log filename stem.
+        log_dir: Directory where log files should be written.
+
+    """
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"{run_name}.log"
+
+    formatter = logging.Formatter(
+        "%(asctime)s %(levelname)-8s [%(name)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(logging.INFO)
+    stream_handler.setFormatter(formatter)
+
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.addHandler(file_handler)
+    root.addHandler(stream_handler)

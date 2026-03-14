@@ -253,6 +253,26 @@ def _build_operation_request(
     )
 
 
+def _select_pool(
+    targets: list[dict[str, object]],
+    hot_targets: list[dict[str, object]],
+    hot_target_probability: float,
+) -> list[dict[str, object]]:
+    """Select the hot or cold pool using the configured probability split.
+
+    Args:
+        targets: The full candidate target pool.
+        hot_targets: The high-contention subset.
+        hot_target_probability: Probability of selecting the hot pool.
+
+    Returns:
+        Either ``hot_targets`` or ``targets``.
+
+    """
+    use_hot = bool(hot_targets) and random.random() < hot_target_probability  # noqa: S311
+    return hot_targets if use_hot else targets
+
+
 def _choose_target(
     targets: list[dict[str, object]],
     hot_targets: list[dict[str, object]],
@@ -269,9 +289,7 @@ def _choose_target(
         A chosen target dictionary.
 
     """
-    use_hot = bool(hot_targets) and random.random() < hot_target_probability  # noqa: S311
-    pool = hot_targets if use_hot else targets
-    return random.choice(pool)  # noqa: S311
+    return random.choice(_select_pool(targets, hot_targets, hot_target_probability))  # noqa: S311
 
 
 def _choose_new_target(  # noqa: PLR0913
@@ -300,9 +318,7 @@ def _choose_new_target(  # noqa: PLR0913
         A chosen target dictionary, preferring a different triplet.
 
     """
-    use_hot = bool(hot_targets) and random.random() < hot_target_probability  # noqa: S311
-    pool = hot_targets if use_hot else targets
-    candidates = list(pool)
+    candidates = list(_select_pool(targets, hot_targets, hot_target_probability))
     random.shuffle(candidates)
     for cand in candidates:
         if (

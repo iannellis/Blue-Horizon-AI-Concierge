@@ -1,15 +1,13 @@
 """Analyze eval results JSONL and report all problematic cases."""
 
+from __future__ import annotations
+
+import argparse
 import json
 import sys
 from pathlib import Path
 
-RESULTS_PATH = Path(
-    "g:/My Drive/Coding_interviews/Interview Kickstart ML Projects/"
-    "Blue Horizon/Blue-Horizon-AI-Concierge/eval/outputs/"
-    "hotel-agent-eval-200_20260228_212139_Full_dataset_with_200_cases/"
-    "results.jsonl",
-)
+from eval._utils import truncate
 
 JUDGE_QUALITY_THRESHOLD = 4.0
 SNIPPET_TRUNCATE_LEN = 120
@@ -192,11 +190,10 @@ def _render_problems(p: dict, out: list[str]) -> None:
                 out.append(
                     f"      Turn {ti}: {n_miss}/{n_exp} snippets missing",
                 )
-                for s in missing:
-                    trunc = s[:SNIPPET_TRUNCATE_LEN] + (
-                        "..." if len(s) > SNIPPET_TRUNCATE_LEN else ""
-                    )
-                    out.append(f'        MISSING: "{trunc}"')
+                out.extend(
+                    f'        MISSING: "{truncate(s, SNIPPET_TRUNCATE_LEN)}"'
+                    for s in missing
+                )
         elif metric == "judge_consumer_quality":
             out.append(
                 f"    - judge_consumer_quality: {prob[1]} "
@@ -239,16 +236,12 @@ def _render_judge_scores(p: dict, out: list[str]) -> None:
     """
     out.append(f"    - judge_consumer_quality: {p['judge_quality']}")
     if p["judge_quality_comment"]:
-        cmt = p["judge_quality_comment"]
-        if len(cmt) > COMMENT_TRUNCATE_LEN:
-            cmt = cmt[:COMMENT_TRUNCATE_LEN] + "..."
+        cmt = truncate(p["judge_quality_comment"], COMMENT_TRUNCATE_LEN)
         out.append(f"      -> {cmt}")
 
     out.append(f"    - judge_grounding_faithfulness: {p['judge_faith']}")
     if p["judge_faith_comment"]:
-        cmt = p["judge_faith_comment"]
-        if len(cmt) > COMMENT_TRUNCATE_LEN:
-            cmt = cmt[:COMMENT_TRUNCATE_LEN] + "..."
+        cmt = truncate(p["judge_faith_comment"], COMMENT_TRUNCATE_LEN)
         out.append(f"      -> {cmt}")
 
 
@@ -308,13 +301,25 @@ def render_case(p: dict) -> list[str]:
 def main() -> None:
     """Parse the eval results JSONL and write a structured report to stdout.
 
-    Flags cases that fail any of the three problem criteria and prints
-    per-case scores alongside the overall summary.
+    Reads the JSONL file at the path given on the command line, flags cases
+    that fail any of the three problem criteria, and prints per-case scores
+    alongside an overall summary.
     """
+    parser = argparse.ArgumentParser(
+        description="Analyze eval results JSONL and report all problematic cases.",
+    )
+    parser.add_argument(
+        "results",
+        metavar="PATH",
+        help="Path to results.jsonl produced by run_experiment.py.",
+    )
+    args = parser.parse_args()
+    results_path = Path(args.results)
+
     all_problems: list[dict] = []
     total = 0
 
-    with RESULTS_PATH.open(encoding="utf-8") as f:
+    with results_path.open(encoding="utf-8") as f:
         for line in f:
             d = json.loads(line)
             total += 1

@@ -7,7 +7,10 @@ amenity/service filters used by evaluators.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 from eval._utils import (
     coerce_float as _coerce_float,
@@ -49,21 +52,12 @@ def _normalize_info_filters_strict(
     if not isinstance(filters, dict):
         return None, ["<non_dict_filters>"]
 
-    canonical_keys = {
-        "booking_required",
-        "min_price",
-        "max_price",
-        "max_notice_hours",
-        "min_duration_minutes",
-        "max_duration_minutes",
-    }
-
     norm: dict[str, object] = {}
     unknown_keys: list[str] = []
 
     for key, value in filters.items():
         canonical = _canonicalize_filter_key(str(key))
-        if canonical not in canonical_keys:
+        if canonical not in _INFO_FILTER_KEYS:
             unknown_keys.append(str(key))
             continue
 
@@ -142,26 +136,3 @@ def _swap_range_if_needed(
         norm[min_key], norm[max_key] = norm[max_key], norm[min_key]
 
 
-def _extract_filters_from_tool_inputs(inputs: object) -> dict[str, object] | None:
-    """Extract a filters dict from tool inputs payloads.
-
-    Args:
-        inputs: Tool inputs payload, often a mapping.
-
-    Returns:
-        Filters dict if present, otherwise None.
-
-    """
-    if not isinstance(inputs, Mapping):
-        return None
-    raw_filters = inputs.get("filters")
-    if isinstance(raw_filters, Mapping):
-        return dict(raw_filters)
-
-    excluded_keys = {"query", "k", "top_k"}
-    extracted = {
-        str(key): value
-        for key, value in inputs.items()
-        if str(key) not in excluded_keys
-    }
-    return extracted or None

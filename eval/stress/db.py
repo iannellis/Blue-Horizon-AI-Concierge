@@ -6,14 +6,19 @@ and DB retry logic.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import random
 from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
-import psycopg
 from psycopg_pool import PoolTimeout
+from tenacity import (
+    AsyncRetrying,
+    before_sleep_log,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from eval.rooms_db_manager import reset_neon_branch
 
@@ -59,8 +64,14 @@ async def _init_branch_and_targets(
     await reset_neon_branch(neon_cfg, api_key=api_key)
 
     targets: list[dict[str, object]] = []
-    for attempt in range(cfg.db_retry_attempts):
-        try:
+    async for attempt in AsyncRetrying(
+        retry=retry_if_exception(_is_transient_db_error),
+        stop=stop_after_attempt(cfg.db_retry_attempts),
+        wait=wait_exponential(multiplier=cfg.db_retry_delay_s, exp_base=2),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,
+    ):
+        with attempt:
             async with pool.connection() as conn:
                 await _set_search_path(conn, "public")
                 targets = await find_available_targets(
@@ -70,23 +81,6 @@ async def _init_branch_and_targets(
                     start_date=cfg.start_date,
                     horizon_days=cfg.horizon_days,
                 )
-            break
-        except (
-            psycopg.OperationalError,
-            psycopg.InterfaceError,
-            PoolTimeout,
-            TimeoutError,
-        ) as exc:
-            if attempt < cfg.db_retry_attempts - 1 and _is_transient_db_error(exc):
-                logger.warning(
-                    "Transient DB error fetching targets (attempt %d/%d); retrying.",
-                    attempt + 1,
-                    cfg.db_retry_attempts,
-                    exc_info=True,
-                )
-                await asyncio.sleep(cfg.db_retry_delay_s * (2**attempt))
-            else:
-                raise
 
     if not targets:
         msg = "No bookable targets found"
@@ -209,8 +203,14 @@ async def _check_invariants(
     """
     double_booked_rows: list[Any] = []
     null_status_count = 0
-    for attempt in range(cfg.db_retry_attempts):
-        try:
+    async for attempt in AsyncRetrying(
+        retry=retry_if_exception(_is_transient_db_error),
+        stop=stop_after_attempt(cfg.db_retry_attempts),
+        wait=wait_exponential(multiplier=cfg.db_retry_delay_s, exp_base=2),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,
+    ):
+        with attempt:
             async with pool.connection() as conn:
                 await _set_search_path(conn, "public")
                 async with conn.cursor() as cur:
@@ -234,23 +234,6 @@ async def _check_invariants(
                         msg = "Expected a count row for null status invariant query"
                         raise RuntimeError(msg)
                     null_status_count = cast("int", row[0])
-            break
-        except (
-            psycopg.OperationalError,
-            psycopg.InterfaceError,
-            PoolTimeout,
-            TimeoutError,
-        ) as exc:
-            if attempt < cfg.db_retry_attempts - 1 and _is_transient_db_error(exc):
-                logger.warning(
-                    "Transient DB error checking invariants (attempt %d/%d); retrying.",
-                    attempt + 1,
-                    cfg.db_retry_attempts,
-                    exc_info=True,
-                )
-                await asyncio.sleep(cfg.db_retry_delay_s * (2**attempt))
-            else:
-                raise
 
     return {
         "double_booking_violations": len(double_booked_rows),
@@ -277,8 +260,14 @@ async def _fetch_booked_dates(
 
     """
     rows: list[Any] = []
-    for attempt in range(cfg.db_retry_attempts):
-        try:
+    async for attempt in AsyncRetrying(
+        retry=retry_if_exception(_is_transient_db_error),
+        stop=stop_after_attempt(cfg.db_retry_attempts),
+        wait=wait_exponential(multiplier=cfg.db_retry_delay_s, exp_base=2),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,
+    ):
+        with attempt:
             async with pool.connection() as conn:
                 await _set_search_path(conn, "public")
                 async with conn.cursor() as cur:
@@ -287,24 +276,6 @@ async def _fetch_booked_dates(
                         " FROM room_availability WHERE status = 'Booked'",
                     )
                     rows = await cur.fetchall()
-            break
-        except (
-            psycopg.OperationalError,
-            psycopg.InterfaceError,
-            PoolTimeout,
-            TimeoutError,
-        ) as exc:
-            if attempt < cfg.db_retry_attempts - 1 and _is_transient_db_error(exc):
-                logger.warning(
-                    "Transient DB error fetching booked dates"
-                    " (attempt %d/%d); retrying.",
-                    attempt + 1,
-                    cfg.db_retry_attempts,
-                    exc_info=True,
-                )
-                await asyncio.sleep(cfg.db_retry_delay_s * (2**attempt))
-            else:
-                raise
     return frozenset((int(r[0]), r[1]) for r in rows)
 
 

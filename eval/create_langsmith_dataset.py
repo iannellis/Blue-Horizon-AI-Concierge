@@ -4,15 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+from itertools import batched
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from dotenv import load_dotenv
 from langsmith import Client
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-
-if TYPE_CHECKING:
-    from collections.abc import Iterable
 
 load_dotenv()
 
@@ -129,30 +127,6 @@ def load_cases(path: Path) -> list[CaseInputModel]:
     return cases
 
 
-def _chunked(
-    items: Iterable[dict[str, object]],
-    batch_size: int,
-) -> Iterable[list[dict[str, object]]]:
-    """Yield items in fixed-size batches.
-
-    Args:
-        items: Iterable of items to batch.
-        batch_size: Maximum size of each batch.
-
-    Yields:
-        Lists containing up to ``batch_size`` items.
-
-    """
-    batch: list[dict[str, object]] = []
-    for item in items:
-        batch.append(item)
-        if len(batch) >= batch_size:
-            yield batch
-            batch = []
-    if batch:
-        yield batch
-
-
 def _find_dataset_id(client: Client, dataset_name: str) -> str | None:
     """Locate a LangSmith dataset by name.
 
@@ -228,7 +202,7 @@ def main() -> None:
         _raise("--batch-size must be a positive integer.")
 
     examples_uploaded = 0
-    for batch in _chunked(examples, args.batch_size):
+    for batch in batched(examples, args.batch_size, strict=False):
         client.create_examples(dataset_id=dataset_id, examples=batch)
         examples_uploaded += len(batch)
 

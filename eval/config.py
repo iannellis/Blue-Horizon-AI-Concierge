@@ -466,6 +466,36 @@ class StressEvalConfig(BaseSettings):
     )
 
 
+def _load_toml(path: Path | str | None, resource_name: str) -> dict[str, object]:
+    """Load a TOML file from a path or from the packaged eval resources.
+
+    Args:
+        path: Explicit path to a TOML file, or ``None`` to load the named
+            packaged resource from the ``eval`` package.
+        resource_name: Filename of the packaged resource to use when
+            ``path`` is ``None``.
+
+    Returns:
+        Parsed TOML data as a plain dict.
+
+    Raises:
+        RuntimeError: If ``path`` points to a missing or non-file path.
+
+    """
+    if path is None:
+        content = (
+            importlib_resources.files(BASE_PACKAGE)
+            .joinpath(resource_name)
+            .read_text(encoding="utf-8")
+        )
+        return tomllib.loads(content)
+    target_path = Path(path).expanduser().resolve()
+    if not target_path.exists() or not target_path.is_file():
+        msg = f"Config file not found: {target_path}"
+        raise RuntimeError(msg)
+    return tomllib.loads(target_path.read_text(encoding="utf-8"))
+
+
 @lru_cache(maxsize=1)
 def load_eval_config(path: Path | str | None = None) -> EvalConfig:
     """Load evaluation configuration from a TOML file.
@@ -481,23 +511,7 @@ def load_eval_config(path: Path | str | None = None) -> EvalConfig:
         RuntimeError: If the provided path is invalid or TOML cannot be parsed.
 
     """
-    if path is None:
-        # Load the packaged TOML resource
-        toml_content = (
-            importlib_resources.files(BASE_PACKAGE)
-            .joinpath(_EVAL_CONFIG_RESOURCE)
-            .read_text(encoding="utf-8")
-        )
-        toml_data = tomllib.loads(toml_content)
-        return EvalConfig.model_validate(toml_data)
-    target_path = Path(path).expanduser().resolve()
-    if not target_path.exists() or not target_path.is_file():
-        msg = f"Config file not found: {target_path}"
-        raise RuntimeError(msg)
-    # Load custom TOML file
-    toml_content = target_path.read_text(encoding="utf-8")
-    toml_data = tomllib.loads(toml_content)
-    return EvalConfig.model_validate(toml_data)
+    return EvalConfig.model_validate(_load_toml(path, _EVAL_CONFIG_RESOURCE))
 
 
 @lru_cache(maxsize=1)
@@ -515,21 +529,7 @@ def load_stress_config(path: Path | str | None = None) -> StressEvalConfig:
         RuntimeError: If the provided path is invalid or TOML cannot be parsed.
 
     """
-    if path is None:
-        toml_content = (
-            importlib_resources.files(BASE_PACKAGE)
-            .joinpath(_STRESS_CONFIG_RESOURCE)
-            .read_text(encoding="utf-8")
-        )
-        toml_data = tomllib.loads(toml_content)
-        return StressEvalConfig.model_validate(toml_data)
-    target_path = Path(path).expanduser().resolve()
-    if not target_path.exists() or not target_path.is_file():
-        msg = f"Config file not found: {target_path}"
-        raise RuntimeError(msg)
-    toml_content = target_path.read_text(encoding="utf-8")
-    toml_data = tomllib.loads(toml_content)
-    return StressEvalConfig.model_validate(toml_data)
+    return StressEvalConfig.model_validate(_load_toml(path, _STRESS_CONFIG_RESOURCE))
 
 
 def _resolve_path(value: object, *, base_dir: Path) -> Path:

@@ -11,7 +11,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage
 
 
 def _preview(obj: object, max_len: int = 200) -> str:
@@ -64,10 +64,10 @@ def _redact_secrets(text: str) -> str:
 
     """
     redacted = re.sub(r"sk-[A-Za-z0-9]{10,}", "[REDACTED]", text)
-    redacted = re.sub(r"Bearer\\s+\\S+", "Bearer [REDACTED]", redacted)
+    redacted = re.sub(r"Bearer\s+\S+", "Bearer [REDACTED]", redacted)
     redacted = re.sub(
-        r"(\\w+://)([^:@\\s]+):([^@\\s]+)@",
-        r"\\1[REDACTED]:[REDACTED]@",
+        r"(\w+://)([^:@\s]+):([^@\s]+)@",
+        r"\1[REDACTED]:[REDACTED]@",
         redacted,
     )
     secret_keys = (
@@ -112,56 +112,6 @@ def _extract_assistant_text(messages: list[BaseMessage]) -> str:
         if isinstance(message, AIMessage):
             return str(message.content)
     return ""
-
-
-def _extract_tool_payload(output: object) -> object:
-    """Extract the tool payload from LangChain tool outputs.
-
-    Args:
-        output: Tool output payload, which may be a ToolMessage.
-
-    Returns:
-        The raw payload content for downstream parsing.
-
-    """
-    if isinstance(output, ToolMessage):
-        if output.artifact is not None:
-            return output.artifact
-        return output.content
-    return output
-
-
-def _parse_tool_content(content: object) -> object:
-    """Parse tool message content into Python objects when possible.
-
-    Args:
-        content: Tool content payload, often a JSON string.
-
-    Returns:
-        Parsed object when JSON is detected, otherwise the original content.
-
-    """
-    parsed: object = content
-    if isinstance(content, str):
-        stripped = content.strip()
-        if stripped.startswith(("[", "{")) and stripped.endswith(("]", "}")):
-            try:
-                parsed = json.loads(stripped)
-            except json.JSONDecodeError:
-                parsed = content
-    elif isinstance(content, list):
-        for block in content:
-            if not isinstance(block, Mapping):
-                continue
-            if block.get("type") == "json" and "json" in block:
-                parsed = block.get("json")
-                break
-            if block.get("type") == "text" and "text" in block:
-                text = block.get("text")
-                if isinstance(text, str):
-                    parsed = _parse_tool_content(text)
-                    break
-    return parsed
 
 
 def _get_tool_name(metadata: dict[str, Any]) -> str | None:

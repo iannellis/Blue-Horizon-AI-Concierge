@@ -1,7 +1,7 @@
 """Artifact writing and summary generation for the stress test harness.
 
-Provides helpers for computing run statistics, writing JSONL/JSON artifacts,
-and configuring logging for a stress run.
+Provides helpers for computing run statistics and writing JSONL/JSON artifacts
+for a stress run.
 """
 
 from __future__ import annotations
@@ -12,8 +12,6 @@ import statistics
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from eval.stress.models import StressRunConfig
 
 logger = logging.getLogger(__name__)
@@ -204,35 +202,3 @@ def _is_failure_entry(op: dict[str, object]) -> bool:
     return False
 
 
-def _configure_logging(run_name: str, log_dir: Path) -> None:
-    """Configure logging for the stress run.
-
-    Attaches both a file handler (``<log_dir>/<run_name>.log``) and a stderr
-    stream handler so that progress is visible in the terminal as well as
-    persisted to disk.
-
-    Args:
-        run_name: Name of the current stress run, used as the log filename stem.
-        log_dir: Directory where log files should be written.
-
-    """
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / f"{run_name}.log"
-
-    formatter = logging.Formatter(
-        "%(asctime)s %(levelname)-8s [%(name)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-
-    file_handler = logging.FileHandler(log_path, encoding="utf-8")
-    file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(formatter)
-
-    stream_handler = logging.StreamHandler()
-    stream_handler.setLevel(logging.INFO)
-    stream_handler.setFormatter(formatter)
-
-    root = logging.getLogger()
-    root.setLevel(logging.INFO)
-    root.addHandler(file_handler)
-    root.addHandler(stream_handler)

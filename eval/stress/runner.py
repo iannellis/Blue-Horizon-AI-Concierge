@@ -16,10 +16,11 @@ from typing import TYPE_CHECKING
 from dotenv import load_dotenv
 
 from blue_horizon.config import load_app_config
+from eval._utils import configure_logging as _configure_logging
 from eval.config import load_stress_config
 from eval.langsmith_target import OrchestrationManager
 from eval.rooms_db_manager import open_schema_pool
-from eval.stress.artifacts import _build_summary, _configure_logging, _write_artifacts
+from eval.stress.artifacts import _build_summary, _write_artifacts
 from eval.stress.db import _check_invariants, _init_branch_and_targets
 from eval.stress.models import StressRunConfig
 from eval.stress.reconciliation import _reconcile_with_db

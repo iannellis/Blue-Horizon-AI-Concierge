@@ -27,7 +27,7 @@ from eval._result_utils import (
     compute_latency_summary,
     format_latency_table,
 )
-from eval._utils import json_safe
+from eval._utils import configure_logging, json_safe
 from eval.config import MetadataConfig, load_eval_config
 from eval.evaluators import (
     eval_info_expected_filters,
@@ -91,41 +91,6 @@ class SummaryContext:
     started_at: datetime
     finished_at: datetime
     upload_results: bool
-
-
-def _configure_logging(experiment_name: str, log_dir: Path) -> None:
-    """Configure logging for the evaluation run.
-
-    Attaches both a file handler (``<log_dir>/<experiment_name>.log``) and a
-    stderr stream handler so that progress is visible in the terminal as well
-    as persisted to disk.
-
-    Args:
-        experiment_name: Name of the current experiment, used as the log
-            filename stem.
-        log_dir: Directory where log files should be written.
-
-    """
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / f"{experiment_name}.log"
-
-    formatter = logging.Formatter(
-        "%(asctime)s %(levelname)-8s [%(name)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-
-    file_handler = logging.FileHandler(log_path, encoding="utf-8")
-    file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(formatter)
-
-    stream_handler = logging.StreamHandler()
-    stream_handler.setLevel(logging.INFO)
-    stream_handler.setFormatter(formatter)
-
-    root = logging.getLogger()
-    root.setLevel(logging.INFO)
-    root.addHandler(file_handler)
-    root.addHandler(stream_handler)
 
 
 def _build_experiment_name(
@@ -375,27 +340,120 @@ def _log_latency_table(latency: dict[str, object]) -> None:
         logger.info(table)
 
 
+def _build_aevaluate_kwargs(
+    cfg: EvalConfig,
+    experiment_name: str,
+    metadata: dict[str, object],
+    evaluators: list[Any],
+) -> MutableMapping[str, Any]:
+    """Build the keyword-argument dict for ``aevaluate``.
+
+    Inspects the ``aevaluate`` signature to choose between the
+    ``experiment_name`` and ``experiment_prefix`` parameter depending on the
+    installed LangSmith version.
+
+    Args:
+        cfg: Loaded evaluation configuration.
+        experiment_name: Formatted experiment name string.
+        metadata: Metadata dict for LangSmith experiment tracking.
+        evaluators: List of evaluator callables.
+
+    Returns:
+        A mapping of keyword arguments ready to unpack into ``aevaluate``.
+
+    """
+    kwargs: MutableMapping[str, Any] = {
+        "evaluators": evaluators,
+        "max_concurrency": cfg.experiment.max_concurrency,
+        "upload_results": cfg.experiment.upload_results,
+        "metadata": metadata,
+    }
+    signature = inspect.signature(aevaluate)
+    if "experiment_name" in signature.parameters:
+        kwargs["experiment_name"] = experiment_name
+    elif "experiment_prefix" in signature.parameters:
+        kwargs["experiment_prefix"] = experiment_name
+    return kwargs
+
+
+async def _run_and_write_results(
+    cfg: EvalConfig,
+    artifacts: RunArtifacts,
+    examples: list[Any],
+    aevaluate_kwargs: MutableMapping[str, Any],
+    started_at: datetime,
+) -> None:
+    """Execute evaluation, write results JSONL, and write the summary JSON.
+
+    Constructs ``SummaryContext`` with the actual ``finished_at`` timestamp in
+    a ``finally`` block so the timestamp is always accurate regardless of
+    whether the run succeeded or failed.  The experiment name is read back
+    from ``aevaluate_kwargs`` (checking both the ``experiment_name`` and
+    ``experiment_prefix`` keys for LangSmith version compatibility).
+
+    Args:
+        cfg: Loaded evaluation configuration (passed to ``run_example``).
+        artifacts: Filesystem paths for the output files.
+        examples: Dataset examples to evaluate.
+        aevaluate_kwargs: Keyword arguments forwarded to ``aevaluate``.
+        started_at: Timestamp when the experiment was started.
+
+    Raises:
+        Exception: Re-raises any exception thrown during evaluation or
+            result collection after writing an error summary to disk.
+
+    """
+    result_rows: list[Any] = []
+    caught_exc: BaseException | None = None
+    try:
+        target = partial(run_example, cfg=cfg)
+        results = await aevaluate(target, examples, **aevaluate_kwargs)
+        if results is not None:
+            result_rows.extend([item async for item in results])
+        result_rows = [_build_results_row(result) for result in result_rows]
+        _write_jsonl(artifacts.results_path, result_rows)
+    except Exception as exc:
+        caught_exc = exc
+        raise
+    finally:
+        exp_name = str(
+            aevaluate_kwargs.get("experiment_name")
+            or aevaluate_kwargs.get("experiment_prefix")
+            or "",
+        )
+        context = SummaryContext(
+            dataset_name=cfg.experiment.dataset_name,
+            experiment_name=exp_name,
+            max_concurrency=cfg.experiment.max_concurrency,
+            started_at=started_at,
+            finished_at=datetime.now(UTC),
+            upload_results=cfg.experiment.upload_results,
+        )
+        if caught_exc is not None:
+            summary: Mapping[str, object] = _build_error_summary(context, caught_exc)
+        else:
+            summary = _summarize_results(result_rows, context)
+            latency = compute_latency_summary(artifacts.results_path)
+            if latency:
+                summary = {**summary, **latency}
+                _log_latency_table(latency)
+        _write_summary(artifacts.summary_path, summary)
+
+
 async def main() -> None:
     """Run the LangSmith experiment and persist local artifacts."""
     args = _parse_args()
     cfg = load_eval_config(path=args.config)
     started_at = datetime.now(UTC)
     dataset_name = cfg.experiment.dataset_name
-    experiment_prefix = cfg.experiment.experiment_prefix
-    run_notes = cfg.experiment.run_notes
     experiment_name = _build_experiment_name(
-        experiment_prefix,
-        run_notes,
+        cfg.experiment.experiment_prefix,
+        cfg.experiment.run_notes,
         started_at,
     )
-    max_concurrency = cfg.experiment.max_concurrency
-    output_root = cfg.experiment.output_dir
-    log_dir = cfg.experiment.log_dir
-    artifacts = _build_output_paths(output_root, experiment_name)
-    upload_results = cfg.experiment.upload_results
-    limit = cfg.experiment.limit
+    artifacts = _build_output_paths(cfg.experiment.output_dir, experiment_name)
 
-    _configure_logging(experiment_name, log_dir)
+    configure_logging(experiment_name, cfg.experiment.log_dir)
 
     # Setting LANGSMITH_TEST_CACHE enables caching of example runs to reduce cost/time.
     metadata = _build_metadata(cfg.metadata)
@@ -410,61 +468,15 @@ async def main() -> None:
         partial(eval_info_expected_filters, cfg=cfg),
         eval_turn_latency,
     ]
+    aevaluate_kwargs = _build_aevaluate_kwargs(
+        cfg, experiment_name, metadata, evaluators,
+    )
 
-    aevaluate_kwargs: MutableMapping[str, Any] = {
-        "evaluators": evaluators,
-        "max_concurrency": max_concurrency,
-        "upload_results": upload_results,
-        "metadata": metadata,
-    }
-    signature = inspect.signature(aevaluate)
-    if "experiment_name" in signature.parameters:
-        aevaluate_kwargs["experiment_name"] = experiment_name
-    elif "experiment_prefix" in signature.parameters:
-        aevaluate_kwargs["experiment_prefix"] = experiment_name
-
-    examples = _load_dataset_examples(dataset_name, limit)
-    has_rooms = _has_rooms_cases(examples)
-    if has_rooms:
+    examples = _load_dataset_examples(dataset_name, cfg.experiment.limit)
+    if _has_rooms_cases(examples):
         await _prepare_eval_database(cfg)
 
-    try:
-        target = partial(run_example, cfg=cfg)
-        results = await aevaluate(target, examples, **aevaluate_kwargs)
-        results_list: list[Any] = []
-        if results is not None:
-            results_list.extend([item async for item in results])
-
-        result_rows = [_build_results_row(result) for result in results_list]
-        _write_jsonl(artifacts.results_path, result_rows)
-        finished_at = datetime.now(UTC)
-        context = SummaryContext(
-            dataset_name=dataset_name,
-            experiment_name=experiment_name,
-            max_concurrency=max_concurrency,
-            started_at=started_at,
-            finished_at=finished_at,
-            upload_results=upload_results,
-        )
-        summary = _summarize_results(result_rows, context)
-        latency = compute_latency_summary(artifacts.results_path)
-        if latency:
-            summary = {**summary, **latency}
-            _log_latency_table(latency)
-        _write_summary(artifacts.summary_path, summary)
-    except Exception as exc:
-        finished_at = datetime.now(UTC)
-        context = SummaryContext(
-            dataset_name=dataset_name,
-            experiment_name=experiment_name,
-            max_concurrency=max_concurrency,
-            started_at=started_at,
-            finished_at=finished_at,
-            upload_results=upload_results,
-        )
-        summary = _build_error_summary(context, exc)
-        _write_summary(artifacts.summary_path, summary)
-        raise
+    await _run_and_write_results(cfg, artifacts, examples, aevaluate_kwargs, started_at)
 
 
 if __name__ == "__main__":

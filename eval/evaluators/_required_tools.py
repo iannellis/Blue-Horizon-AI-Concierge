@@ -265,19 +265,6 @@ def _tools_called(tool_summary: object) -> set[str]:
     return tools
 
 
-def _missing_info_tools(called_tools: set[str]) -> list[str]:
-    """Determine which required info tools are missing.
-
-    Args:
-        called_tools: Set of tool names called in the turn.
-
-    Returns:
-        List of missing tool names.
-
-    """
-    return [name for name in _INFO_REQUIRED_TOOLS if name not in called_tools]
-
-
 def _append_required_tool_failure(
     failure_context: dict[str, Any],
     *,

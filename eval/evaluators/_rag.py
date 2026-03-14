@@ -26,7 +26,8 @@ from ragas.metrics.collections import (
     Faithfulness,
 )
 
-from eval._utils import json_value
+from eval._utils import json_value, truncate
+from eval.evaluators._common import _rag_extract_reference, _rag_extract_turn_inputs
 
 if TYPE_CHECKING:
     from langsmith.schemas import Example, Run
@@ -180,11 +181,11 @@ async def eval_rag_metrics_info_turns(
         turn_output = turn_outputs[idx]
         if not _rag_is_eligible_turn(turn_output):
             continue
-        question = _rag_truncate_text(
+        question = truncate(
             example_turns[idx].get("user"),
             max_query_chars,
         )
-        answer = _rag_truncate_text(
+        answer = truncate(
             turn_output.get("assistant_text"),
             max_response_chars,
         )
@@ -279,35 +280,6 @@ async def eval_rag_metrics_info_turns(
         },
         per_turn_entry,
     ]
-
-
-def _rag_extract_turn_inputs(
-    run: Run,
-    example: Example,
-) -> tuple[list[dict[str, object]], list[dict[str, object]], list[object]]:
-    """Extract turn data from run outputs and example inputs.
-
-    Args:
-        run: LangSmith run object containing turn outputs.
-        example: LangSmith example object containing dataset turns.
-
-    Returns:
-        Tuple of (turn_outputs, example_turns, reference_answers).
-
-    """
-    outputs = run.outputs or {}
-    turn_outputs_raw = outputs.get("turn_outputs") or []
-    turn_outputs = [t for t in turn_outputs_raw if isinstance(t, dict)]
-
-    inputs = example.inputs or {}
-    example_turns_raw = inputs.get("turns") or []
-    example_turns = [t for t in example_turns_raw if isinstance(t, dict)]
-
-    reference_answers = inputs.get("reference_answers") or []
-    if not isinstance(reference_answers, list):
-        reference_answers = []
-
-    return turn_outputs, example_turns, reference_answers
 
 
 async def _get_ragas_metrics(
@@ -466,64 +438,10 @@ def _rag_prepare_contexts(
     for item in contexts[:max_contexts]:
         if item is None:
             continue
-        text = _rag_truncate_text(item, max_chars)
+        text = truncate(item, max_chars)
         if text:
             trimmed.append(text)
     return trimmed
-
-
-def _rag_extract_reference(
-    example_turn: dict[str, object],
-    reference_answers: list[object],
-    index: int,
-    max_chars: int,
-) -> str | None:
-    """Extract a reference answer for a turn if available.
-
-    Args:
-        example_turn: Example turn dict containing potential reference fields.
-        reference_answers: Optional list of reference answers from example inputs.
-        index: Turn index used to lookup reference list entries.
-        max_chars: Maximum length for the reference string.
-
-    Returns:
-        Truncated reference string if available, otherwise None.
-
-    """
-    reference = example_turn.get("reference")
-    if reference is None:
-        reference = example_turn.get("expected_answer")
-    if reference is None:
-        reference = example_turn.get("ground_truth")
-    if reference is None and index < len(reference_answers):
-        reference = reference_answers[index]
-    if reference is None:
-        return None
-    text = _rag_truncate_text(reference, max_chars)
-    return text if text else None
-
-
-def _rag_truncate_text(value: object, limit: int) -> str:
-    """Convert a value to a truncated string.
-
-    Args:
-        value: Value to coerce into a string.
-        limit: Maximum character length.
-
-    Returns:
-        Truncated string value.
-
-    """
-    if limit <= 0:
-        return ""
-    if value is None:
-        return ""
-    text = str(value)
-    if len(text) <= limit:
-        return text
-    if limit <= 3:  # noqa: PLR2004
-        return text[:limit]
-    return f"{text[: limit - 3]}..."
 
 
 async def _rag_score_turn(

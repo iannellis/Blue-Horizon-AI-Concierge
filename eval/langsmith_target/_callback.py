@@ -20,6 +20,7 @@ from langchain_core.messages import ToolMessage
 from pydantic import BaseModel, ValidationError
 
 from eval._utils import coerce_int as _coerce_int
+from eval._utils import json_safe as _json_safe
 from eval.langsmith_target._filter_utils import (
     _INFO_FILTER_KEYS,
     _normalize_info_filters_strict,
@@ -31,6 +32,32 @@ from eval.langsmith_target._text_utils import (
 )
 
 _ROUTE_KEY = "route"  # key from orchestration.py
+
+
+def _compact_rows(
+    rows: list[dict[str, Any]],
+    max_rows: int = 1,
+) -> list[dict[str, Any]]:
+    """Return a JSON-safe, truncated view of tool rows.
+
+    Args:
+        rows: Raw rows returned by the tool.
+        max_rows: Maximum number of rows to keep.
+
+    Returns:
+        A list containing at most ``max_rows`` JSON-safe row dicts.
+
+    """
+    if max_rows <= 0:
+        return []
+    safe_rows: list[dict[str, Any]] = []
+    for row in rows[:max_rows]:
+        if not isinstance(row, Mapping):
+            continue
+        safe_rows.append(
+            {str(key): _json_safe(val) for key, val in row.items()},
+        )
+    return safe_rows
 
 
 class RunSqlOutput(BaseModel):
@@ -432,7 +459,7 @@ class EvalCaptureCallback(AsyncCallbackHandler):
         summary["rowcount"] = payload.rowcount
         summary["truncated"] = payload.truncated
         if isinstance(payload.rows, list) and payload.rows:
-            summary["rows"] = self._compact_rows(payload.rows, max_rows=1)
+            summary["rows"] = _compact_rows(payload.rows, max_rows=1)
         if payload.error:
             summary["error"] = payload.error
         summary["output_preview"] = _preview(
@@ -455,50 +482,3 @@ class EvalCaptureCallback(AsyncCallbackHandler):
                     if row_str:
                         self.contexts_used.append(f"SQL result: {row_str}")
 
-    @staticmethod
-    def _compact_rows(
-        rows: list[dict[str, Any]],
-        max_rows: int = 1,
-    ) -> list[dict[str, Any]]:
-        """Return a JSON-safe, truncated view of tool rows.
-
-        Args:
-            rows: Raw rows returned by the tool.
-            max_rows: Maximum number of rows to keep.
-
-        Returns:
-            A list containing at most ``max_rows`` JSON-safe row dicts.
-
-        """
-        if max_rows <= 0:
-            return []
-        safe_rows: list[dict[str, Any]] = []
-        for row in rows[:max_rows]:
-            if not isinstance(row, Mapping):
-                continue
-            safe_rows.append(
-                {
-                    str(key): EvalCaptureCallback._json_safe(val)
-                    for key, val in row.items()
-                },
-            )
-        return safe_rows
-
-    @staticmethod
-    def _json_safe(value: object) -> object:
-        """Convert values to JSON-serializable structures.
-
-        Args:
-            value: Value to normalize for JSON serialization.
-
-        Returns:
-            A JSON-safe value, recursively normalized.
-
-        """
-        if value is None or isinstance(value, (str, int, float, bool)):
-            return value
-        if isinstance(value, Mapping):
-            return {str(k): EvalCaptureCallback._json_safe(v) for k, v in value.items()}
-        if isinstance(value, (list, tuple, set)):
-            return [EvalCaptureCallback._json_safe(item) for item in value]
-        return str(value)

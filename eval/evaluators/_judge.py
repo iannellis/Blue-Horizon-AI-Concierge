@@ -111,83 +111,24 @@ async def eval_llm_rubrics(
         raise
     except Exception as exc:  # noqa: BLE001
         raw_comment = truncate(str(exc), 200)
-        return [
-            {
-                "key": "judge_consumer_quality",
-                "score": 0.0,
-                "comment": f"Judge failure: {raw_comment}",
-            },
-            {
-                "key": "judge_injection_resistance",
-                "score": 0.0,
-                "comment": f"Judge failure: {raw_comment}",
-            },
-            {
-                "key": "judge_grounding_faithfulness",
-                "score": 0.0,
-                "comment": f"Judge failure: {raw_comment}",
-            },
-            {
-                "key": "judge_raw_json",
-                "value": json_value({"error": raw_comment}),
-            },
-        ]
+        return _judge_error_results(
+            f"Judge failure: {raw_comment}",
+            {"error": raw_comment},
+        )
 
     parsed = _safe_json_loads(raw_text)
     if parsed is None:
-        return [
-            {
-                "key": "judge_consumer_quality",
-                "score": 0.0,
-                "comment": f"Judge JSON parse failure. Raw: {raw_text}",
-            },
-            {
-                "key": "judge_injection_resistance",
-                "score": 0.0,
-                "comment": f"Judge JSON parse failure. Raw: {raw_text}",
-            },
-            {
-                "key": "judge_grounding_faithfulness",
-                "score": 0.0,
-                "comment": f"Judge JSON parse failure. Raw: {raw_text}",
-            },
-            {
-                "key": "judge_raw_json",
-                "value": json_value(
-                    {"error": "parse_failure", "raw_text": raw_text},
-                ),
-            },
-        ]
+        return _judge_error_results(
+            f"Judge JSON parse failure. Raw: {raw_text}",
+            {"error": "parse_failure", "raw_text": raw_text},
+        )
 
     valid, error_message = _validate_rubric_payload(parsed)
     if not valid:
-        return [
-            {
-                "key": "judge_consumer_quality",
-                "score": 0.0,
-                "comment": f"Judge JSON invalid: {error_message}. Raw: {raw_text}",
-            },
-            {
-                "key": "judge_injection_resistance",
-                "score": 0.0,
-                "comment": f"Judge JSON invalid: {error_message}. Raw: {raw_text}",
-            },
-            {
-                "key": "judge_grounding_faithfulness",
-                "score": 0.0,
-                "comment": f"Judge JSON invalid: {error_message}. Raw: {raw_text}",
-            },
-            {
-                "key": "judge_raw_json",
-                "value": json_value(
-                    {
-                        "error": error_message,
-                        "raw_text": raw_text,
-                        "payload": parsed,
-                    },
-                ),
-            },
-        ]
+        return _judge_error_results(
+            f"Judge JSON invalid: {error_message}. Raw: {raw_text}",
+            {"error": error_message, "raw_text": raw_text, "payload": parsed},
+        )
 
     consumer = parsed["consumer_quality"]
     injection = parsed["injection_resistance"]
@@ -213,6 +154,35 @@ async def eval_llm_rubrics(
             "key": "judge_raw_json",
             "value": json_value(parsed),
         },
+    ]
+
+
+def _judge_error_results(
+    comment: str,
+    raw_info: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Build the standard zero-scored error result list for judge failures.
+
+    Returns the three scored metric entries (``judge_consumer_quality``,
+    ``judge_injection_resistance``, ``judge_grounding_faithfulness``) all at
+    score ``0.0`` with the given comment, plus a ``judge_raw_json`` entry
+    containing ``raw_info``.
+
+    Args:
+        comment: Human-readable explanation of the failure, used as the
+            ``comment`` field on each scored metric.
+        raw_info: Arbitrary dict written to the ``judge_raw_json`` value field
+            for diagnostic purposes.
+
+    Returns:
+        A four-element list of LangSmith metric dicts.
+
+    """
+    return [
+        {"key": "judge_consumer_quality", "score": 0.0, "comment": comment},
+        {"key": "judge_injection_resistance", "score": 0.0, "comment": comment},
+        {"key": "judge_grounding_faithfulness", "score": 0.0, "comment": comment},
+        {"key": "judge_raw_json", "value": json_value(raw_info)},
     ]
 
 

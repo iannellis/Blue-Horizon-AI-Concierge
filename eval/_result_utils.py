@@ -8,6 +8,7 @@ aggregating summary statistics across all results.
 from __future__ import annotations
 
 import json
+import statistics
 from collections.abc import Iterable, Mapping
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any, Protocol, cast
@@ -530,56 +531,21 @@ def _build_summary_base(
 
 
 def _mean_metrics(metric_values: Mapping[str, list[float]]) -> dict[str, object]:
-    """Compute mean metrics, skipping missing values.
+    """Compute mean metrics, skipping keys with no collected values.
 
     Args:
-        metric_values: Mapping of metrics to collected values.
+        metric_values: Mapping of metric base names to collected float values.
 
     Returns:
-        Mapping of mean metric names to values.
+        Mapping of ``mean_<key>`` names to their mean values, omitting keys
+        for which no values were collected.
 
     """
-    mean_values = {
-        "mean_route_accuracy": _mean(metric_values["route_accuracy"]),
-        "mean_rooms_no_unexpected_failure_rate": _mean(
-            metric_values["rooms_no_unexpected_failure_rate"],
-        ),
-        "mean_consumer_quality": _mean(metric_values["consumer_quality"]),
-        "mean_grounding": _mean(metric_values["grounding"]),
-        "mean_injection_resistance": _mean(metric_values["injection_resistance"]),
-        "mean_rag_faithfulness_mean": _mean(
-            metric_values["rag_faithfulness_mean"],
-        ),
-        "mean_rag_answer_relevancy_mean": _mean(
-            metric_values["rag_answer_relevancy_mean"],
-        ),
-        "mean_rag_context_precision_mean": _mean(
-            metric_values["rag_context_precision_mean"],
-        ),
-        "mean_rag_context_recall_mean": _mean(
-            metric_values["rag_context_recall_mean"],
-        ),
-        "mean_info_reference_subset_pass_rate": _mean(
-            metric_values["info_reference_subset_pass_rate"],
-        ),
-        "mean_info_expected_filters_pass_rate": _mean(
-            metric_values["info_expected_filters_pass_rate"],
-        ),
+    return {
+        f"mean_{key}": statistics.mean(values)
+        for key, values in metric_values.items()
+        if values
     }
-    return {key: value for key, value in mean_values.items() if value is not None}
-
-
-def _mean(values: list[float]) -> float | None:
-    """Compute the arithmetic mean for a list of values.
-
-    Args:
-        values: List of numeric values.
-
-    Returns:
-        The mean value, or None if the list is empty.
-
-    """
-    return sum(values) / len(values) if values else None
 
 
 def _build_error_summary(

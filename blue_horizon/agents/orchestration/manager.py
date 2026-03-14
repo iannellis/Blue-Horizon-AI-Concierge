@@ -7,10 +7,17 @@ and memory-aware request invocation.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.messages import AIMessage, HumanMessage
+from tenacity import (
+    AsyncRetrying,
+    retry_if_exception_type,
+    stop_never,
+    wait_exponential,
+)
 
 from blue_horizon.agents.exceptions import OperationalError
 from blue_horizon.agents.orchestration.factory import OrchestrationAgentFactory
@@ -19,6 +26,7 @@ from blue_horizon.agents.orchestration.resources import OrchestrationResources
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
     from langgraph.graph.state import CompiledStateGraph
+    from tenacity import RetryCallState
 
     from blue_horizon.agents.orchestration.models import ConversationState
 
@@ -186,78 +194,63 @@ class OrchestrationManager:
             - Attempts initialization if the agent is not ready.
             - On success, waits for a stop signal.
             - On failure, logs, resets, and retries with exponential backoff.
+            - Backoff sleeps are interruptible: a stop signal exits immediately.
 
         """
         cfg = self._resources.get_config().orchestration
-        backoff = cfg.init_retry_base_s
 
-        while not self._stop_event.is_set():
-            try:
+        async def _interruptible_sleep(wait: float) -> None:
+            """Sleep for *wait* seconds or until the stop event fires.
+
+            Args:
+                wait: Maximum seconds to sleep.
+
+            Raises:
+                asyncio.CancelledError: If the stop event fires during sleep.
+
+            """
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self._stop_event.wait(), timeout=wait)
+            if self._stop_event.is_set():
+                raise asyncio.CancelledError
+
+        def _before_sleep(retry_state: RetryCallState) -> None:
+            """Reset state and log the failure before the next retry.
+
+            Args:
+                retry_state: Tenacity retry call state carrying the last outcome.
+
+            """
+            self._resources.reset_runtime_state()
+            self._agent = None
+            exc = retry_state.outcome.exception() if retry_state.outcome else None
+            if isinstance(exc, OperationalError):
+                logger.warning(
+                    "Initialization failed (operational): %s",
+                    repr(exc),
+                    exc_info=exc,
+                )
+            else:
+                logger.error("Initialization failed", exc_info=exc)
+
+        async for attempt in AsyncRetrying(
+            retry=retry_if_exception_type(Exception),
+            stop=stop_never,
+            wait=wait_exponential(
+                multiplier=cfg.init_retry_base_s,
+                max=cfg.init_retry_max_s,
+            ),
+            before_sleep=_before_sleep,
+            sleep=_interruptible_sleep,
+        ):
+            with attempt:
+                if self._stop_event.is_set():
+                    return
                 async with self._lock:
                     if self._agent is None:
                         logger.info("Initializing orchestration resources...")
                         await self._resources.startup_check()
                         self._agent = self._factory.build()
                         logger.info("Orchestration agent ready")
-                        backoff = cfg.init_retry_base_s
 
-                await self._stop_event.wait()
-
-            except asyncio.CancelledError:
-                raise
-            except OperationalError as exc:
-                logger.warning(
-                    "Initialization failed (operational): %s",
-                    repr(exc),
-                    exc_info=True,
-                )
-                backoff = await self._reset_and_backoff(
-                    backoff=backoff,
-                    max_backoff=cfg.init_retry_max_s,
-                )
-            except Exception:
-                logger.exception("Initialization failed")
-                backoff = await self._reset_and_backoff(
-                    backoff=backoff,
-                    max_backoff=cfg.init_retry_max_s,
-                )
-
-    async def _reset_and_backoff(self, *, backoff: float, max_backoff: float) -> float:
-        """Reset runtime state and sleep for the current backoff.
-
-        Args:
-            backoff: Current backoff duration in seconds.
-            max_backoff: Maximum backoff duration in seconds.
-
-        Returns:
-            Next backoff duration in seconds.
-
-        """
-        self._resources.reset_runtime_state()
-        self._agent = None
-
-        stopped = await self._sleep_or_stop(timeout_s=backoff)
-        if stopped:
-            return backoff
-
-        return min(backoff * 2.0, max_backoff)
-
-    async def _sleep_or_stop(self, *, timeout_s: float) -> bool:
-        """Wait for either a stop signal or a timeout.
-
-        Args:
-            timeout_s: Maximum wait duration in seconds.
-
-        Returns:
-            True if a stop signal was received, otherwise False.
-
-        """
-        if self._stop_event.is_set():
-            return True
-
-        try:
-            await asyncio.wait_for(self._stop_event.wait(), timeout=timeout_s)
-        except asyncio.TimeoutError:  # noqa: UP041
-            return False
-        else:
-            return True
+        await self._stop_event.wait()

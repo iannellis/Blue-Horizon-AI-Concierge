@@ -28,12 +28,12 @@ jobs:
 
     steps:
       - name: Checkout (with LFS for wheel and pkl files)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           lfs: true
 
       - name: Set up Python 3.13
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
@@ -66,7 +66,7 @@ jobs:
 
       - name: Upload eval logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: eval-logs-200
           path: eval/logs/
@@ -74,7 +74,7 @@ jobs:
 
       - name: Upload eval results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: eval-results-200
           path: eval/outputs/

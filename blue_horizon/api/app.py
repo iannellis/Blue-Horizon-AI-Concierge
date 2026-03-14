@@ -17,6 +17,7 @@ from blue_horizon.agents.orchestration import OrchestrationManager, format_chat_
 
 load_dotenv()
 
+
 class ChatPayload(BaseModel):
     """The payload for the chat endpoint.
 

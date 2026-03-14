@@ -44,30 +44,6 @@ class RetrievalItem(BaseModel):
     score: float = Field(..., description="Similarity score; higher is more relevant")
 
 
-class RerankInput(BaseModel):
-    """Input schema for the reranker tool.
-
-    Attributes:
-        faq_results: Results returned by ``query_faq``.
-        amenities_results: Results returned by ``query_amenities``.
-        services_results: Results returned by ``query_services``.
-
-    """
-
-    faq_results: list[RetrievalItem] = Field(
-        ...,
-        description="Output from query_faq",
-    )
-    amenities_results: list[RetrievalItem] = Field(
-        ...,
-        description="Output from query_amenities",
-    )
-    services_results: list[RetrievalItem] = Field(
-        ...,
-        description="Output from query_services",
-    )
-
-
 class ParsedQuery(BaseModel):
     """Structured interpretation of a user request for retrieval tools.
 
@@ -202,7 +178,3 @@ class ParsedState(InfoState):
     parsed: ParsedQuery
 
 
-INFO_AGENT_ENDING = (
-    "Is there any other information I can provide about the hotel? "
-    "I can also help finding and booking a room."
-)

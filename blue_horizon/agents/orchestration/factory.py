@@ -13,7 +13,6 @@ from langchain_core.messages import (
     SystemMessage,
     filter_messages,
 )
-from langchain_core.runnables import RunnableLambda
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
@@ -105,7 +104,7 @@ class OrchestrationAgentFactory:
                         get_agent().ainvoke(state, config=config),
                         timeout=timeout_s,
                     )
-                except asyncio.TimeoutError:  # noqa: UP041
+                except TimeoutError:
                     logger.warning(
                         "%s agent timed out after %s s",
                         agent_name,
@@ -144,31 +143,13 @@ class OrchestrationAgentFactory:
             """
             messages = state["messages"]
 
-            async def _invoke() -> RouteStep:
-                """Invoke the router runnable with the system prompt prepended.
-
-                Returns:
-                    RouteStep returned by the router runnable.
-
-                Raises:
-                    Exception: Propagates any exception raised by the underlying
-                        router runnable.
-
-                """
-                decision = await resources.get_router().ainvoke(
-                    [
-                        SystemMessage(content=resources.get_system_prompt()),
-                        *messages,
-                    ],
-                )
-                return cast("RouteStep", getattr(decision, "step", "error"))
-
             try:
-                step = await asyncio.wait_for(
-                    _invoke(),
+                system_msg = SystemMessage(content=resources.get_system_prompt())
+                decision = await asyncio.wait_for(
+                    resources.get_router().ainvoke([system_msg, *messages]),
                     timeout=cfg.orchestration.router_timeout_s,
                 )
-            except asyncio.TimeoutError:  # noqa: UP041
+            except TimeoutError:
                 logger.warning(
                     "Router timed out after %s s",
                     cfg.orchestration.router_timeout_s,
@@ -178,6 +159,7 @@ class OrchestrationAgentFactory:
                 logger.exception("Router failed")
                 return {"route": "error"}
 
+            step = cast("RouteStep", getattr(decision, "step", "error"))
             logger.info("Router decision: %s", step)
             return {"route": step}
 
@@ -192,11 +174,11 @@ class OrchestrationAgentFactory:
             cfg.orchestration.rooms_timeout_s,
         )
 
-        def refuse_node(_: ConversationState) -> dict[str, Any]:
+        def refuse_node(state: ConversationState) -> dict[str, Any]:  # noqa: ARG001
             """Return an out-of-scope refusal response.
 
             Args:
-                _: Unused conversation state.
+                state: Unused conversation state.
 
             Returns:
                 State patch with the refusal message.
@@ -209,11 +191,11 @@ class OrchestrationAgentFactory:
                 ],
             }
 
-        def error_node(_: ConversationState) -> dict[str, Any]:
+        def error_node(state: ConversationState) -> dict[str, Any]:  # noqa: ARG001
             """Return a user-friendly error response.
 
             Args:
-                _: Unused conversation state.
+                state: Unused conversation state.
 
             Returns:
                 State patch with the error message.
@@ -296,12 +278,12 @@ class OrchestrationAgentFactory:
             return {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES), *kept]}
 
         graph = StateGraph(ConversationState)
-        graph.add_node("router", RunnableLambda(router_node))
-        graph.add_node("info", RunnableLambda(info_node))
-        graph.add_node("rooms", RunnableLambda(rooms_node))
-        graph.add_node("refuse", RunnableLambda(refuse_node))
-        graph.add_node("error", RunnableLambda(error_node))
-        graph.add_node("finalize", RunnableLambda(finalize_node))
+        graph.add_node("router", router_node)
+        graph.add_node("info", info_node)
+        graph.add_node("rooms", rooms_node)
+        graph.add_node("refuse", refuse_node)
+        graph.add_node("error", error_node)
+        graph.add_node("finalize", finalize_node)
 
         graph.add_edge(START, "router")
         graph.add_conditional_edges(

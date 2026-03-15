@@ -7,6 +7,8 @@ workload, and writes artifacts.  Can be executed directly as a script.
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 import platform
 import time
 from contextlib import suppress
@@ -30,6 +32,8 @@ if TYPE_CHECKING:
     from psycopg_pool import AsyncConnectionPool
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 def _load_config() -> StressRunConfig:
@@ -70,6 +74,24 @@ def _load_config() -> StressRunConfig:
         cancel_weight=cfg.workload.cancel_weight,
         db_url=db_url,
     )
+
+
+def _override_db_url(db_url: str) -> None:
+    """Write ``db_url`` to ``PGSQL_DB_URL`` and clear the ``load_app_config`` cache.
+
+    ``OrchestrationResources.__init__`` calls ``load_app_config()`` unconditionally,
+    which requires ``PGSQL_DB_URL`` to be present in the environment.  In CI the
+    stress test only receives ``PGSQL_EVAL_DB_URL``; this function bridges the gap
+    by copying ``cfg.db_url`` (already resolved from ``PGSQL_EVAL_DB_URL``) into
+    ``PGSQL_DB_URL`` before the orchestrator is created.
+
+    Args:
+        db_url: Resolved database URL to set as ``PGSQL_DB_URL``.
+
+    """
+    os.environ["PGSQL_DB_URL"] = db_url
+    load_app_config.cache_clear()
+    logger.info("PGSQL_EVAL_DB_URL override applied: PGSQL_DB_URL updated.")
 
 
 async def _start_orchestration(*, db_url: str) -> OrchestrationManager:
@@ -127,6 +149,7 @@ async def run_stress() -> None:
     cfg = _load_config()
     ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     _configure_logging(f"stress_{ts}", cfg.log_dir)
+    _override_db_url(cfg.db_url)
     stress_cfg = load_stress_config()
     neon_cfg = stress_cfg.neon
     neon_api_key = stress_cfg.neon_api_key

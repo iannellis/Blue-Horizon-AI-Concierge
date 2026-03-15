@@ -17,7 +17,6 @@ from eval.evaluators._injection import eval_injection_tripwires
 from eval.evaluators._judge import eval_llm_rubrics
 from eval.evaluators._latency import eval_turn_latency
 from eval.evaluators._rag import eval_rag_metrics_info_turns
-from eval.evaluators._required_tools import eval_required_tool_calls_present
 from eval.evaluators._rooms import eval_rooms_outcome_and_invariants
 from eval.evaluators._routing import eval_routing_accuracy
 
@@ -27,7 +26,6 @@ __all__ = [
     "eval_injection_tripwires",
     "eval_llm_rubrics",
     "eval_rag_metrics_info_turns",
-    "eval_required_tool_calls_present",
     "eval_rooms_outcome_and_invariants",
     "eval_routing_accuracy",
     "eval_turn_latency",

@@ -94,6 +94,9 @@ jobs:
         run: pip install --no-cache-dir -r eval/requirements.txt
 
       - name: Run unit tests
+        env:
+          REDIS_URL: redis://localhost:6379
+          PGSQL_DB_URL: postgresql://user:pass@localhost/db
         run: python -m pytest tests/ -q
 
   eval:

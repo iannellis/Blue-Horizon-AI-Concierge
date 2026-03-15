@@ -2,12 +2,14 @@
 #
 # On every push to main that touches relevant directories:
 #   1. Detect which path groups changed.
-#   2. If eval/ or blue_horizon/ changed: run the 20-case smoke eval and
+#   2. If blue_horizon/, eval/, ui/, or tests/ changed: run the pytest unit
+#      test suite (no secrets required).
+#   3. If eval/ or blue_horizon/ changed: run the 20-case smoke eval and
 #      compare aggregated metric scores against the pinned baseline.
-#   3. If blue_horizon/, deploy/, assets/, ui/, Dockerfile, pyproject.toml,
-#      or poetry.lock changed, and the eval either passed or was skipped:
-#      push the repo to the HuggingFace Docker Space so HF rebuilds the
-#      container automatically.
+#   4. If blue_horizon/, deploy/, assets/, ui/, Dockerfile, pyproject.toml,
+#      or poetry.lock changed, and both unit tests and the eval either passed
+#      or were skipped: push the repo to the HuggingFace Docker Space so HF
+#      rebuilds the container automatically.
 #
 # Required repository/environment secrets (CI environment):
 #   LANGSMITH_API_KEY   – LangSmith API key for dataset loading and tracing.
@@ -36,6 +38,7 @@ on:
       - "deploy/**"
       - "assets/**"
       - "ui/**"
+      - "tests/**"
       - "Dockerfile"
       - "pyproject.toml"
       - "poetry.lock"
@@ -45,6 +48,7 @@ jobs:
     name: Detect changed paths
     runs-on: ubuntu-latest
     outputs:
+      unit_tests: ${{ steps.filter.outputs.unit_tests }}
       eval: ${{ steps.filter.outputs.eval }}
       deploy: ${{ steps.filter.outputs.deploy }}
     steps:
@@ -53,6 +57,13 @@ jobs:
         id: filter
         with:
           filters: |
+            unit_tests:
+              - 'blue_horizon/**'
+              - 'eval/**'
+              - 'ui/**'
+              - 'tests/**'
+              - 'pyproject.toml'
+              - 'poetry.lock'
             eval:
               - 'eval/**'
               - 'blue_horizon/**'
@@ -64,6 +75,26 @@ jobs:
               - 'Dockerfile'
               - 'pyproject.toml'
               - 'poetry.lock'
+
+  unit-tests:
+    name: Unit tests
+    needs: changes
+    if: needs.changes.outputs.unit_tests == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: pip install --no-cache-dir -r eval/requirements.txt
+
+      - name: Run unit tests
+        run: python -m pytest tests/ -q
 
   eval:
     name: Smoke eval (20 cases)
@@ -128,11 +159,12 @@ jobs:
 
   deploy:
     name: Push to HuggingFace Space
-    needs: [changes, eval]
+    needs: [changes, unit-tests, eval]
     if: |
       always() &&
       needs.changes.result == 'success' &&
       needs.changes.outputs.deploy == 'true' &&
+      (needs.unit-tests.result == 'success' || needs.unit-tests.result == 'skipped') &&
       (needs.eval.result == 'success' || needs.eval.result == 'skipped')
     runs-on: ubuntu-latest
     environment: CI

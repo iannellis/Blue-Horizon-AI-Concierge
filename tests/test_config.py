@@ -139,3 +139,4 @@ def test_load_packaged_app_config() -> None:
     assert cfg.info.redis.health_check_interval_s == EXPECTED_HEALTH_CHECK_INTERVAL_S
     assert cfg.rooms.agent.top_k == EXPECTED_ROOMS_TOP_K
     assert cfg.load_data.rooms_pgsql.data_path == EXPECTED_DATA_PATH
+

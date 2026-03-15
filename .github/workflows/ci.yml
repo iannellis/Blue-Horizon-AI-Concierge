@@ -91,7 +91,9 @@ jobs:
           python-version: "3.13"
 
       - name: Install dependencies
-        run: pip install --no-cache-dir -r eval/requirements.txt
+        run: |
+          pip install --no-cache-dir assets/ml_dtypes-0.4.1-cp313-cp313-linux_x86_64.whl
+          pip install --no-cache-dir -r eval/requirements.txt
 
       - name: Run unit tests
         env:

@@ -559,3 +559,4 @@ def _resolve_path(value: object, *, base_dir: Path) -> Path:
     if not path.is_absolute():
         path = base_dir / path
     return path.resolve()
+

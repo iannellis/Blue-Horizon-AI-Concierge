@@ -52,6 +52,7 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
             "top_k": 4,
             "vector_dims": 1536,
             "retriever_cache_max": 64,
+            "max_context_items": 20,
         },
         "embeddings": {
             "model": "text-embedding-3-small",
@@ -76,6 +77,7 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
         "prompts": {
             "folder": "system_prompts",
             "system_prompt_filename": "information_prompt.txt",
+            "parser_prompt_filename": "information_parser.txt",
         },
     },
     "rooms": {

@@ -23,23 +23,26 @@ dependencies = [
 
 [dependency-groups]
 ui = [
-    "streamlit (>=1.40.0)",
+    "streamlit[auth] (>=1.40.0)",
     "httpx (>=0.27.0)",
 ]
-dev = [
+eval = [
+    "langchain-google-genai (>=4.2.0,<5.0.0)",
+    "pytest (>=8.0.0,<9.0.0)",
+    "ragas (==0.4.3)",  # fixed so tests don't change due to version changes
+]
+notebook = [
     "ipykernel (>=7.1.0,<8.0.0)",
     "ipywidgets (>=8.1.8,<9.0.0)",
     "openai (>=2.7.2,<3.0.0)",
-    "ruff (>=0.14.5,<0.15.0)",
     "langchain-community (>=0.4.1,<0.5.0)",
-    "langchain-google-genai (>=4.2.0,<5.0.0)",
     "pydantic-ai-slim[openai, google, duckduckgo, logfire] (>=1.20.0,<2.0.0)",
     "llama-index-embeddings-huggingface (>=0.6.1,<0.7.0)",
     "llama-index-llms-openai (>=0.6.6,<0.7.0)",
     "llama-index-embeddings-google-genai (>=0.3.1,<0.4.0)",
-    "pytest (>=8.0.0,<9.0.0)",
-    "ragas (==0.4.3)",  # fixed so tests don't change due to version changes
-    "jsonref (>=1.1.0,<2.0.0)",
+]
+lint = [
+    "ruff (>=0.14.5,<0.15.0)",
 ]
 
 [build-system]

@@ -155,7 +155,6 @@ def _render_login_page() -> None:
     st.button(
         "Sign in with Google",
         on_click=st.login,
-        args=("google",),
         use_container_width=True,
     )
 

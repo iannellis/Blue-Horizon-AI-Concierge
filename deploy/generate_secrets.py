@@ -116,8 +116,6 @@ def main() -> None:
         [auth]
         redirect_uri = "{_build_redirect_uri()}"
         cookie_secret = "{_derive_cookie_secret(client_secret)}"
-
-        [auth.providers.google]
         client_id = "{client_id}"
         client_secret = "{client_secret}"
         server_metadata_url = "{_GOOGLE_METADATA_URL}"

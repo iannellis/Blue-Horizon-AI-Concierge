@@ -9,6 +9,9 @@ Run with:
 Environment variables:
     BLUE_HORIZON_API_URL: Base URL for the Blue Horizon API.
         Defaults to ``http://localhost:8000``.
+    GOOGLE_CLIENT_ID: When set, enables Google OAuth authentication.
+        Set alongside ``GOOGLE_CLIENT_SECRET`` as HuggingFace Space secrets.
+        Access is controlled via Google Cloud Console's OAuth test users list.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ import httpx
 import streamlit as st
 
 _API_BASE: str = os.getenv("BLUE_HORIZON_API_URL", "http://localhost:8000").rstrip("/")
+_AUTH_ENABLED: bool = bool(os.getenv("GOOGLE_CLIENT_ID"))
 _CHAT_TIMEOUT_S: float = 90.0
 _HEALTH_TIMEOUT_S: float = 3.0
 _HTTP_OK: int = 200
@@ -145,10 +149,27 @@ def _render_recovery_poll() -> None:
         st.rerun()
 
 
+def _render_login_page() -> None:
+    """Render the sign-in page shown to unauthenticated visitors."""
+    st.info("Please sign in with your Google account to access the concierge.")
+    st.button(
+        "Sign in with Google",
+        on_click=st.login,
+        args=("google",),
+        use_container_width=True,
+    )
+
+
+
 def _render_sidebar() -> None:
-    """Render the sidebar with the API health status and conversation controls."""
+    """Render the sidebar: auth info, health status, and conversation controls."""
     with st.sidebar:
         st.header("Blue Horizon")
+
+        if _AUTH_ENABLED:
+            st.caption(f"Signed in as **{st.user.name or st.user.email}**")
+            st.button("Sign out", on_click=st.logout, use_container_width=True)
+            st.divider()
 
         if _check_health():
             st.success("Chatbot: Online")
@@ -211,6 +232,10 @@ def main() -> None:
     st.title("Blue Horizon Concierge 🌅")
     st.subheader("AI concierge to help with room bookings and answer questions about "
                  "the hotel and its services/amenities")
+
+    if _AUTH_ENABLED and not st.user.is_logged_in:
+        _render_login_page()
+        st.stop()
 
     _init_session_state()
     _render_sidebar()

@@ -2,6 +2,7 @@ FROM python:3.13-slim
 
 # ── System packages ────────────────────────────────────────────────────────────
 RUN apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends git supervisor curl \
     && rm -rf /var/lib/apt/lists/*
 

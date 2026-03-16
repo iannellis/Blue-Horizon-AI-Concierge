@@ -59,6 +59,7 @@ jobs:
           filters: |
             unit_tests:
               - 'blue_horizon/**'
+              - 'deploy/generate_secrets.py'
               - 'eval/**'
               - 'ui/**'
               - 'tests/**'

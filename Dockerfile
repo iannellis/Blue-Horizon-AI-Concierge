@@ -36,6 +36,8 @@ ENV PYTHONPATH=/home/user/app
 
 # ── Deployment configuration ───────────────────────────────────────────────────
 COPY --chown=user deploy/.streamlit/ ./.streamlit/
+COPY --chown=user deploy/generate_secrets.py ./deploy/generate_secrets.py
+COPY --chown=user deploy/__init__.py ./deploy/__init__.py
 
 # HuggingFace Spaces exposes exactly one port.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \

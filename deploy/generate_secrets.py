@@ -1,4 +1,4 @@
-"""Generate ~/.streamlit/secrets.toml from environment variables at container startup.
+"""Generate secrets.toml from environment variables at container startup.
 
 Intended to run once before Streamlit starts (see supervisord.conf).  Reads
 Google OAuth credentials stored as HuggingFace Space secrets and writes them
@@ -23,7 +23,6 @@ Environment variables read:
 from __future__ import annotations
 
 import hashlib
-import logging
 import os
 import pathlib
 import textwrap
@@ -31,9 +30,6 @@ import textwrap
 _GOOGLE_METADATA_URL: str = (
     "https://accounts.google.com/.well-known/openid-configuration"
 )
-
-logging.basicConfig(level=logging.INFO, format="%(message)s")
-_log = logging.getLogger(__name__)
 
 
 def _build_redirect_uri() -> str:
@@ -75,27 +71,11 @@ def _derive_cookie_secret(client_secret: str) -> str:
     return hashlib.sha256(client_secret.encode()).hexdigest()
 
 
-def _write_secrets(secrets_dir: pathlib.Path, content: str) -> None:
-    """Create *secrets_dir* if needed and write *content* as ``secrets.toml``.
-
-    Args:
-        secrets_dir: Directory that will contain ``secrets.toml``.
-        content: TOML-formatted string to write.
-
-    """
-    secrets_dir.mkdir(parents=True, exist_ok=True)
-    secrets_path = secrets_dir / "secrets.toml"
-    secrets_path.write_text(content)
-    _log.info("Secrets written to %s", secrets_path)
-
-
 def main() -> None:
-    """Write secrets.toml to all locations Streamlit checks.
+    """Write secrets.toml to the locations Streamlit checks for auth config.
 
-    Streamlit resolves secrets relative to the running script's directory
-    (``ui/.streamlit/``) and also from ``~/.streamlit/``.  Writing to both
-    ensures the credentials are found regardless of which path Streamlit
-    resolves first.
+    Writes to ``~/.streamlit/`` (global) and ``ui/.streamlit/`` (script-
+    relative), covering both lookup paths Streamlit uses.
 
     Exits without writing if ``GOOGLE_CLIENT_ID`` or
     ``GOOGLE_CLIENT_SECRET`` are absent, so local development without
@@ -106,10 +86,6 @@ def main() -> None:
     client_secret = os.environ.get("GOOGLE_CLIENT_SECRET")
 
     if not client_id or not client_secret:
-        _log.info(
-            "GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not set; "
-            "skipping secrets.toml generation.",
-        )
         return
 
     content = textwrap.dedent(f"""\
@@ -123,11 +99,11 @@ def main() -> None:
 
     app_root = pathlib.Path(__file__).resolve().parent.parent
     for secrets_dir in (
-        pathlib.Path.home() / ".streamlit",   # global fallback
-        app_root / ".streamlit",               # CWD-relative project root
-        app_root / "ui" / ".streamlit",        # script-relative
+        pathlib.Path.home() / ".streamlit",
+        app_root / "ui" / ".streamlit",
     ):
-        _write_secrets(secrets_dir, content)
+        secrets_dir.mkdir(parents=True, exist_ok=True)
+        (secrets_dir / "secrets.toml").write_text(content)
 
 
 if __name__ == "__main__":

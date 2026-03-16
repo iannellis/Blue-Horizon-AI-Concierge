@@ -75,13 +75,27 @@ def _derive_cookie_secret(client_secret: str) -> str:
     return hashlib.sha256(client_secret.encode()).hexdigest()
 
 
-def main() -> None:
-    """Write ~/.streamlit/secrets.toml from environment variables.
+def _write_secrets(secrets_dir: pathlib.Path, content: str) -> None:
+    """Create *secrets_dir* if needed and write *content* as ``secrets.toml``.
 
-    Writes to the ``.streamlit/`` directory alongside the application root
-    (i.e. the parent of the ``deploy/`` directory containing this script),
-    so the file sits next to ``config.toml`` where Streamlit's auth system
-    looks for it.
+    Args:
+        secrets_dir: Directory that will contain ``secrets.toml``.
+        content: TOML-formatted string to write.
+
+    """
+    secrets_dir.mkdir(parents=True, exist_ok=True)
+    secrets_path = secrets_dir / "secrets.toml"
+    secrets_path.write_text(content)
+    _log.info("Secrets written to %s", secrets_path)
+
+
+def main() -> None:
+    """Write secrets.toml to all locations Streamlit checks.
+
+    Streamlit resolves secrets relative to the running script's directory
+    (``ui/.streamlit/``) and also from ``~/.streamlit/``.  Writing to both
+    ensures the credentials are found regardless of which path Streamlit
+    resolves first.
 
     Exits without writing if ``GOOGLE_CLIENT_ID`` or
     ``GOOGLE_CLIENT_SECRET`` are absent, so local development without
@@ -98,9 +112,6 @@ def main() -> None:
         )
         return
 
-    secrets_dir = pathlib.Path(__file__).resolve().parent.parent / ".streamlit"
-    secrets_dir.mkdir(parents=True, exist_ok=True)
-
     content = textwrap.dedent(f"""\
         [auth]
         redirect_uri = "{_build_redirect_uri()}"
@@ -112,9 +123,13 @@ def main() -> None:
         server_metadata_url = "{_GOOGLE_METADATA_URL}"
     """)
 
-    secrets_path = secrets_dir / "secrets.toml"
-    secrets_path.write_text(content)
-    _log.info("Secrets written to %s", secrets_path)
+    app_root = pathlib.Path(__file__).resolve().parent.parent
+    for secrets_dir in (
+        pathlib.Path.home() / ".streamlit",   # global fallback
+        app_root / ".streamlit",               # CWD-relative project root
+        app_root / "ui" / ".streamlit",        # script-relative
+    ):
+        _write_secrets(secrets_dir, content)
 
 
 if __name__ == "__main__":

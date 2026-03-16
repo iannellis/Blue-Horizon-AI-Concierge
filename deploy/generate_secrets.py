@@ -78,6 +78,11 @@ def _derive_cookie_secret(client_secret: str) -> str:
 def main() -> None:
     """Write ~/.streamlit/secrets.toml from environment variables.
 
+    Writes to the ``.streamlit/`` directory alongside the application root
+    (i.e. the parent of the ``deploy/`` directory containing this script),
+    so the file sits next to ``config.toml`` where Streamlit's auth system
+    looks for it.
+
     Exits without writing if ``GOOGLE_CLIENT_ID`` or
     ``GOOGLE_CLIENT_SECRET`` are absent, so local development without
     authentication is unaffected.
@@ -93,7 +98,7 @@ def main() -> None:
         )
         return
 
-    secrets_dir = pathlib.Path.home() / ".streamlit"
+    secrets_dir = pathlib.Path(__file__).resolve().parent.parent / ".streamlit"
     secrets_dir.mkdir(parents=True, exist_ok=True)
 
     content = textwrap.dedent(f"""\

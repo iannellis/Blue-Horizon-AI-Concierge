@@ -116,13 +116,7 @@ async def reset() -> JSONResponse:
     if not cfg.neon_api_key or not cfg.neon.project_id:
         raise HTTPException(status_code=503, detail="Reset not configured.")
     try:
-        await reset_branch(
-            cfg.neon.project_id,
-            cfg.neon.branch_name,
-            cfg.neon_api_key,
-            lock_retry_attempts=cfg.neon.lock_retry_attempts,
-            lock_retry_delay_s=cfg.neon.lock_retry_delay_s,
-        )
+        await reset_branch(cfg.neon, api_key=cfg.neon_api_key)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return JSONResponse({"status": "ok"})

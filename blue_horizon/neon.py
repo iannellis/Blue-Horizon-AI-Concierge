@@ -9,8 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import TYPE_CHECKING
 
 import httpx
+
+if TYPE_CHECKING:
+    from blue_horizon.config import NeonConfig
 
 _log = logging.getLogger(__name__)
 
@@ -18,26 +22,16 @@ _BASE_URL: str = "https://console.neon.tech/api/v2"
 _HTTP_LOCKED: int = 423
 
 
-async def reset_branch(
-    project_id: str,
-    branch_name: str,
-    api_key: str,
-    *,
-    lock_retry_attempts: int,
-    lock_retry_delay_s: float,
-) -> None:
+async def reset_branch(neon_cfg: NeonConfig, *, api_key: str) -> None:
     """Reset a Neon branch to its parent baseline state via the Neon API.
 
     Looks up the named branch within the project, then issues a restore
     request so it returns to its parent's data state.
 
     Args:
-        project_id: Neon project ID (visible in the console URL).
-        branch_name: Display name of the branch to reset (e.g. ``"Working"``).
+        neon_cfg: Neon branch configuration (project ID, branch name, retry
+            settings).
         api_key: Neon management API key.
-        lock_retry_attempts: Maximum retry attempts when the branch is locked
-            (HTTP 423).
-        lock_retry_delay_s: Seconds to wait between lock retry attempts.
 
     Raises:
         RuntimeError: If the branch is not found or has no parent.
@@ -47,19 +41,21 @@ async def reset_branch(
     """
     headers = {"Authorization": f"Bearer {api_key}"}
     async with httpx.AsyncClient(headers=headers) as client:
-        branch_id, parent_id = await _find_branch(client, project_id, branch_name)
+        branch_id, parent_id = await _find_branch(
+            client, neon_cfg.project_id, neon_cfg.branch_name,
+        )
         await _restore_branch(
             client,
-            project_id,
+            neon_cfg.project_id,
             branch_id,
             parent_id,
-            lock_retry_attempts=lock_retry_attempts,
-            lock_retry_delay_s=lock_retry_delay_s,
+            lock_retry_attempts=neon_cfg.lock_retry_attempts,
+            lock_retry_delay_s=neon_cfg.lock_retry_delay_s,
         )
     _log.info(
         "Neon branch %r in project %r reset to parent.",
-        branch_name,
-        project_id,
+        neon_cfg.branch_name,
+        neon_cfg.project_id,
     )
 
 

@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
+from blue_horizon.config import NeonConfig
 from blue_horizon.neon import _find_branch, _restore_branch, reset_branch
 
 _PROJECT_ID = "test-project"
@@ -211,15 +212,13 @@ class TestResetBranch:
                 return_value=MagicMock(),
             )
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-            asyncio.run(
-                reset_branch(
-                    _PROJECT_ID,
-                    _BRANCH_NAME,
-                    "api-key",
-                    lock_retry_attempts=_LOCK_RETRY_ATTEMPTS_THREE,
-                    lock_retry_delay_s=_LOCK_RETRY_DELAY,
-                ),
+            neon_cfg = NeonConfig(
+                project_id=_PROJECT_ID,
+                branch_name=_BRANCH_NAME,
+                lock_retry_attempts=_LOCK_RETRY_ATTEMPTS_THREE,
+                lock_retry_delay_s=_LOCK_RETRY_DELAY,
             )
+            asyncio.run(reset_branch(neon_cfg, api_key="api-key"))
         find_mock.assert_called_once()
         assert find_mock.call_args.args[1] == _PROJECT_ID
         assert find_mock.call_args.args[2] == _BRANCH_NAME

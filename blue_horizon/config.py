@@ -9,7 +9,7 @@ from importlib import resources as importlib_resources
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_PACKAGE = "blue_horizon"
@@ -425,6 +425,7 @@ class NeonConfig(BaseModel):
         project_id: Neon project ID (visible in the console URL).
         branch_name: Name of the branch to reset to its parent baseline.
         lock_retry_attempts: Retry attempts when the branch is locked (HTTP 423).
+            Clamped to a minimum of 1.
         lock_retry_delay_s: Seconds to wait between lock retry attempts.
 
     """
@@ -433,8 +434,14 @@ class NeonConfig(BaseModel):
 
     project_id: str
     branch_name: str
-    lock_retry_attempts: int
-    lock_retry_delay_s: float
+    lock_retry_attempts: Annotated[int, Field(ge=1)] = 8
+    lock_retry_delay_s: Annotated[float, Field(ge=0.0)] = 5.0
+
+    @field_validator("lock_retry_attempts", mode="before")
+    @classmethod
+    def _clamp_to_one(cls, value: int) -> int:
+        """Ensure lock_retry_attempts is at least 1."""
+        return max(1, value)
 
 
 class AppConfig(BaseSettings):

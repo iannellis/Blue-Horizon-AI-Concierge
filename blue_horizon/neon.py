@@ -22,7 +22,7 @@ _BASE_URL: str = "https://console.neon.tech/api/v2"
 _HTTP_LOCKED: int = 423
 
 
-async def reset_branch(neon_cfg: NeonConfig, *, api_key: str) -> None:
+async def reset_branch(neon_cfg: NeonConfig, *, api_key: str | None) -> None:
     """Reset a Neon branch to its parent baseline state via the Neon API.
 
     Looks up the named branch within the project, then issues a restore
@@ -34,11 +34,15 @@ async def reset_branch(neon_cfg: NeonConfig, *, api_key: str) -> None:
         api_key: Neon management API key.
 
     Raises:
-        RuntimeError: If the branch is not found or has no parent.
+        RuntimeError: If ``api_key`` is not provided, the branch is not
+            found, or the branch has no parent to restore from.
         httpx.HTTPStatusError: If the Neon API returns a non-2xx response
             after all retry attempts are exhausted.
 
     """
+    if not api_key:
+        msg = "api_key is required but was not provided (check NEON_API_KEY)."
+        raise RuntimeError(msg)
     headers = {"Authorization": f"Bearer {api_key}"}
     async with httpx.AsyncClient(headers=headers) as client:
         branch_id, parent_id = await _find_branch(

@@ -15,6 +15,8 @@ from typing import Annotated
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from blue_horizon.config import NeonConfig  # noqa: TC001
+
 BASE_PACKAGE = "eval"
 _EVAL_CONFIG_RESOURCE = "eval_config.toml"
 _STRESS_CONFIG_RESOURCE = "stress_config.toml"
@@ -137,32 +139,6 @@ class EvaluatorLimitsConfig(BaseModel):
     @classmethod
     def _clamp_to_one(cls, value: int) -> int:
         """Ensure all limit values are at least 1."""
-        return max(1, value)
-
-
-class NeonConfig(BaseModel):
-    """Configuration for the Neon branch reset used before each eval run.
-
-    Attributes:
-        project_id: Neon project ID (visible in the console URL:
-            ``console.neon.tech/app/projects/<project_id>``).
-        branch_name: Name of the branch to restore to its parent baseline.
-        lock_retry_attempts: Retry attempts when the branch is locked (HTTP 423).
-        lock_retry_delay_s: Seconds to wait between lock retry attempts.
-
-    """
-
-    model_config = {"frozen": True}
-
-    project_id: str
-    branch_name: str
-    lock_retry_attempts: Annotated[int, Field(ge=1)] = 8
-    lock_retry_delay_s: Annotated[float, Field(ge=0.0)] = 5.0
-
-    @field_validator("lock_retry_attempts", mode="before")
-    @classmethod
-    def _clamp_to_one(cls, value: int) -> int:
-        """Ensure lock_retry_attempts is at least 1."""
         return max(1, value)
 
 

@@ -114,7 +114,17 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
         "information_redis": {"data_path": str(EXPECTED_DATA_PATH)},
         "rooms_pgsql": {"data_path": str(EXPECTED_DATA_PATH)},
     },
+    "neon": {
+        "project_id": "test-project-id",
+        "branch_name": "Working",
+        "lock_retry_attempts": 8,
+        "lock_retry_delay_s": 5.0,
+    },
 }
+
+
+EXPECTED_NEON_LOCK_RETRY_ATTEMPTS = 8
+EXPECTED_NEON_LOCK_RETRY_DELAY_S = 5.0
 
 
 def test_parse_app_config_from_dict() -> None:
@@ -125,6 +135,9 @@ def test_parse_app_config_from_dict() -> None:
     assert cfg.rooms.db.guardrails.max_rows == EXPECTED_MAX_ROWS
     assert cfg.rooms.agent.top_k == EXPECTED_ROOMS_TOP_K
     assert cfg.load_data.information_redis.data_path == EXPECTED_DATA_PATH
+    assert cfg.neon.branch_name == "Working"
+    assert cfg.neon.lock_retry_attempts == EXPECTED_NEON_LOCK_RETRY_ATTEMPTS
+    assert cfg.neon.lock_retry_delay_s == EXPECTED_NEON_LOCK_RETRY_DELAY_S
 
 
 def test_load_packaged_app_config() -> None:
@@ -139,3 +152,6 @@ def test_load_packaged_app_config() -> None:
     assert cfg.info.redis.health_check_interval_s == EXPECTED_HEALTH_CHECK_INTERVAL_S
     assert cfg.rooms.agent.top_k == EXPECTED_ROOMS_TOP_K
     assert cfg.load_data.rooms_pgsql.data_path == EXPECTED_DATA_PATH
+    assert cfg.neon.branch_name == "Working"
+    assert cfg.neon.lock_retry_attempts == EXPECTED_NEON_LOCK_RETRY_ATTEMPTS
+    assert cfg.neon.lock_retry_delay_s == EXPECTED_NEON_LOCK_RETRY_DELAY_S

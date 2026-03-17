@@ -418,6 +418,25 @@ class OrchestrationConfig(BaseModel):
     messages: MessagesConfig
 
 
+class NeonConfig(BaseModel):
+    """Neon branch configuration for the database reset feature.
+
+    Attributes:
+        project_id: Neon project ID (visible in the console URL).
+        branch_name: Name of the branch to reset to its parent baseline.
+        lock_retry_attempts: Retry attempts when the branch is locked (HTTP 423).
+        lock_retry_delay_s: Seconds to wait between lock retry attempts.
+
+    """
+
+    model_config = {"frozen": True}
+
+    project_id: str
+    branch_name: str
+    lock_retry_attempts: int
+    lock_retry_delay_s: float
+
+
 class AppConfig(BaseSettings):
     """Parsed application configuration container.
 
@@ -432,6 +451,9 @@ class AppConfig(BaseSettings):
         load_data: Data ingestion settings for local loaders.
         redis_url: Redis connection URL from environment.
         pgsql_db_url: PostgreSQL connection URL from environment.
+        neon_api_key: Neon management API key.  When ``None``, the reset
+            endpoint is disabled.
+        neon: Neon branch configuration (project ID and branch name).
 
     """
 
@@ -447,6 +469,8 @@ class AppConfig(BaseSettings):
     load_data: LoadDataConfig
     redis_url: str = Field(validation_alias="REDIS_URL")
     pgsql_db_url: str = Field(validation_alias="PGSQL_DB_URL")
+    neon_api_key: str | None = Field(default=None, validation_alias="NEON_API_KEY")
+    neon: NeonConfig
 
 
 @lru_cache(maxsize=1)

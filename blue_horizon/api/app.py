@@ -9,11 +9,13 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from blue_horizon.agents.orchestration import OrchestrationManager, format_chat_response
+from blue_horizon.config import load_app_config
+from blue_horizon.neon import reset_branch
 
 load_dotenv()
 
@@ -92,6 +94,38 @@ async def chat(payload: ChatPayload) -> dict[str, Any]:
         user_text=payload.text,
     )
     return format_chat_response(result)
+
+
+@router.post("/reset")
+async def reset() -> JSONResponse:
+    """Reset the working Neon branch to its parent baseline.
+
+    Restores the configured Neon branch (typically ``"Working"``) to the
+    state of its parent branch (typically ``"production"``), effectively
+    clearing all user-created bookings.
+
+    Returns:
+        JSONResponse with ``{"status": "ok"}`` on success.
+
+    Raises:
+        HTTPException: 503 if Neon credentials are not configured; 500 if
+            the Neon API call fails.
+
+    """
+    cfg = load_app_config()
+    if not cfg.neon_api_key or not cfg.neon.project_id:
+        raise HTTPException(status_code=503, detail="Reset not configured.")
+    try:
+        await reset_branch(
+            cfg.neon.project_id,
+            cfg.neon.branch_name,
+            cfg.neon_api_key,
+            lock_retry_attempts=cfg.neon.lock_retry_attempts,
+            lock_retry_delay_s=cfg.neon.lock_retry_delay_s,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return JSONResponse({"status": "ok"})
 
 
 app.include_router(router)

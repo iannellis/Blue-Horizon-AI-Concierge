@@ -85,6 +85,26 @@ def _check_health() -> bool:
         return False
 
 
+def _call_reset() -> str | None:
+    """Call the reset endpoint to restore the working database branch.
+
+    Returns:
+        ``None`` on success, or a user-facing error string on failure.
+
+    """
+    try:
+        response = httpx.post(f"{_API_BASE}/v1/reset", timeout=_CHAT_TIMEOUT_S)
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == _HTTP_SERVICE_UNAVAILABLE:
+            return "Reset is not configured on this deployment."
+        return f"Reset failed ({exc.response.status_code}). Please try again."
+    except Exception as exc:  # noqa: BLE001
+        return f"Could not reach the API: {exc}"
+    else:
+        return None
+
+
 def _send_message(thread_id: str, text: str) -> str:
     """Send a user message to the chat API and return the assistant's reply.
 
@@ -182,6 +202,16 @@ def _render_sidebar() -> None:
         if st.button("New Conversation", use_container_width=True):
             _reset_session()
             st.rerun()
+
+        if st.button("Clear My Bookings", use_container_width=True):
+            with st.spinner("Clearing bookings…"):
+                error = _call_reset()
+            if error:
+                st.error(error)
+            else:
+                _reset_session()
+                st.toast("Bookings cleared. Starting a new conversation.")
+                st.rerun()
 
 
 def _md(text: str) -> None:

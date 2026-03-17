@@ -52,6 +52,8 @@ def _init_session_state() -> None:
     if "last_activity" not in st.session_state:
         # Reserved for future 10-minute inactivity timeout.
         st.session_state.last_activity = datetime.now(UTC)
+    if "pending_toast" not in st.session_state:
+        st.session_state.pending_toast = None
 
 
 def _reset_session() -> None:
@@ -210,7 +212,7 @@ def _render_sidebar() -> None:
                 st.error(error)
             else:
                 _reset_session()
-                st.toast("Bookings cleared. Starting a new conversation.")
+                st.session_state.pending_toast = "Bookings cleared."
                 st.rerun()
 
 
@@ -267,6 +269,9 @@ def main() -> None:
         st.stop()
 
     _init_session_state()
+    if msg := st.session_state.pending_toast:
+        st.toast(msg)
+        st.session_state.pending_toast = None
     _render_sidebar()
     _render_chat()
 

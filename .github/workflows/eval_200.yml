@@ -27,10 +27,8 @@ jobs:
     environment: Full Eval
 
     steps:
-      - name: Checkout (with LFS for wheel and pkl files)
-        uses: actions/checkout@v5
-        with:
-          lfs: true
+      - uses: actions/checkout@v5
+      - run: git lfs pull --include="assets/"
 
       - name: Set up Python 3.13
         uses: actions/setup-python@v6

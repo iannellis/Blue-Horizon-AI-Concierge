@@ -84,10 +84,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout (with LFS for wheel files)
-        uses: actions/checkout@v5
-        with:
-          lfs: true
+      - uses: actions/checkout@v5
+      - run: git lfs pull --include="assets/"
 
       - name: Set up Python 3.13
         uses: actions/setup-python@v6
@@ -113,10 +111,8 @@ jobs:
     environment: CI
 
     steps:
-      - name: Checkout (with LFS for wheel and pkl files)
-        uses: actions/checkout@v5
-        with:
-          lfs: true
+      - uses: actions/checkout@v5
+      - run: git lfs pull --include="assets/"
 
       - name: Set up Python 3.13
         uses: actions/setup-python@v6
@@ -179,11 +175,10 @@ jobs:
     environment: CI
 
     steps:
-      - name: Checkout (latest commit with LFS)
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v5
         with:
-          lfs: true
           fetch-depth: 1
+      - run: git lfs pull --include="assets/"
 
       - name: Push snapshot to HuggingFace Space
         env:

@@ -48,10 +48,10 @@ def _latest_user_text(messages: Sequence[BaseMessage]) -> str:
 
 
 def _build_context_block(items: list[RetrievalItem]) -> str:
-    """Build a plain-text context block from hydrated items.
+    """Build a plain-text context block from retrieved items.
 
     Args:
-        items: Hydrated retrieval items to serialize into a context block.
+        items: Retrieval items to serialize into a context block.
 
     Returns:
         Context block string with one section per item.

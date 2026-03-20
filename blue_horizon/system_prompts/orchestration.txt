@@ -82,7 +82,7 @@ Important disambiguation:
 
 Choose **"rooms"** if the user asks about or requests actions involving:
 
-* Room inventory: what rooms exist, what room types are available, comparing room types
+* Room inventory: what rooms exist, what room types are available, comparing room types, **how many rooms / floors the hotel has** (these require a live database count)
 * Room attributes: type, bed type, view type, square footage, floor, accessibility, max occupancy, renovation recency
 * In-room features: anything that would be found under room **basic_amenities** / **additional_amenities** (e.g., TV, coffee maker, city view, turndown service, etc.)
 * Availability for dates, rates, totals, choosing between options, upgrades/downgrades

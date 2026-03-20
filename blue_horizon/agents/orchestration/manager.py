@@ -21,14 +21,32 @@ from tenacity import (
 
 from blue_horizon.agents.exceptions import OperationalError
 from blue_horizon.agents.orchestration.factory import OrchestrationAgentFactory
+from blue_horizon.agents.orchestration.formatting import format_chat_response
 from blue_horizon.agents.orchestration.resources import OrchestrationResources
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
     from langchain_core.runnables import RunnableConfig
     from langgraph.graph.state import CompiledStateGraph
     from tenacity import RetryCallState
 
     from blue_horizon.agents.orchestration.models import ConversationState
+
+# Maps LangGraph node names to (stage_key, human-readable label) pairs.
+# ``stage_key`` is used to deduplicate events so that multiple nodes sharing
+# the same conceptual stage (e.g. the three query_* nodes) only emit one event.
+_NODE_TO_STAGE: dict[str, tuple[str, str]] = {
+    "router": ("routing", "Routing your request\u2026"),
+    "info": ("search", "Searching hotel information\u2026"),
+    "rooms": ("rooms", "Processing your room request\u2026"),
+    "parse": ("parse", "Understanding your request\u2026"),
+    "query_faq": ("search", "Searching hotel information\u2026"),
+    "query_amenities": ("search", "Searching hotel information\u2026"),
+    "query_services": ("search", "Searching hotel information\u2026"),
+    "rerank": ("rerank", "Ranking results\u2026"),
+    "respond": ("respond", "Generating response\u2026"),
+}
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +195,68 @@ class OrchestrationManager:
                     config=config,
                 ),
             )
+
+    async def ainvoke_stream(
+        self,
+        *,
+        thread_id: str,
+        user_text: str,
+    ) -> AsyncGenerator[dict[str, Any]]:
+        """Stream stage events followed by the final assistant response.
+
+        Yields stage-progress events as the graph executes each node, then a
+        single ``done`` event once the graph has finished.
+
+        Stage events have the form ``{"type": "stage", "label": str}``.
+        The done event has the form ``{"type": "done", "response": str}``.
+
+        Multiple graph nodes that share the same conceptual stage (e.g.
+        ``query_faq``, ``query_amenities``, ``query_services``) are
+        deduplicated so that only one event is emitted per logical stage.
+
+        Args:
+            thread_id: Conversation identifier. Same id => shared history.
+            user_text: Latest user message.
+
+        Yields:
+            Stage dicts ``{"type": "stage", "label": str}`` as each graph
+            node starts, followed by a done dict
+            ``{"type": "done", "response": str}`` when the graph completes.
+
+        """
+        if self._agent is None:
+            yield {"type": "done", "response": self.get_unavailable_message()}
+            return
+
+        state: ConversationState = {"messages": [HumanMessage(content=user_text)]}
+        config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+
+        emitted_stages: set[str] = set()
+        async with self._llm_semaphore:
+            async for event in self._agent.astream_events(
+                state,
+                config=config,
+                version="v2",
+            ):
+                if event.get("event") != "on_chain_start":
+                    continue
+                node_name: str = event.get("metadata", {}).get("langgraph_node", "")
+                if not node_name or node_name not in _NODE_TO_STAGE:
+                    continue
+                stage_key, label = _NODE_TO_STAGE[node_name]
+                if stage_key not in emitted_stages:
+                    emitted_stages.add(stage_key)
+                    yield {"type": "stage", "label": label}
+
+        final_state = await self._agent.aget_state(config)
+        response_dict = format_chat_response(
+            cast("dict[str, Any]", final_state.values),
+        )
+        ai_messages = [m for m in response_dict["messages"] if m["type"] == "ai"]
+        response_text = (
+            ai_messages[-1]["content"] if ai_messages else "No response received."
+        )
+        yield {"type": "done", "response": response_text}
 
     def get_unavailable_message(self) -> str:
         """Return the configured "unavailable" message.

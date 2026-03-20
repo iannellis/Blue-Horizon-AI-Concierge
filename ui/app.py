@@ -16,6 +16,7 @@ Environment variables:
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from datetime import UTC, datetime
@@ -226,6 +227,64 @@ def _md(text: str) -> None:
     st.markdown(text.replace("$", r"\$"))
 
 
+def _stream_message(thread_id: str, text: str) -> str:
+    """Stream stage events from the API and display a live progress indicator.
+
+    Connects to the ``/v1/chat/stream`` SSE endpoint and updates a
+    :func:`streamlit.status` widget as each stage event arrives.  Returns
+    the final response text from the ``done`` event.
+
+    This function must be called inside a ``st.chat_message`` context so that
+    the status widget is rendered inside the assistant bubble.
+
+    Args:
+        thread_id: Unique identifier for the current conversation thread.
+        text: The user's message text.
+
+    Returns:
+        The assistant's reply as a plain string, or a user-facing error
+        message if the request fails.
+
+    """
+    status = st.status("Routing your request\u2026", state="running")
+    try:
+        with httpx.stream(
+            "POST",
+            f"{_API_BASE}/v1/chat/stream",
+            json={"thread_id": thread_id, "text": text},
+            timeout=_CHAT_TIMEOUT_S,
+        ) as response:
+            response.raise_for_status()
+            for line in response.iter_lines():
+                if not line.startswith("data: "):
+                    continue
+                try:
+                    event = json.loads(line[6:])
+                except json.JSONDecodeError:
+                    continue
+                event_type = event.get("type")
+                if event_type == "stage":
+                    status.update(label=event["label"], state="running")
+                elif event_type == "done":
+                    status.update(label="Done", state="complete")
+                    return str(event.get("response", "No response received."))
+    except httpx.HTTPStatusError as exc:
+        status.update(label="Error", state="error")
+        if exc.response.status_code == _HTTP_SERVICE_UNAVAILABLE:
+            return "The system is still starting up. Please try again in a moment."
+        return (
+            f"The server returned an error ({exc.response.status_code}). "
+            "Please try again."
+        )
+    except httpx.TimeoutException:
+        status.update(label="Error", state="error")
+        return "The request timed out. The agent may be busy — please try again."
+    except Exception as exc:  # noqa: BLE001
+        status.update(label="Error", state="error")
+        return f"Could not reach the API: {exc}"
+    return "No response received."
+
+
 def _render_chat() -> None:
     """Render the chat message history and handle new user input."""
     for msg in st.session_state.messages:
@@ -241,8 +300,7 @@ def _render_chat() -> None:
             _md(prompt)
 
         with st.chat_message("assistant"):
-            with st.spinner(""):
-                reply = _send_message(st.session_state.thread_id, prompt)
+            reply = _stream_message(st.session_state.thread_id, prompt)
             _md(reply)
 
         st.session_state.messages.append({"role": "assistant", "content": reply})

@@ -1,16 +1,23 @@
-"""The FastAPI API that provides in interface to the agent.
+"""FastAPI application exposing chat, streaming chat, health, and reset endpoints.
 
-Has one main function: chat, which sends a query to the agent and its response to the
-user.
+The ``/v1/chat`` endpoint sends a user message to the orchestration agent and
+returns the complete response.  The ``/v1/chat/stream`` endpoint streams
+stage-progress events followed by the final response as Server-Sent Events
+(SSE).  The ``/v1/reset`` endpoint resets the working Neon database branch.
 """
 
-from collections.abc import AsyncGenerator
+from __future__ import annotations
+
+import json
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from blue_horizon.agents.orchestration import OrchestrationManager, format_chat_response
@@ -94,6 +101,44 @@ async def chat(payload: ChatPayload) -> dict[str, Any]:
         user_text=payload.text,
     )
     return format_chat_response(result)
+
+
+@router.post("/chat/stream")
+async def chat_stream(payload: ChatPayload) -> StreamingResponse:
+    r"""Stream stage events and the final response for a chat request.
+
+    Returns a ``text/event-stream`` response where each SSE event is a
+    JSON-encoded dict prefixed with ``data: `` and terminated by ``\n\n``.
+
+    Two event types are emitted:
+
+    * ``{"type": "stage", "label": str}`` — emitted when the orchestrator
+      enters a new processing stage.
+    * ``{"type": "done", "response": str}`` — emitted once the final
+      assistant response is available.
+
+    Args:
+        payload: Chat payload containing ``thread_id`` and user ``text``.
+
+    Returns:
+        StreamingResponse with ``Content-Type: text/event-stream``.
+
+    """
+
+    async def _event_stream() -> AsyncGenerator[str]:
+        r"""Yield SSE-formatted strings from the orchestrator stream.
+
+        Yields:
+            SSE strings of the form ``data: {json}\n\n``, one per event.
+
+        """
+        async for event in orchestrator.ainvoke_stream(
+            thread_id=payload.thread_id,
+            user_text=payload.text,
+        ):
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(_event_stream(), media_type="text/event-stream")
 
 
 @router.post("/reset")

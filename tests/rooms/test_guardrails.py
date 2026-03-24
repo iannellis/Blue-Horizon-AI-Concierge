@@ -289,3 +289,34 @@ class TestWriteSqlDetection:
             "DELETE FROM room_availability WHERE id = 99",
             allow_only_hotel_tables=_ALLOW,
         )
+
+
+# ---------------------------------------------------------------------------
+# Regression coverage for current regex limitations
+# ---------------------------------------------------------------------------
+
+
+class TestRegexRegressionCoverage:
+    """Regression tests for the known regex limitations in validate_sql."""
+
+    def test_privileged_keyword_inside_string_literal_passes(self) -> None:
+        """Keyword text inside a string literal must not be treated as DDL."""
+        validate_sql(
+            "SELECT 'drop' AS note FROM rooms",
+            allow_only_hotel_tables=_ALLOW,
+        )
+
+    def test_delete_from_only_allowed_table_passes(self) -> None:
+        """ONLY is valid PostgreSQL syntax and must not trip the allowlist."""
+        validate_sql(
+            "DELETE FROM ONLY room_availability WHERE room_id = 1",
+            allow_only_hotel_tables=_ALLOW,
+        )
+
+    def test_delete_using_disallowed_table_blocked(self) -> None:
+        """USING tables must also be checked against the allowlist."""
+        with pytest.raises(ValueError, match="Table not allowed"):
+            validate_sql(
+                "DELETE FROM rooms USING audit_log WHERE rooms.room_id = 1",
+                allow_only_hotel_tables=_ALLOW,
+            )

@@ -1,10 +1,13 @@
 """Tests for rooms database utility helpers.
 
-All tested functions are pure (no I/O).  psycopg_pool.PoolTimeout is
-instantiated directly; no real database connection is required.
+No real database connection is required. psycopg_pool.PoolTimeout is
+instantiated directly, and database metadata tests use async mocks.
 """
 
 # ruff: noqa: S101
+
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from psycopg_pool import PoolTimeout
@@ -13,7 +16,58 @@ from blue_horizon.agents.rooms.db_utils import (
     _is_transient_conn_error,
     _truncate_rows,
     _user_facing_db_message,
+    fetch_rooms_metadata,
 )
+
+# ---------------------------------------------------------------------------
+# fetch_rooms_metadata
+# ---------------------------------------------------------------------------
+
+
+class TestFetchRoomsMetadata:
+    """fetch_rooms_metadata builds metadata from PostgreSQL result rows."""
+
+    def test_preserves_enum_labels_with_commas(self) -> None:
+        """Comma-containing enum labels are preserved without string splitting."""
+        cursor = MagicMock()
+        cursor.__aenter__ = AsyncMock(return_value=cursor)
+        cursor.__aexit__ = AsyncMock(return_value=False)
+        cursor.execute = AsyncMock()
+        cursor.fetchall = AsyncMock(
+            side_effect=[
+                [("available",), ("booked",)],
+                [("King, Split",), ("Queen",)],
+                [("clean",), ("dirty",)],
+                [("suite",), ("standard",)],
+                [("wifi",), ("tv",)],
+                [("balcony",)],
+                [("ocean",)],
+            ],
+        )
+
+        conn = MagicMock()
+        conn.__aenter__ = AsyncMock(return_value=conn)
+        conn.__aexit__ = AsyncMock(return_value=False)
+        conn.cursor.return_value = cursor
+
+        with patch(
+            "blue_horizon.agents.rooms.db_utils.psycopg.AsyncConnection.connect",
+            new=AsyncMock(return_value=conn),
+        ):
+            (
+                enum_values,
+                basic_amenities,
+                additional_amenities,
+                view_types,
+            ) = asyncio.run(
+                fetch_rooms_metadata("postgresql://example"),
+            )
+
+        assert enum_values["room_bed_type"] == ["King, Split", "Queen"]
+        assert basic_amenities == ["wifi", "tv"]
+        assert additional_amenities == ["balcony"]
+        assert view_types == ["ocean"]
+
 
 # ---------------------------------------------------------------------------
 # _is_transient_conn_error

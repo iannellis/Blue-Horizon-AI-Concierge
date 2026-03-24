@@ -51,18 +51,14 @@ async def fetch_rooms_metadata(
         ):
             await cur.execute("SET search_path TO public;")
             for enum_type in ENUM_TYPES:
-                query = sql.SQL("SELECT enum_range(NULL::{});").format(
+                query = sql.SQL("SELECT unnest(enum_range(NULL::{}));").format(
                     sql.Identifier(enum_type),
                 )
                 await cur.execute(query)
-                row = await cur.fetchone()
-                if not row or row[0] is None:
-                    enum_values[enum_type] = []
-                    continue
-
-                raw = str(row[0]).strip("{}")
                 enum_values[enum_type] = [
-                    v.strip().strip('"').strip("'") for v in raw.split(",") if v.strip()
+                    str(row[0])
+                    for row in await cur.fetchall()
+                    if row and row[0] is not None
                 ]
 
             await cur.execute("SELECT DISTINCT unnest(basic_amenities) FROM rooms;")

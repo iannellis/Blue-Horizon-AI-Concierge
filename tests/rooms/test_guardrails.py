@@ -82,8 +82,8 @@ class TestForbiddenTokens:
 # ---------------------------------------------------------------------------
 
 
-class TestForbiddenKeywords:
-    """validate_sql must block DDL and privileged commands."""
+class TestUnsupportedStatements:
+    """validate_sql must reject statement types outside the runtime contract."""
 
     @pytest.mark.parametrize(
         "statement",
@@ -102,14 +102,14 @@ class TestForbiddenKeywords:
             "EXECUTE 'SELECT 1'",
         ],
     )
-    def test_ddl_keyword_blocked(self, statement: str) -> None:
-        """DDL/privileged keywords are always blocked regardless of table policy."""
-        with pytest.raises(ValueError, match="DDL/privileged"):
+    def test_unsupported_statement_blocked(self, statement: str) -> None:
+        """Non-runtime statements are always blocked regardless of table policy."""
+        with pytest.raises(ValueError, match="Only SELECT and UPDATE"):
             validate_sql(statement, allow_only_hotel_tables=_ANY)
 
     def test_ddl_keyword_case_insensitive(self) -> None:
-        """Keyword blocking is case-insensitive."""
-        with pytest.raises(ValueError, match="DDL/privileged"):
+        """Statement-type blocking is case-insensitive."""
+        with pytest.raises(ValueError, match="Only SELECT and UPDATE"):
             validate_sql("drop table rooms", allow_only_hotel_tables=_ANY)
 
 
@@ -192,16 +192,10 @@ class TestTableAllowlist:
             allow_only_hotel_tables=_ALLOW,
         )
 
-    def test_quoted_disallowed_table_not_blocked(self) -> None:
-        r"""Double-quoted disallowed table names currently bypass the allowlist.
-
-        The _TABLE_REF regex requires a word-boundary (``\b``) after the
-        table token.  A closing ``"`` is a non-word character, so the regex
-        does not match ``FROM "users"``.  This is a known limitation of the
-        current regex-based check; schema-qualified or plain-name references
-        ARE correctly blocked.
-        """
-        validate_sql('SELECT * FROM "users"', allow_only_hotel_tables=_ALLOW)
+    def test_quoted_disallowed_table_blocked(self) -> None:
+        """Double-quoted disallowed table names must be rejected."""
+        with pytest.raises(ValueError, match="Table not allowed"):
+            validate_sql('SELECT * FROM "users"', allow_only_hotel_tables=_ALLOW)
 
 
 # ---------------------------------------------------------------------------
@@ -267,14 +261,18 @@ class TestCteHandling:
 
 
 class TestWriteSqlDetection:
-    """Write SQL passes validate_sql (guardrails don't block DML by default)."""
+    """Only room-state updates are allowed as write operations."""
 
-    def test_insert_passes_guardrails(self) -> None:
-        """INSERT is not blocked by validate_sql (write control is elsewhere)."""
-        validate_sql(
-            "INSERT INTO room_availability (room_id, date) VALUES (1, '2026-06-01')",
-            allow_only_hotel_tables=_ALLOW,
-        )
+    def test_insert_blocked_by_guardrails(self) -> None:
+        """INSERT is outside the rooms runtime contract."""
+        with pytest.raises(ValueError, match="Only SELECT and UPDATE"):
+            validate_sql(
+                (
+                    "INSERT INTO room_availability (room_id, date) "
+                    "VALUES (1, '2026-06-01')"
+                ),
+                allow_only_hotel_tables=_ALLOW,
+            )
 
     def test_update_passes_guardrails(self) -> None:
         """UPDATE is not blocked by validate_sql."""
@@ -283,12 +281,13 @@ class TestWriteSqlDetection:
             allow_only_hotel_tables=_ALLOW,
         )
 
-    def test_delete_passes_guardrails(self) -> None:
-        """DELETE is not blocked by validate_sql."""
-        validate_sql(
-            "DELETE FROM room_availability WHERE id = 99",
-            allow_only_hotel_tables=_ALLOW,
-        )
+    def test_delete_blocked_by_guardrails(self) -> None:
+        """DELETE is outside the rooms runtime contract."""
+        with pytest.raises(ValueError, match="Only SELECT and UPDATE"):
+            validate_sql(
+                "DELETE FROM room_availability WHERE id = 99",
+                allow_only_hotel_tables=_ALLOW,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -306,17 +305,22 @@ class TestRegexRegressionCoverage:
             allow_only_hotel_tables=_ALLOW,
         )
 
-    def test_delete_from_only_allowed_table_passes(self) -> None:
+    def test_update_only_allowed_table_passes(self) -> None:
         """ONLY is valid PostgreSQL syntax and must not trip the allowlist."""
         validate_sql(
-            "DELETE FROM ONLY room_availability WHERE room_id = 1",
+            "UPDATE ONLY room_availability SET status = 'Booked' WHERE room_id = 1",
             allow_only_hotel_tables=_ALLOW,
         )
 
-    def test_delete_using_disallowed_table_blocked(self) -> None:
-        """USING tables must also be checked against the allowlist."""
+    def test_update_from_disallowed_table_blocked(self) -> None:
+        """UPDATE ... FROM tables must also be checked against the allowlist."""
         with pytest.raises(ValueError, match="Table not allowed"):
             validate_sql(
-                "DELETE FROM rooms USING audit_log WHERE rooms.room_id = 1",
+                (
+                    "UPDATE room_availability AS ra "
+                    "SET status = 'Booked' "
+                    "FROM audit_log AS al "
+                    "WHERE ra.room_id = al.room_id"
+                ),
                 allow_only_hotel_tables=_ALLOW,
             )

@@ -1,53 +1,42 @@
 """SQL guardrails for the rooms agent.
 
-Validates SQL statements against conservative security rules before execution.
-Supports booking/cancel write operations while blocking DDL, catalog access,
-and multi-statement calls.
+Validates SQL statements against conservative security rules before execution
+using a PostgreSQL-aware AST parser. Supports room search plus booking-state
+updates while blocking unsupported statements, catalog access, and
+multi-statement input.
 """
 
 from __future__ import annotations
 
-import re
 from typing import Final
 
-import sqlparse
-
-_FORBIDDEN_TOKENS: Final[tuple[str, ...]] = (
-    "pg_sleep",
-    "information_schema",
-    "pg_catalog",
-    "dblink",
-)
-
-_FORBIDDEN_KEYWORDS = re.compile(
-    r"\b("
-    r"alter|create|drop|truncate|grant|revoke|vacuum|analyze|"
-    r"copy|do|call|execute"
-    r")\b",
-    re.IGNORECASE,
-)
+import sqlglot
+from sqlglot import exp
+from sqlglot.errors import ParseError
 
 _ALLOWED_TABLES: Final[set[str]] = {"rooms", "room_availability"}
-
-_IDENTIFIER = r'(?:"[^"]+"|[a-zA-Z_][a-zA-Z0-9_]*)'
-# Matches table/view references after FROM/JOIN/UPDATE/INTO.
-# The negative lookahead (?!\s*\() excludes set-returning function calls such as
-# generate_series(...) or unnest(...), which appear syntactically in the same
-# position as table names but are not subject to the table allowlist.
-_TABLE_REF = re.compile(
-    rf"\b(from|join|update|into)\s+({_IDENTIFIER})(?:\s*\.\s*({_IDENTIFIER}))?(?!\s*\()\b",
-    re.IGNORECASE,
-)
+_ALLOWED_SCHEMAS: Final[set[str]] = {"public"}
+_FORBIDDEN_FUNCTIONS: Final[set[str]] = {
+    "dblink",
+    "information_schema",
+    "pg_catalog",
+    "pg_sleep",
+}
+_FORBIDDEN_SCHEMAS: Final[set[str]] = {"information_schema", "pg_catalog"}
+_ALLOWED_STATEMENT_KEYS: Final[set[str]] = {"select", "update"}
+_WRITE_STATEMENT_KEYS: Final[set[str]] = {"update"}
 
 
 def validate_sql(query: str, *, allow_only_hotel_tables: bool) -> None:
     """Validate a SQL statement against conservative guardrails.
 
     Guardrails enforced:
-      - Exactly one statement per call (no statement separators).
-      - Blocks common catalog/extension escape hatches.
-      - Blocks DDL and privileged commands.
-      - Optionally restricts table references to an allowlist (CTEs are allowed).
+      - Exactly one statement per call.
+      - Blocks disallowed function calls such as ``pg_sleep`` and ``dblink``.
+      - Blocks system-catalog access.
+      - Blocks all statement types other than ``SELECT`` and ``UPDATE``.
+      - Optionally restricts table references to a hotel-table allowlist, with
+        CTE names treated as allowed references.
 
     Args:
         query: SQL statement to validate.
@@ -57,111 +46,146 @@ def validate_sql(query: str, *, allow_only_hotel_tables: bool) -> None:
         ValueError: If the SQL violates any guardrail.
 
     """
-    if _contains_statement_separator(query):
+    statement = _parse_single_statement(query)
+    _validate_statement_type(statement)
+    _validate_forbidden_functions(statement)
+    _validate_forbidden_schemas(statement)
+
+    if allow_only_hotel_tables:
+        _validate_table_allowlist(statement)
+
+
+def _is_write_sql(query: str) -> bool:
+    """Determine whether the SQL statement is a write statement.
+
+    Args:
+        query: SQL statement.
+
+    Returns:
+        True when the parsed statement is ``UPDATE``. Returns False when
+        parsing fails or the statement is not write-oriented.
+
+    """
+    try:
+        statement = _parse_single_statement(query)
+    except ValueError:
+        return False
+
+    return statement.key in _WRITE_STATEMENT_KEYS
+
+
+def _parse_single_statement(query: str) -> exp.Expr:
+    """Parse a SQL string and require exactly one statement.
+
+    Args:
+        query: Raw SQL string.
+
+    Returns:
+        The parsed SQL expression.
+
+    Raises:
+        ValueError: If parsing fails or the input contains zero or multiple
+            statements.
+
+    """
+    try:
+        statements = [
+            statement
+            for statement in sqlglot.parse(query, read="postgres")
+            if statement is not None
+        ]
+    except ParseError as exc:
+        msg = "Invalid SQL statement."
+        raise ValueError(msg) from exc
+
+    if len(statements) != 1:
         msg = (
             "Only a single SQL statement is allowed per call (no semicolons). "
             "For multi-step workflows, call the tool multiple times."
         )
         raise ValueError(msg)
 
-    q = _normalize_sql(query)
-    q_lower = q.lower()
+    return statements[0]
 
-    for token in _FORBIDDEN_TOKENS:
-        if token in q_lower:
-            msg = f"Forbidden SQL token detected: {token}"
-            raise ValueError(msg)
 
-    if _FORBIDDEN_KEYWORDS.search(q):
-        msg = "DDL/privileged SQL statements are not allowed."
+def _validate_statement_type(statement: exp.Expr) -> None:
+    """Reject statement types outside the allowed DML/read subset.
+
+    Args:
+        statement: Parsed SQL expression.
+
+    Raises:
+        ValueError: If the parsed statement is not allowed for the rooms agent.
+
+    """
+    if statement.key not in _ALLOWED_STATEMENT_KEYS:
+        msg = "Only SELECT and UPDATE statements are allowed."
         raise ValueError(msg)
 
-    if allow_only_hotel_tables:
-        cte_names = _extract_cte_names(query)
-        allowed = _ALLOWED_TABLES | cte_names
 
-        for _, part1, part2 in _TABLE_REF.findall(q):
-            table_token = part2 or part1
-            table = _normalize_identifier(table_token)
-            if table not in allowed:
-                msg = f"Table not allowed: {table_token}"
-                raise ValueError(msg)
-
-
-def _is_write_sql(query: str) -> bool:
-    """Determine whether the SQL statement looks like a write (DML).
+def _validate_forbidden_functions(statement: exp.Expr) -> None:
+    """Reject forbidden function calls found anywhere in the statement.
 
     Args:
-        query: SQL statement.
+        statement: Parsed SQL expression.
 
-    Returns:
-        True if the statement contains INSERT, UPDATE, or DELETE.
+    Raises:
+        ValueError: If a forbidden function call is present.
 
     """
-    q = _normalize_sql(query).lower()
-    return bool(re.search(r"\b(insert|update|delete)\b", q))
+    for function in statement.find_all(exp.Func):
+        function_name = (function.name or function.sql_name()).lower()
+        if function_name in _FORBIDDEN_FUNCTIONS:
+            msg = f"Forbidden SQL token detected: {function_name}"
+            raise ValueError(msg)
 
 
-def _extract_cte_names(query: str) -> set[str]:
-    """Extract CTE names from WITH clauses in a SQL query.
+def _validate_forbidden_schemas(statement: exp.Expr) -> None:
+    """Reject references to forbidden schemas.
 
     Args:
-        query: SQL query string.
+        statement: Parsed SQL expression.
 
-    Returns:
-        Set of normalized CTE names found in the query.
+    Raises:
+        ValueError: If a forbidden schema is referenced by a table expression.
 
     """
-    cte_pattern = re.compile(
-        r"(?:\bWITH\s+(?:RECURSIVE\s+)?|,\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s+AS\s*\(",
-        re.IGNORECASE,
-    )
-    return {
-        _normalize_identifier(match.group(1)) for match in cte_pattern.finditer(query)
+    for table in statement.find_all(exp.Table):
+        schema_name = table.db.lower() if table.db else ""
+        if schema_name in _FORBIDDEN_SCHEMAS:
+            msg = f"Forbidden SQL token detected: {schema_name}"
+            raise ValueError(msg)
+
+
+def _validate_table_allowlist(statement: exp.Expr) -> None:
+    """Reject references to tables outside the hotel-table allowlist.
+
+    Args:
+        statement: Parsed SQL expression.
+
+    Raises:
+        ValueError: If the statement references a disallowed schema or table.
+
+    """
+    allowed = {
+        cte.alias_or_name.lower()
+        for cte in statement.find_all(exp.CTE)
+        if cte.alias_or_name
     }
+    allowed |= _ALLOWED_TABLES
 
+    for table in statement.find_all(exp.Table):
+        table_name = table.name.lower() if table.name else ""
+        if not table_name:
+            continue
 
-def _normalize_sql(query: str) -> str:
-    """Normalize SQL text for lightweight validation.
+        if table_name in allowed:
+            continue
 
-    Args:
-        query: Raw SQL string.
+        schema_name = table.db.lower() if table.db else ""
+        if schema_name and schema_name not in _ALLOWED_SCHEMAS:
+            msg = f"Table not allowed: {table.sql(dialect='postgres')}"
+            raise ValueError(msg)
 
-    Returns:
-        SQL with collapsed whitespace.
-
-    """
-    return " ".join(query.strip().split())
-
-
-def _normalize_identifier(identifier: str) -> str:
-    """Normalize a SQL identifier for comparisons.
-
-    Args:
-        identifier: Identifier token, possibly quoted.
-
-    Returns:
-        Normalized identifier name.
-
-    """
-    token = identifier.strip()
-    if token.startswith('"') and token.endswith('"') and len(token) >= 2:  # noqa: PLR2004
-        token = token[1:-1]
-    return token.lower()
-
-
-def _contains_statement_separator(query: str) -> bool:
-    """Detect whether a SQL string contains a statement separator.
-
-    Delegates to ``sqlparse.split`` which correctly handles semicolons inside
-    string literals, quoted identifiers, line comments (``--``), and block
-    comments (``/* … */``).
-
-    Args:
-        query: Raw SQL string.
-
-    Returns:
-        True if more than one non-empty statement is found; otherwise False.
-
-    """
-    return len([s for s in sqlparse.split(query) if s.strip()]) > 1
+        msg = f"Table not allowed: {table.sql(dialect='postgres')}"
+        raise ValueError(msg)

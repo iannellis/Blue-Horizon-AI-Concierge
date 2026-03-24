@@ -119,6 +119,28 @@ def build_index(
         sys.exit(1)
 
 
+def _to_float(value: object) -> float:
+    """Convert a pandas scalar-like value into a Python float.
+
+    Args:
+        value: Scalar value produced by pandas normalization.
+
+    Returns:
+        float: Converted numeric value.
+
+    Raises:
+        TypeError: If the value is not float-convertible.
+
+    """
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        return float(value)
+
+    msg = f"Value is not float-convertible: {value!r}"
+    raise TypeError(msg)
+
+
 _FAQ_SCHEMA = pa.DataFrameSchema(
     columns={
         "question": pa.Column(str, nullable=True, coerce=True),
@@ -228,11 +250,11 @@ def get_amenities_nodes(df_amenities: pd.DataFrame) -> list[TextNode]:
             id_=row.Index,
             metadata={
                 "category": row.category,
-                "price": float(row.price),
-                "duration": float(row.duration),
+                "price": _to_float(row.price),
+                "duration": _to_float(row.duration),
                 "availability": row.availability,
                 "booking_required": row.booking_required,
-                "min_notice_hours": float(row.min_notice_hours),
+                "min_notice_hours": _to_float(row.min_notice_hours),
             },
         )
         for row in normalized.itertuples()
@@ -271,11 +293,11 @@ def get_services_nodes(df_services: pd.DataFrame) -> list[TextNode]:
             id_=row.Index,
             metadata={
                 "service_type": row.service_type,
-                "duration": float(row.duration),
-                "price": float(row.price),
+                "duration": _to_float(row.duration),
+                "price": _to_float(row.price),
                 "department": row.department,
                 "booking_required": row.booking_required,
-                "min_notice_hours": float(row.min_notice_hours),
+                "min_notice_hours": _to_float(row.min_notice_hours),
             },
         )
         for row in normalized.itertuples()

@@ -17,7 +17,13 @@ from llama_index.core.vector_stores.types import (
     MetadataFilters,
 )
 
-from blue_horizon.agents.information.retrieval import build_filters, build_index_schema
+from blue_horizon.agents.information.models import Source
+from blue_horizon.agents.information.retrieval import (
+    build_filters,
+    build_index_schema,
+    build_information_index_schemas,
+    build_source_index_schema,
+)
 
 # ---------------------------------------------------------------------------
 # build_filters
@@ -232,3 +238,54 @@ class TestBuildIndexSchema:
         """Without extra fields exactly four base fields are present."""
         d = self._captured_dict(extra_fields=[])
         assert len(d["fields"]) == 4  # noqa: PLR2004
+
+
+# ---------------------------------------------------------------------------
+# build_source_index_schema / build_information_index_schemas
+# ---------------------------------------------------------------------------
+
+
+class TestSharedInformationSchemas:
+    """Shared schema builders keep runtime and ETL schema definitions aligned."""
+
+    def test_build_source_index_schema_uses_source_defaults(self) -> None:
+        """Each source expands to its expected name, prefix, and metadata fields."""
+        with patch(
+            "blue_horizon.agents.information.retrieval.build_index_schema",
+        ) as mock_build_index_schema:
+            mock_build_index_schema.return_value = MagicMock()
+
+            build_source_index_schema(source=Source.SERVICES, vector_dims=256)
+
+        mock_build_index_schema.assert_called_once_with(
+            name="services",
+            prefix="services",
+            extra_fields=[
+                {"type": "tag", "name": "service_type"},
+                {"type": "numeric", "name": "price"},
+                {"type": "numeric", "name": "duration"},
+                {"type": "numeric", "name": "min_notice_hours"},
+                {"type": "tag", "name": "department"},
+                {"type": "tag", "name": "booking_required"},
+            ],
+            vector_dims=256,
+        )
+
+    def test_build_information_index_schemas_returns_one_schema_per_source(
+        self,
+    ) -> None:
+        """All information sources receive a schema from the shared builder."""
+        with patch(
+            "blue_horizon.agents.information.retrieval.build_source_index_schema",
+        ) as mock_build_source_index_schema:
+            mock_build_source_index_schema.side_effect = (
+                lambda *, source, vector_dims: f"{source.value}:{vector_dims}"
+            )
+
+            schemas = build_information_index_schemas(vector_dims=1536)
+
+        assert schemas == {
+            Source.FAQ: "faq:1536",
+            Source.AMENITIES: "amenities:1536",
+            Source.SERVICES: "services:1536",
+        }

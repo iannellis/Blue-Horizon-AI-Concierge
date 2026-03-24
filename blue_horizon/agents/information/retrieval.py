@@ -1,8 +1,8 @@
-"""Retrieval helpers for the information RAG agent."""
+"""Retrieval helpers and shared Redis index schemas for the information RAG agent."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Final
 
 from llama_index.core.vector_stores.types import (
     FilterOperator,
@@ -10,6 +10,29 @@ from llama_index.core.vector_stores.types import (
     MetadataFilters,
 )
 from redisvl.schema import IndexSchema
+
+from blue_horizon.agents.information.models import Source
+
+_INDEX_EXTRA_FIELDS_BY_SOURCE: Final[dict[Source, tuple[dict[str, str], ...]]] = {
+    Source.FAQ: (
+        {"type": "tag", "name": "category"},
+    ),
+    Source.AMENITIES: (
+        {"type": "tag", "name": "category"},
+        {"type": "numeric", "name": "price"},
+        {"type": "numeric", "name": "duration"},
+        {"type": "numeric", "name": "min_notice_hours"},
+        {"type": "tag", "name": "booking_required"},
+    ),
+    Source.SERVICES: (
+        {"type": "tag", "name": "service_type"},
+        {"type": "numeric", "name": "price"},
+        {"type": "numeric", "name": "duration"},
+        {"type": "numeric", "name": "min_notice_hours"},
+        {"type": "tag", "name": "department"},
+        {"type": "tag", "name": "booking_required"},
+    ),
+}
 
 
 def build_filters(  # noqa: PLR0913
@@ -133,3 +156,38 @@ def build_index_schema(
 
     schema_dict = {"index": {"name": name, "prefix": prefix}, "fields": fields}
     return IndexSchema.from_dict(schema_dict)
+
+
+def build_source_index_schema(*, source: Source, vector_dims: int) -> IndexSchema:
+    """Create the RedisVL schema for one information source.
+
+    Args:
+        source: Information source whose index schema should be built.
+        vector_dims: Dimensionality of the vector field.
+
+    Returns:
+        IndexSchema: RedisVL schema instance for the given source.
+
+    """
+    return build_index_schema(
+        name=source.value,
+        prefix=source.value,
+        extra_fields=[field.copy() for field in _INDEX_EXTRA_FIELDS_BY_SOURCE[source]],
+        vector_dims=vector_dims,
+    )
+
+
+def build_information_index_schemas(*, vector_dims: int) -> dict[Source, IndexSchema]:
+    """Create RedisVL schemas for all information-agent indices.
+
+    Args:
+        vector_dims: Dimensionality of each vector field.
+
+    Returns:
+        dict[Source, IndexSchema]: Mapping from source enum to RedisVL schema.
+
+    """
+    return {
+        source: build_source_index_schema(source=source, vector_dims=vector_dims)
+        for source in Source
+    }

@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import math
 from collections import OrderedDict
-from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -23,15 +22,18 @@ from redis.exceptions import BusyLoadingError
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 from redis.retry import Retry
+from redisvl.index import AsyncSearchIndex
+from redisvl.redis.connection import convert_index_info_to_schema
 
 from blue_horizon.agents.exceptions import OperationalError
 from blue_horizon.agents.information.config import build_system_prompt
 from blue_horizon.agents.information.models import RetrievalItem, Source
-from blue_horizon.agents.information.retrieval import build_index_schema
+from blue_horizon.agents.information.retrieval import build_information_index_schemas
 from blue_horizon.agents.prompt_utils import load_packaged_text
 
 if TYPE_CHECKING:
     from llama_index.core.vector_stores.types import MetadataFilters
+    from redisvl.schema import IndexSchema
 
     from blue_horizon.config import InfoEmbeddingsConfig, InfoRagConfig, InfoRedisConfig
 
@@ -69,6 +71,7 @@ class InfoRagResources:
         "_config",
         "_embed_batch_size",
         "_faq_retriever",
+        "_index_schemas",
         "_parser_prompt_resource",
         "_retriever_cache_max",
         "_system_prompt_resource",
@@ -85,6 +88,7 @@ class InfoRagResources:
     _vector_dims: int
     _embed_batch_size: int
     _retriever_cache_max: int
+    _index_schemas: dict[Source, IndexSchema]
     redis_async: AsyncRedis
     indexes: VectorIndexes
     _faq_retriever: BaseRetriever
@@ -131,9 +135,12 @@ class InfoRagResources:
             retry=retry,
         )
 
+        self._index_schemas = build_information_index_schemas(
+            vector_dims=self._vector_dims,
+        )
         self.indexes = self._build_indexes(
             self.redis_async,
-            vector_dims=self._vector_dims,
+            schemas=self._index_schemas,
         )
 
         self._faq_retriever = self.indexes.faq.as_retriever(
@@ -267,7 +274,7 @@ class InfoRagResources:
         """
         for src in (Source.FAQ, Source.AMENITIES, Source.SERVICES):
             expected = self._vector_dims
-            actual = await self._get_index_vector_dims(src.value)
+            actual = await self._get_index_vector_dims(src)
             if actual != expected:
                 msg = (
                     f"Index '{src.value}' vector dims mismatch: "
@@ -275,95 +282,48 @@ class InfoRagResources:
                 )
                 raise OperationalError(msg)
 
-    async def _get_index_vector_dims(self, index_name: str) -> int:
-        """Extract vector dims for the 'vector' field from FT.INFO.
+    async def _get_index_vector_dims(self, source: Source) -> int:
+        """Extract vector dims for the ``vector`` field via RedisVL index info.
 
         Args:
-            index_name: RedisSearch index name.
+            source: Information source whose Redis index should be inspected.
 
         Returns:
             int: Vector dimensionality for the "vector" field.
 
         Raises:
-            OperationalError: If FT.INFO fails or the response is missing required
-                fields.
+            OperationalError: If RedisVL cannot load the live index schema or the
+                schema is missing vector dimensions.
 
         """
+        index_name = source.value
+        index = AsyncSearchIndex(
+            schema=self._index_schemas[source],
+            redis_client=self.redis_async,
+        )
         try:
-            reply = await self.redis_async.execute_command("FT.INFO", index_name)
+            info = await index.info()
         except Exception as exc:
-            msg = f"FT.INFO failed for index '{index_name}'"
+            msg = f"RedisVL info lookup failed for index '{index_name}'"
             raise OperationalError(msg) from exc
 
-        info = self._redis_kv_list_to_dict(reply)
-        attributes = info.get("attributes") or info.get("fields")
-        if not isinstance(attributes, list):
-            msg = f"FT.INFO for '{index_name}' missing attributes/fields section"
-            raise OperationalError(msg)
+        try:
+            live_schema_dict = convert_index_info_to_schema(info)
+            for field in live_schema_dict.get("fields", []):
+                if not isinstance(field, dict) or field.get("name") != "vector":
+                    continue
 
-        for attr in attributes:
-            attr_dict = self._redis_kv_list_to_dict(attr)
-            name = (
-                attr_dict.get("attribute")
-                or attr_dict.get("identifier")
-                or attr_dict.get("name")
-            )
-            if str(name).lower() != "vector":
-                continue
+                attrs = field.get("attrs")
+                if not isinstance(attrs, dict):
+                    break
 
-            dims = attr_dict.get("dims") or attr_dict.get("dim")
-            if dims is None:
-                for v in attr_dict.values():
-                    nested = self._redis_kv_list_to_dict(v)
-                    dims = nested.get("dims") or nested.get("dim")
-                    if dims is not None:
-                        break
+                return int(attrs["dims"])
+        except (KeyError, TypeError, ValueError) as exc:
+            msg = f"RedisVL schema for index '{index_name}' is missing vector dims"
+            raise OperationalError(msg) from exc
 
-            if dims is None:
-                msg = f"FT.INFO for '{index_name}' has vector field but no dims"
-                raise OperationalError(msg)
-
-            try:
-                return int(dims)
-            except (TypeError, ValueError) as exc:
-                msg = f"FT.INFO for '{index_name}' returned non-int dims: {dims!r}"
-                raise OperationalError(msg) from exc
-
-        msg = (
-            f"FT.INFO for '{index_name}' did not include a vector field named 'vector'"
-        )
+        msg = f"RedisVL schema for index '{index_name}' is missing vector dims"
         raise OperationalError(msg)
-
-    @staticmethod
-    def _redis_kv_list_to_dict(reply: object | None) -> dict[str, Any]:
-        """Convert Redis module replies (flat [k, v, k, v, ...]) to dict.
-
-        Args:
-            reply: Redis module response (mapping-like or flat sequence) or None.
-
-        Returns:
-            dict[str, Any]: Lowercased-key dictionary representation.
-
-        """
-        if reply is None:
-            return {}
-        if isinstance(reply, Mapping):
-            return {str(k).lower(): v for k, v in reply.items()}
-        if not isinstance(reply, Sequence) or isinstance(
-            reply,
-            (str, bytes, bytearray),
-        ):
-            return {}
-
-        out: dict[str, Any] = {}
-        it = iter(reply)
-        for k in it:
-            try:
-                v = next(it)
-            except StopIteration:
-                break
-            out[str(k).lower()] = v
-        return out
 
     @staticmethod
     def _init_llamaindex(cfg: InfoEmbeddingsConfig) -> None:
@@ -388,86 +348,35 @@ class InfoRagResources:
     def _build_indexes(
         redis_client_async: AsyncRedis,
         *,
-        vector_dims: int,
+        schemas: dict[Source, IndexSchema],
     ) -> VectorIndexes:
         """Build VectorStoreIndex instances backed by RedisVectorStore.
 
         Args:
             redis_client_async: Async Redis client used by RedisVectorStore.
-            vector_dims: Vector dimension for the schema.
+            schemas: Shared RedisVL schemas keyed by information source.
 
         Returns:
             VectorIndexes: Container with all three indexes.
 
         """
-        faq_schema = build_index_schema(
-            name=Source.FAQ.value,
-            prefix=Source.FAQ.value,
-            extra_fields=[{"type": "tag", "name": "category"}],
-            vector_dims=vector_dims,
-        )
-        faq_store = RedisVectorStore(
-            schema=faq_schema,
-            redis_client_async=redis_client_async,
-            overwrite=False,
-        )
-        faq_storage = StorageContext.from_defaults(vector_store=faq_store)
-        faq_index = VectorStoreIndex.from_vector_store(
-            vector_store=faq_store,
-            storage_context=faq_storage,
-        )
-
-        amenities_schema = build_index_schema(
-            name=Source.AMENITIES.value,
-            prefix=Source.AMENITIES.value,
-            extra_fields=[
-                {"type": "tag", "name": "category"},
-                {"type": "numeric", "name": "price"},
-                {"type": "numeric", "name": "duration"},
-                {"type": "numeric", "name": "min_notice_hours"},
-                {"type": "tag", "name": "booking_required"},
-            ],
-            vector_dims=vector_dims,
-        )
-        amenities_store = RedisVectorStore(
-            schema=amenities_schema,
-            redis_client_async=redis_client_async,
-            overwrite=False,
-        )
-        amenities_storage = StorageContext.from_defaults(vector_store=amenities_store)
-        amenities_index = VectorStoreIndex.from_vector_store(
-            vector_store=amenities_store,
-            storage_context=amenities_storage,
-        )
-
-        services_schema = build_index_schema(
-            name=Source.SERVICES.value,
-            prefix=Source.SERVICES.value,
-            extra_fields=[
-                {"type": "tag", "name": "service_type"},
-                {"type": "numeric", "name": "price"},
-                {"type": "numeric", "name": "duration"},
-                {"type": "numeric", "name": "min_notice_hours"},
-                {"type": "tag", "name": "department"},
-                {"type": "tag", "name": "booking_required"},
-            ],
-            vector_dims=vector_dims,
-        )
-        services_store = RedisVectorStore(
-            schema=services_schema,
-            redis_client_async=redis_client_async,
-            overwrite=False,
-        )
-        services_storage = StorageContext.from_defaults(vector_store=services_store)
-        services_index = VectorStoreIndex.from_vector_store(
-            vector_store=services_store,
-            storage_context=services_storage,
-        )
+        built_indexes: dict[Source, VectorStoreIndex] = {}
+        for source, schema in schemas.items():
+            vector_store = RedisVectorStore(
+                schema=schema,
+                redis_client_async=redis_client_async,
+                overwrite=False,
+            )
+            storage_context = StorageContext.from_defaults(vector_store=vector_store)
+            built_indexes[source] = VectorStoreIndex.from_vector_store(
+                vector_store=vector_store,
+                storage_context=storage_context,
+            )
 
         return VectorIndexes(
-            faq=faq_index,
-            amenities=amenities_index,
-            services=services_index,
+            faq=built_indexes[Source.FAQ],
+            amenities=built_indexes[Source.AMENITIES],
+            services=built_indexes[Source.SERVICES],
         )
 
     @property

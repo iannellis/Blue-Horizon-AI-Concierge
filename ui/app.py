@@ -304,6 +304,7 @@ def _render_chat() -> None:
             _md(reply)
 
         st.session_state.messages.append({"role": "assistant", "content": reply})
+        st.rerun()
 
 
 # ============================

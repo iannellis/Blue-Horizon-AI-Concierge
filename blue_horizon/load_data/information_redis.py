@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 import pandera.pandas as pa
+from dotenv import load_dotenv
 from llama_index.core import Settings, StorageContext, VectorStoreIndex
 from llama_index.core.schema import TextNode
 from llama_index.embeddings.openai import OpenAIEmbedding
@@ -317,6 +318,7 @@ def main() -> None:
     via separate vector store indices.
 
     """
+    load_dotenv()
     cfg = load_app_config()
     embeddings_cfg = cfg.info.embeddings
     vector_dims = cfg.info.retrieval.vector_dims

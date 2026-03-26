@@ -11,9 +11,10 @@ import json
 import statistics
 from collections.abc import Iterable, Mapping
 from contextlib import suppress
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol
 
 import pandas as pd
+from pydantic import TypeAdapter, ValidationError
 
 from eval._utils import json_safe
 
@@ -23,6 +24,23 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # Structural protocols for LangSmith result objects
 # ---------------------------------------------------------------------------
+
+_FEEDBACK_PAIR_LIST_ADAPTER = TypeAdapter(list[tuple[str, Any]])
+
+_SUMMARY_SCORE_KEY_MAP: dict[str, str] = {
+    "route_accuracy": "route_accuracy",
+    "routing_accuracy": "route_accuracy",
+    "rooms_no_unexpected_failure_rate": "rooms_no_unexpected_failure_rate",
+    "judge_consumer_quality": "consumer_quality",
+    "judge_grounding_faithfulness": "grounding",
+    "judge_injection_resistance": "injection_resistance",
+    "rag_faithfulness_mean": "rag_faithfulness_mean",
+    "rag_answer_relevancy_mean": "rag_answer_relevancy_mean",
+    "rag_context_precision_mean": "rag_context_precision_mean",
+    "rag_context_recall_mean": "rag_context_recall_mean",
+    "info_reference_subset_pass_rate": "info_reference_subset_pass_rate",
+    "info_expected_filters_pass_rate": "info_expected_filters_pass_rate",
+}
 
 
 class SupportsAttrs(Protocol):
@@ -214,24 +232,157 @@ def _collect_feedback(
     if isinstance(raw_feedback, Mapping):
         for key, payload in raw_feedback.items():
             if isinstance(payload, Mapping):
-                feedback[key] = cast("dict[str, object]", json_safe(payload))
+                feedback[key] = dict(json_safe(payload))
             else:
                 feedback[key] = {"value": json_safe(payload)}
         return feedback
     if isinstance(raw_feedback, Iterable):
-        for item in raw_feedback:
-            if item is None:
-                continue
-            key = _get_attr(item, "key") or _get_attr(item, "name")
-            if not key:
-                continue
-            payload = {
-                "score": json_safe(_get_attr(item, "score")),
-                "value": json_safe(_get_attr(item, "value")),
-                "comment": json_safe(_get_attr(item, "comment")),
-            }
-            feedback[str(key)] = {k: v for k, v in payload.items() if v is not None}
+        feedback.update(_normalize_feedback(raw_feedback))
     return feedback
+
+
+def _normalize_feedback(feedback: object) -> dict[str, dict[str, object]]:
+    """Normalize raw or persisted evaluator feedback into a flat metric map.
+
+    Args:
+        feedback: Raw LangSmith feedback object, persisted evaluator mapping, or
+            a nested ``{"results": {"value": ...}}`` structure from ``results.jsonl``.
+
+    Returns:
+        Mapping of metric key to a payload containing ``score``, ``value``, and
+        ``comment`` fields when present.
+
+    """
+    if isinstance(feedback, Mapping):
+        nested_results = feedback.get("results")
+        if nested_results is not None:
+            return _normalize_feedback(nested_results)
+
+        raw_value = feedback.get("value")
+        if (
+            raw_value is not None
+            and isinstance(raw_value, Iterable)
+            and not isinstance(raw_value, (str, bytes, Mapping))
+        ):
+            return _normalize_feedback_from_sequence(raw_value)
+
+        return _normalize_feedback_from_mapping(feedback)
+
+    if isinstance(feedback, Iterable) and not isinstance(feedback, (str, bytes)):
+        return _normalize_feedback_from_sequence(feedback)
+
+    return {}
+
+
+def _normalize_feedback_from_mapping(
+    feedback: Mapping[str, object],
+) -> dict[str, dict[str, object]]:
+    """Normalize a flat metric-keyed feedback mapping.
+
+    Args:
+        feedback: Mapping keyed by metric name.
+
+    Returns:
+        Flat metric map with normalized payloads.
+
+    """
+    normalized: dict[str, dict[str, object]] = {}
+
+    for key, payload in feedback.items():
+        if not isinstance(payload, Mapping):
+            continue
+        normalized[str(key)] = _build_feedback_payload(payload)
+
+    return normalized
+
+
+def _build_feedback_payload(payload: Mapping[str, object]) -> dict[str, object]:
+    """Build a normalized feedback payload from a mapping.
+
+    Args:
+        payload: Raw payload mapping.
+
+    Returns:
+        Payload containing only ``score``, ``value``, and ``comment`` when present.
+
+    """
+    normalized = {
+        "score": json_safe(payload.get("score")),
+        "value": json_safe(payload.get("value")),
+        "comment": json_safe(payload.get("comment")),
+    }
+    return {key: value for key, value in normalized.items() if value is not None}
+
+
+def _normalize_feedback_from_sequence(
+    feedback: Iterable[object],
+) -> dict[str, dict[str, object]]:
+    """Normalize a sequence of LangSmith feedback entries.
+
+    Args:
+        feedback: Iterable of feedback entries, each represented as an object,
+            mapping, or persisted list-of-pairs structure.
+
+    Returns:
+        Flat metric map with normalized payloads.
+
+    """
+    normalized: dict[str, dict[str, object]] = {}
+
+    for item in feedback:
+        payload = _coerce_feedback_entry(item)
+        if payload is None:
+            continue
+
+        key = payload.get("key") or payload.get("name")
+        if not key:
+            continue
+
+        normalized[str(key)] = _build_feedback_payload(payload)
+
+    return normalized
+
+
+def _coerce_feedback_entry(item: object) -> dict[str, object] | None:
+    """Coerce a feedback item into a plain dictionary.
+
+    Args:
+        item: Feedback entry represented as an object, mapping, or list of
+            ``(key, value)`` pairs.
+
+    Returns:
+        Plain dictionary representation of the feedback item, or ``None`` when
+        the entry cannot be interpreted.
+
+    """
+    if item is None:
+        return None
+
+    if isinstance(item, Mapping):
+        return dict(item)
+
+    try:
+        pairs = _FEEDBACK_PAIR_LIST_ADAPTER.validate_python(item)
+    except ValidationError:
+        pairs = None
+
+    if pairs is not None:
+        return {str(key): value for key, value in pairs}
+
+    attr_source = _as_attr_source(item)
+    if attr_source is None:
+        return None
+
+    key = _get_attr(attr_source, "key") or _get_attr(attr_source, "name")
+    if key is None:
+        return None
+
+    return {
+        "key": key,
+        "score": _get_attr(attr_source, "score"),
+        "value": _get_attr(attr_source, "value"),
+        "comment": _get_attr(attr_source, "comment"),
+    }
 
 
 def _extract_run_outputs(
@@ -340,20 +491,22 @@ def compute_latency_summary(results_path: Path) -> dict[str, object]:
             if not stripped:
                 continue
             case = json.loads(stripped)
-            feedback_items: list[list[Any]] = (
-                case.get("evaluators", {}).get("results", {}).get("value") or []
-            )
-            for item in feedback_items:
-                item_dict = dict(item)
-                if item_dict.get("key") != "latency_per_turn":
-                    continue
-                raw_val = item_dict.get("value")
-                if not raw_val:
-                    continue
-                with suppress(json.JSONDecodeError, TypeError):
-                    turn_records = json.loads(raw_val)
-                    if isinstance(turn_records, list):
-                        records.extend(turn_records)
+            feedback = _normalize_feedback(case.get("evaluators", {}))
+            latency_payload = feedback.get("latency_per_turn", {})
+            raw_val = latency_payload.get("value")
+            if isinstance(raw_val, list):
+                records.extend(
+                    [item for item in raw_val if isinstance(item, dict)],
+                )
+                continue
+            if not raw_val:
+                continue
+            with suppress(json.JSONDecodeError, TypeError):
+                turn_records = json.loads(str(raw_val))
+                if isinstance(turn_records, list):
+                    records.extend(
+                        [item for item in turn_records if isinstance(item, dict)],
+                    )
 
     if not records:
         return {}
@@ -461,23 +614,18 @@ def _update_metric_values(
         feedback: Evaluator feedback mapping.
 
     """
-    for key, payload in feedback.items():
-        if not isinstance(payload, Mapping):
+    normalized_feedback = _normalize_feedback(feedback)
+
+    for key, payload in normalized_feedback.items():
+        summary_key = _SUMMARY_SCORE_KEY_MAP.get(key)
+        if summary_key is None:
             continue
+
         score = _extract_numeric(payload.get("score"))
-        value = _extract_numeric(payload.get("value"))
-        for metric, values in metric_values.items():
-            metric_value = _extract_numeric(payload.get(metric))
-            if metric_value is not None:
-                values.append(metric_value)
-        if key in {"route_accuracy", "routing_accuracy"} and score is not None:
-            metric_values["route_accuracy"].append(score)
-        if key == "rooms_no_unexpected_failure_rate" and score is not None:
-            metric_values["rooms_no_unexpected_failure_rate"].append(score)
-        if key == "info_reference_subset_pass_rate" and score is not None:
-            metric_values["info_reference_subset_pass_rate"].append(score)
-        if "expected_filters" in key and value is not None:
-            metric_values["info_expected_filters_pass_rate"].append(value)
+        if score is None:
+            continue
+
+        metric_values[summary_key].append(score)
 
 
 def _extract_numeric(value: object) -> float | None:

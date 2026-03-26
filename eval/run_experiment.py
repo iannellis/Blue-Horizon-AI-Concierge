@@ -10,6 +10,7 @@ import logging
 import os
 import platform
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import partial
@@ -43,7 +44,7 @@ from eval.langsmith_target import run_example
 from eval.rooms_db_manager import reset_neon_branch
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping, MutableMapping
+    from collections.abc import Iterable, MutableMapping
     from pathlib import Path
 
     from langsmith.schemas import Example
@@ -227,6 +228,15 @@ def _has_rooms_cases(examples: Iterable[Example]) -> bool:
         tags = inputs.get("tags") or []
         if _ROOMS_TAGS.intersection(tags):
             return True
+        turns = inputs.get("turns") or []
+        if not isinstance(turns, list):
+            continue
+        for turn in turns:
+            if not isinstance(turn, Mapping):
+                continue
+            route = turn.get("expected_route")
+            if isinstance(route, str) and route == "rooms":
+                return True
     return False
 
 

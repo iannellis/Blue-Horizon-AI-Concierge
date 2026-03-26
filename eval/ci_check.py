@@ -22,7 +22,11 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from eval._result_utils import compute_latency_summary, format_latency_table
+from eval._result_utils import (
+    _normalize_feedback,
+    compute_latency_summary,
+    format_latency_table,
+)
 
 _DEFAULT_BASELINE = (
     Path(__file__).parent / "baselines" / "hotel_agent_eval_20_baseline.json"
@@ -110,13 +114,9 @@ def _collect_scores(results_path: Path) -> dict[str, list[float]]:
             if not stripped:
                 continue
             case = json.loads(stripped)
-            feedback_items: list[list[Any]] = (
-                case.get("evaluators", {}).get("results", {}).get("value") or []
-            )
-            for item in feedback_items:
-                item_dict = dict(item)
-                key: str | None = item_dict.get("key")
-                score = item_dict.get("score")
+            feedback = _normalize_feedback(case.get("evaluators", {}))
+            for key, payload in feedback.items():
+                score = payload.get("score")
                 if key is None or key in _SKIP_KEYS:
                     continue
                 if score is None:

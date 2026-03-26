@@ -13,7 +13,8 @@ from uuid import uuid4
 
 from blue_horizon.agents.orchestration import OrchestrationManager
 from eval.langsmith_target._callback import EvalCaptureCallback
-from eval.langsmith_target._text_utils import _extract_assistant_text
+from eval.langsmith_target._orchestration_utils import wait_for_orchestration_ready
+from eval.langsmith_target._text_utils import _extract_assistant_text_from_result
 
 if TYPE_CHECKING:
     from eval.config import EvalConfig
@@ -74,9 +75,7 @@ async def run_example(
         )
         latency_ms = (asyncio.get_running_loop().time() - _t0) * 1000.0
 
-        messages_raw = result.get("messages", [])
-        messages = messages_raw if isinstance(messages_raw, list) else []
-        assistant_text = _extract_assistant_text(messages)
+        assistant_text = _extract_assistant_text_from_result(result)
 
         route_pred = callback.route_pred
         if route_pred is None:
@@ -132,12 +131,15 @@ async def ensure_orchestration_ready(cfg: EvalConfig) -> OrchestrationManager:
         await _ORCHESTRATION.start()
 
         timeout_s = cfg.orchestration.ready_timeout_s
-        start = asyncio.get_running_loop().time()
-        while not _ORCHESTRATION.is_ready:
-            if asyncio.get_running_loop().time() - start >= timeout_s:
-                msg = "OrchestrationManager did not become ready within timeout."
-                raise RuntimeError(msg)
-            await asyncio.sleep(0.2)
+        try:
+            await wait_for_orchestration_ready(
+                _ORCHESTRATION,
+                timeout_s=timeout_s,
+                manager_name="OrchestrationManager",
+            )
+        except TimeoutError as exc:
+            msg = "OrchestrationManager did not become ready within timeout."
+            raise RuntimeError(msg) from exc
 
     if _ORCHESTRATION is None:
         msg = "OrchestrationManager was not initialized."

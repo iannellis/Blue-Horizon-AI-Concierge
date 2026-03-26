@@ -1,17 +1,17 @@
 """Text and payload extraction utilities for the eval harness.
 
 Provides helpers for previewing, sanitizing, and extracting content from
-LangChain messages and tool outputs.
+LangChain messages, orchestration results, and tool outputs.
 """
 
 from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage
 
 
 def _preview(obj: object, max_len: int = 200) -> str:
@@ -98,7 +98,7 @@ def _input_keys(obj: object, max_keys: int = 20) -> list[str]:
     return keys[:max_keys]
 
 
-def _extract_assistant_text(messages: list[BaseMessage]) -> str:
+def _extract_assistant_text(messages: Sequence[object]) -> str:
     """Extract the last assistant message content from a list of messages.
 
     Args:
@@ -110,7 +110,10 @@ def _extract_assistant_text(messages: list[BaseMessage]) -> str:
     """
     for message in reversed(messages):
         if isinstance(message, AIMessage):
-            return str(message.content)
+            return _stringify_message_content(message.content)
+        role = getattr(message, "type", None) or getattr(message, "role", None)
+        if role in {"ai", "assistant"}:
+            return _stringify_message_content(getattr(message, "content", ""))
     return ""
 
 
@@ -133,3 +136,53 @@ def _get_tool_name(metadata: dict[str, Any]) -> str | None:
         if isinstance(serialized_name, str):
             return serialized_name
     return None
+
+
+def _extract_assistant_text_from_result(result: object) -> str:
+    """Extract the final assistant text from an orchestration result object.
+
+    Args:
+        result: Orchestration result object, typically a mapping containing a
+            ``"messages"`` entry.
+
+    Returns:
+        Final assistant message text, or an empty string when unavailable.
+
+    """
+    if not isinstance(result, Mapping):
+        return ""
+
+    messages = result.get("messages", [])
+    if not isinstance(messages, Sequence):
+        return ""
+
+    return _extract_assistant_text(messages)
+
+
+def _stringify_message_content(content: object) -> str:
+    """Normalize assistant message content into plain text.
+
+    Args:
+        content: Message content, which may be a string or a list of blocks.
+
+    Returns:
+        Text content with non-text blocks omitted.
+
+    """
+    if isinstance(content, str):
+        return content.strip()
+
+    if not isinstance(content, list):
+        return str(content).strip()
+
+    parts: list[str] = []
+    for item in content:
+        if isinstance(item, str):
+            parts.append(item)
+            continue
+        if isinstance(item, dict):
+            text = item.get("text")
+            if isinstance(text, str):
+                parts.append(text)
+
+    return " ".join(parts).strip()

@@ -11,13 +11,14 @@ import logging
 import random
 import statistics
 import time
-from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import cast
 from uuid import uuid4
 
+from eval._utils import coerce_int as _coerce_int
 from eval._utils import truncate as _truncate
 from eval.langsmith_target import EvalCaptureCallback, OrchestrationManager
+from eval.langsmith_target._text_utils import _extract_assistant_text_from_result
 from eval.stress.models import OperationBuildResult, StressRunConfig, UserState
 
 logger = logging.getLogger(__name__)
@@ -81,7 +82,7 @@ async def _run_workload(
                 )
                 t0 = time.perf_counter()
                 callback = EvalCaptureCallback()
-                assistant_text, outcome, err_text = await _invoke_orchestration(
+                assistant_text, err_text = await _invoke_orchestration(
                     orchestration=orchestration,
                     callback=callback,
                     thread_id=thread_id,
@@ -92,9 +93,13 @@ async def _run_workload(
 
                 latency_ms = (time.perf_counter() - t0) * 1000.0
 
-                sql_calls = [
-                    e for e in callback.tool_summary if e.get("tool") == "run_sql"
-                ]
+                sql_calls = _collect_run_sql_calls(callback.tool_summary)
+                outcome = _classify_outcome(
+                    op_type=build.op_type,
+                    assistant_text=assistant_text,
+                    err_text=err_text,
+                    sql_calls=sql_calls,
+                )
                 _update_booking_state(state, build, outcome=outcome)
                 op_entry = _build_op_entry(
                     op_type=build.op_type,
@@ -355,7 +360,7 @@ async def _invoke_orchestration(  # noqa: PLR0913
     prompt: str,
     tags: list[str],
     metadata: dict[str, object],
-) -> tuple[str, str, str | None]:
+) -> tuple[str, str | None]:
     """Invoke the orchestrator and classify the assistant response.
 
     Args:
@@ -367,7 +372,7 @@ async def _invoke_orchestration(  # noqa: PLR0913
         metadata: LangSmith metadata for the trace.
 
     Returns:
-        A tuple of ``(assistant_text, outcome, error_text)``.
+        A tuple of ``(assistant_text, error_text)``.
 
     """
     try:
@@ -378,57 +383,232 @@ async def _invoke_orchestration(  # noqa: PLR0913
             tags=tags,
             metadata=metadata,
         )
-        assistant_text = await _extract_last_assistant_text(result)
-        outcome = _classify_outcome(assistant_text or "")
+        assistant_text = _extract_assistant_text_from_result(result)
     except Exception as exc:  # noqa: BLE001
         err_text = f"{type(exc).__name__}: {exc}"
-        return err_text, "error", err_text
-    return assistant_text, outcome, None
+        return "", err_text
+    return assistant_text, None
 
 
-async def _extract_last_assistant_text(result: object) -> str:
-    """Extract the last assistant/AI message text from a graph result.
-
-    The result structure varies across orchestrator and message types, so this
-    function makes a best effort to find an assistant message and normalize
-    list-based content.
+def _collect_run_sql_calls(
+    tool_summary: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Collect ``run_sql`` entries from a callback tool summary.
 
     Args:
-        result: The orchestration result object, typically a dict.
+        tool_summary: Tool summary entries captured during orchestration.
 
     Returns:
-        The extracted assistant text, or an empty string if not found.
+        List of ``run_sql`` tool entries in original order.
 
     """
-    try:
-        messages_obj: Sequence[object]
-        if isinstance(result, Mapping):
-            messages_obj = cast("Sequence[object]", result.get("messages", []))
-        else:
-            messages_obj = []
-        for msg in reversed(messages_obj):
-            role = getattr(msg, "type", None) or getattr(msg, "role", None)
-            if role in {"ai", "assistant"}:
-                content = getattr(msg, "content", "")
-                if isinstance(content, list):
-                    parts: list[str] = []
-                    for part in content:
-                        if isinstance(part, dict) and "text" in part:
-                            parts.append(str(part["text"]))
-                        elif isinstance(part, str):
-                            parts.append(part)
-                        # skip non-text blocks (type="reasoning", etc.)
-                    return " ".join(parts).strip()
-                return str(content).strip()
-    except (AttributeError, KeyError, TypeError, ValueError):
-        return ""
-    return ""
+    sql_calls: list[dict[str, object]] = []
+
+    for entry in tool_summary:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("tool") != "run_sql":
+            continue
+        sql_calls.append(entry)
+
+    return sql_calls
 
 
-def _classify_outcome(text: str) -> str:
+def _classify_outcome(
+    *,
+    op_type: str,
+    assistant_text: str,
+    err_text: str | None,
+    sql_calls: list[dict[str, object]],
+) -> str:
+    """Classify a stress-test operation outcome.
+
+    Structured ``run_sql`` outcomes are preferred because they are more stable
+    than natural-language response text.  Assistant text is only used as a
+    fallback when no usable SQL outcome is available.
+
+    Args:
+        op_type: Effective operation type (``BOOK``, ``MODIFY``, or ``CANCEL``).
+        assistant_text: Assistant response text.
+        err_text: Python-level error text from orchestration invocation, if any.
+        sql_calls: Captured ``run_sql`` tool summaries for the operation.
+
+    Returns:
+        One of ``"success"``, ``"conflict"``, or ``"error"``.
+
+    """
+    if err_text:
+        return "error"
+
+    sql_outcome = _classify_sql_outcome(op_type=op_type, sql_calls=sql_calls)
+    if sql_outcome is not None:
+        return sql_outcome
+
+    return _classify_text_outcome(assistant_text)
+
+
+def _classify_sql_outcome(
+    *,
+    op_type: str,
+    sql_calls: list[dict[str, object]],
+) -> str | None:
+    """Classify an outcome from captured ``run_sql`` summaries.
+
+    Args:
+        op_type: Effective operation type for the prompt.
+        sql_calls: Captured ``run_sql`` entries for the operation.
+
+    Returns:
+        Structured outcome label when a usable SQL result is available;
+        otherwise ``None`` so the caller can fall back to text heuristics.
+
+    """
+    if not sql_calls:
+        return None
+
+    for sql_call in reversed(sql_calls):
+        if _sql_call_has_error(sql_call):
+            return "error"
+
+        row = _extract_first_sql_row(sql_call)
+        if row is None:
+            continue
+
+        if op_type == "BOOK":
+            return _classify_book_outcome(row)
+        if op_type == "MODIFY":
+            return _classify_modify_outcome(row)
+        if op_type == "CANCEL":
+            return _classify_cancel_outcome(row)
+
+    return None
+
+
+def _sql_call_has_error(sql_call: dict[str, object]) -> bool:
+    """Check whether a ``run_sql`` summary indicates an error.
+
+    Args:
+        sql_call: ``run_sql`` tool summary entry.
+
+    Returns:
+        ``True`` when the summary indicates an error.
+
+    """
+    status = sql_call.get("status")
+    if isinstance(status, str) and status.lower() == "error":
+        return True
+
+    return bool(sql_call.get("error"))
+
+
+def _extract_first_sql_row(sql_call: dict[str, object]) -> dict[str, object] | None:
+    """Extract the first row from a ``run_sql`` summary.
+
+    Args:
+        sql_call: ``run_sql`` tool summary entry.
+
+    Returns:
+        First row mapping when available; otherwise ``None``.
+
+    """
+    rows = sql_call.get("rows")
+    if not isinstance(rows, list):
+        return None
+
+    for row in rows:
+        if isinstance(row, dict):
+            return row
+
+    return None
+
+
+def _classify_book_outcome(row: dict[str, object]) -> str | None:
+    """Classify a BOOK outcome from a SQL result row.
+
+    Args:
+        row: SQL result row.
+
+    Returns:
+        Structured outcome label, or ``None`` if the row does not match the
+        expected BOOK result shape.
+
+    """
+    nights_requested = _coerce_int(row.get("nights_requested"))
+    nights_booked = _coerce_int(row.get("nights_booked"))
+
+    if nights_requested is None or nights_booked is None:
+        return None
+
+    if nights_requested > 0 and nights_booked == nights_requested:
+        return "success"
+
+    return "conflict"
+
+
+def _classify_modify_outcome(row: dict[str, object]) -> str | None:
+    """Classify a MODIFY outcome from a SQL result row.
+
+    Args:
+        row: SQL result row.
+
+    Returns:
+        Structured outcome label, or ``None`` if the row does not match the
+        expected MODIFY result shape.
+
+    """
+    release_requested = _coerce_int(
+        row.get("release_needed") or row.get("release_needed_total"),
+    )
+    acquire_requested = _coerce_int(
+        row.get("acquire_needed") or row.get("acquire_needed_total"),
+    )
+    nights_released = _coerce_int(row.get("nights_released"))
+    nights_acquired = _coerce_int(row.get("nights_acquired"))
+
+    if (
+        release_requested is None
+        or acquire_requested is None
+        or nights_released is None
+        or nights_acquired is None
+    ):
+        return None
+
+    if (
+        release_requested > 0
+        and acquire_requested > 0
+        and nights_released == release_requested
+        and nights_acquired == acquire_requested
+    ):
+        return "success"
+
+    return "conflict"
+
+
+def _classify_cancel_outcome(row: dict[str, object]) -> str | None:
+    """Classify a CANCEL outcome from a SQL result row.
+
+    Args:
+        row: SQL result row.
+
+    Returns:
+        Structured outcome label, or ``None`` if the row does not match the
+        expected CANCEL result shape.
+
+    """
+    nights_requested = _coerce_int(row.get("nights_requested"))
+    nights_canceled = _coerce_int(row.get("nights_canceled"))
+
+    if nights_requested is None or nights_canceled is None:
+        return None
+
+    if nights_requested > 0 and nights_canceled == nights_requested:
+        return "success"
+
+    return "conflict"
+
+
+def _classify_text_outcome(text: str) -> str:
     """Classify an assistant response into a coarse outcome bucket.
-
-    This heuristic is used only for stress-test statistics.
 
     Args:
         text: The assistant's response text.

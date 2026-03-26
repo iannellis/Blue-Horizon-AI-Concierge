@@ -11,9 +11,8 @@ import logging
 import os
 import platform
 import time
-from contextlib import suppress
+from contextlib import AsyncExitStack
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 
 from dotenv import load_dotenv
 
@@ -21,15 +20,13 @@ from blue_horizon.config import load_app_config
 from eval._utils import configure_logging as _configure_logging
 from eval.config import load_stress_config
 from eval.langsmith_target import OrchestrationManager
+from eval.langsmith_target._orchestration_utils import wait_for_orchestration_ready
 from eval.rooms_db_manager import open_schema_pool
 from eval.stress.artifacts import _build_summary, _write_artifacts
 from eval.stress.db import _check_invariants, _init_branch_and_targets
 from eval.stress.models import StressRunConfig
 from eval.stress.reconciliation import _reconcile_with_db
 from eval.stress.workload import _run_workload
-
-if TYPE_CHECKING:
-    from psycopg_pool import AsyncConnectionPool
 
 load_dotenv()
 
@@ -94,11 +91,12 @@ def _override_db_url(db_url: str) -> None:
     logger.info("PGSQL_EVAL_DB_URL override applied: PGSQL_DB_URL updated.")
 
 
-async def _start_orchestration(*, db_url: str) -> OrchestrationManager:
+async def _start_orchestration(
+    *,
+    db_url: str,
+    ready_timeout_s: float,
+) -> OrchestrationManager:
     """Start the orchestrator and wait for readiness with a configured timeout.
-
-    The timeout is read from ``stress_config.toml`` via
-    ``orchestration.ready_timeout_s``.
 
     The ``db_url`` is forwarded to :class:`OrchestrationManager` so that the
     rooms SQL agent writes to the same database that the reconciliation pool
@@ -108,6 +106,7 @@ async def _start_orchestration(*, db_url: str) -> OrchestrationManager:
 
     Args:
         db_url: Postgres connection URL used by the rooms SQL agent.
+        ready_timeout_s: Maximum number of seconds to wait for readiness.
 
     Returns:
         A ready ``OrchestrationManager`` instance.
@@ -116,19 +115,18 @@ async def _start_orchestration(*, db_url: str) -> OrchestrationManager:
         TimeoutError: If readiness is not reached within the configured timeout.
 
     """
-    ready_timeout_s = load_stress_config().orchestration.ready_timeout_s
     orchestration = OrchestrationManager(pgsql_db_url=db_url)
     await orchestration.start()
-
-    ready_deadline = time.perf_counter() + ready_timeout_s
-    while not orchestration.is_ready:
-        if time.perf_counter() > ready_deadline:
-            msg = (
-                f"OrchestrationManager did not become ready"
-                f" within {ready_timeout_s:.0f}s"
-            )
-            raise TimeoutError(msg)
-        await asyncio.sleep(0.1)
+    try:
+        await wait_for_orchestration_ready(
+            orchestration,
+            timeout_s=ready_timeout_s,
+            manager_name="OrchestrationManager",
+            poll_interval_s=0.1,
+        )
+    except Exception:
+        await orchestration.stop()
+        raise
 
     return orchestration
 
@@ -148,39 +146,49 @@ async def run_stress() -> None:
     """
     cfg = _load_config()
     ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    run_id = f"stress_{ts}"
     _configure_logging(f"stress_{ts}", cfg.log_dir)
     _override_db_url(cfg.db_url)
     stress_cfg = load_stress_config()
     neon_cfg = stress_cfg.neon
     neon_api_key = stress_cfg.neon_api_key
-    pool: AsyncConnectionPool | None = None
     targets: list[dict[str, object]] = []
     hot_targets: list[dict[str, object]] = []
     op_logs: list[dict[str, object]] = []
     user_logs: list[dict[str, object]] = []
     invariants: dict[str, object] = {}
     reconciliation: dict[str, object] = {}
+    caught_exc: Exception | None = None
 
     start_time = time.perf_counter()
     try:
-        orchestration = await _start_orchestration(db_url=cfg.db_url)
-        pool = await open_schema_pool(cfg.db_url, max_size=cfg.pool_max)
-        targets, hot_targets = await _init_branch_and_targets(
-            pool, cfg, neon_cfg, api_key=neon_api_key,
-        )
-        op_logs, user_logs = await _run_workload(
-            orchestration,
-            cfg,
-            targets,
-            hot_targets,
-            run_id=f"stress_{ts}",
-        )
-        invariants = await _check_invariants(pool, cfg)
-        reconciliation = await _reconcile_with_db(pool, op_logs, cfg)
-    finally:
-        if pool is not None:
-            with suppress(Exception):
-                await pool.close()
+        async with AsyncExitStack() as stack:
+            orchestration = await _start_orchestration(
+                db_url=cfg.db_url,
+                ready_timeout_s=stress_cfg.orchestration.ready_timeout_s,
+            )
+            stack.push_async_callback(orchestration.stop)
+
+            pool = await open_schema_pool(cfg.db_url, max_size=cfg.pool_max)
+            stack.push_async_callback(pool.close)
+
+            targets, hot_targets = await _init_branch_and_targets(
+                pool,
+                cfg,
+                neon_cfg,
+                api_key=neon_api_key,
+            )
+            op_logs, user_logs = await _run_workload(
+                orchestration,
+                cfg,
+                targets,
+                hot_targets,
+                run_id=run_id,
+            )
+            invariants = await _check_invariants(pool, cfg)
+            reconciliation = await _reconcile_with_db(pool, op_logs, cfg)
+    except Exception as exc:  # noqa: BLE001
+        caught_exc = exc
 
     elapsed_s = max(0.0, time.perf_counter() - start_time)
     summary = _build_summary(
@@ -192,13 +200,18 @@ async def run_stress() -> None:
         hot_targets=hot_targets,
         elapsed_s=elapsed_s,
     )
+    if caught_exc is not None:
+        summary["error"] = f"{type(caught_exc).__name__}: {caught_exc}"
+        summary["status"] = "FAIL"
     _write_artifacts(
         cfg,
-        run_id=f"stress_{ts}",
+        run_id=run_id,
         op_logs=op_logs,
         user_logs=user_logs,
         summary=summary,
     )
+    if caught_exc is not None:
+        raise caught_exc
 
 
 if __name__ == "__main__":

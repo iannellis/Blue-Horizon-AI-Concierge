@@ -7,6 +7,7 @@ checks, ensuring booking operations behave correctly.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeGuard
 
 from psycopg_pool import AsyncConnectionPool
@@ -32,6 +33,23 @@ except Exception as _exc:  # noqa: BLE001
 
 _EVAL_POOL_LOCK = asyncio.Lock()
 _EVAL_POOL: AsyncConnectionPool[Any] | None = None
+
+
+@dataclass
+class RoomsOutcomeState:
+    """Mutable aggregation state for rooms outcome scoring.
+
+    Attributes:
+        counts: Aggregate counters across all evaluated rooms turns.
+        per_turn_outcomes: Per-turn pass-rate records used for turn-based
+            summary reporting.
+        unexpected_fail_details: Failure detail records captured for logging.
+
+    """
+
+    counts: dict[str, int]
+    per_turn_outcomes: list[dict[str, Any]]
+    unexpected_fail_details: list[dict[str, Any]]
 
 
 async def eval_rooms_outcome_and_invariants(
@@ -94,8 +112,11 @@ def _score_rooms_tool_outcomes(
     turn_outputs = _iter_turn_outputs(run)
     example_turns = _get_example_turns(example)
 
-    counts = _init_rooms_outcome_counts()
-    unexpected_fail_details: list[dict[str, Any]] = []
+    state = RoomsOutcomeState(
+        counts=_init_rooms_outcome_counts(),
+        per_turn_outcomes=[],
+        unexpected_fail_details=[],
+    )
 
     for global_idx, turn in enumerate(turn_outputs):
         if turn.get("route_pred") != "rooms":
@@ -113,14 +134,13 @@ def _score_rooms_tool_outcomes(
         _accumulate_rooms_turn(
             turn_idx=global_idx,
             tool_summary=tool_summary,
-            counts=counts,
-            unexpected_fail_details=unexpected_fail_details,
+            state=state,
             expected_success=expected_success,
         )
 
-    tool_error_score, tool_error_comment = _format_tool_error_metric(counts)
-    match_rate, match_comment = _format_outcome_match_metric(counts)
-    rowcount_score, rowcount_comment = _format_rowcount_metric(counts)
+    tool_error_score, tool_error_comment = _format_tool_error_metric(state.counts)
+    match_rate, match_comment = _format_outcome_match_metric(state.counts)
+    rowcount_score, rowcount_comment = _format_rowcount_metric(state.counts)
 
     metrics: list[dict[str, Any]] = [
         {
@@ -139,14 +159,29 @@ def _score_rooms_tool_outcomes(
             "comment": rowcount_comment,
         },
     ]
-    if unexpected_fail_details:
-        raw_failures = json_value(unexpected_fail_details)
+    if state.per_turn_outcomes:
+        raw_per_turn = json_value(state.per_turn_outcomes)
+        if len(raw_per_turn) > limits.json_value_max:
+            metrics.append(
+                {
+                    "key": "rooms_outcome_per_turn",
+                    "value": json_value(
+                        state.per_turn_outcomes,
+                        max_len=limits.json_value_max,
+                    ),
+                    "comment": "JSON truncated",
+                },
+            )
+        else:
+            metrics.append({"key": "rooms_outcome_per_turn", "value": raw_per_turn})
+    if state.unexpected_fail_details:
+        raw_failures = json_value(state.unexpected_fail_details)
         if len(raw_failures) > limits.json_value_max:
             metrics.append(
                 {
                     "key": "rooms_unexpected_failures",
                     "value": json_value(
-                        unexpected_fail_details,
+                        state.unexpected_fail_details,
                         max_len=limits.json_value_max,
                     ),
                     "comment": "JSON truncated",
@@ -179,8 +214,7 @@ def _accumulate_rooms_turn(
     *,
     turn_idx: int,
     tool_summary: list[object],
-    counts: dict[str, int],
-    unexpected_fail_details: list[dict[str, Any]],
+    state: RoomsOutcomeState,
     expected_success: bool | None,
 ) -> None:
     """Accumulate outcome counts for a single rooms turn.
@@ -188,27 +222,44 @@ def _accumulate_rooms_turn(
     Args:
         turn_idx: Global turn index within the run.
         tool_summary: Tool summary entries for the turn.
-        counts: Mutable counter dict updated in place.
-        unexpected_fail_details: Unexpected failure details list updated in
-            place.
+        state: Mutable rooms scoring state updated in place.
         expected_success: Whether the example expects this turn to succeed.
             ``False`` means a failure is expected and should not be penalised.
 
     """
+    matched_outcomes = 0
+    total_outcomes = 0
+
     for entry in tool_summary:
         if not _is_run_sql_entry(entry):
             continue
-        counts["run_sql_calls"] += 1
+        state.counts["run_sql_calls"] += 1
         if _has_tool_error(entry):
-            counts["tool_errors"] += 1
+            state.counts["tool_errors"] += 1
         if entry.get("rowcount") is not None:
-            counts["rowcount_present"] += 1
-        _accumulate_outcome(
+            state.counts["rowcount_present"] += 1
+        outcome_matched, failure_detail = _score_outcome_match(
             turn_idx=turn_idx,
             entry=entry,
-            counts=counts,
-            unexpected_fail_details=unexpected_fail_details,
             expected_success=expected_success,
+        )
+        if outcome_matched is None:
+            continue
+        total_outcomes += 1
+        if outcome_matched:
+            state.counts["outcome_matches"] += 1
+            matched_outcomes += 1
+            continue
+        state.counts["unexpected_failures"] += 1
+        if failure_detail is not None:
+            state.unexpected_fail_details.append(failure_detail)
+
+    if total_outcomes:
+        state.per_turn_outcomes.append(
+            {
+                "turn_index": turn_idx,
+                "pass_rate": matched_outcomes / total_outcomes,
+            },
         )
 
 
@@ -241,40 +292,36 @@ def _has_tool_error(summary: dict[str, Any]) -> bool:
     return bool(summary.get("error"))
 
 
-def _accumulate_outcome(
+def _score_outcome_match(
     *,
     turn_idx: int,
     entry: dict[str, Any],
-    counts: dict[str, int],
-    unexpected_fail_details: list[dict[str, Any]],
     expected_success: bool | None,
-) -> None:
-    """Accumulate outcome counts for a single run_sql entry.
+) -> tuple[bool | None, dict[str, Any] | None]:
+    """Score outcome matching for a single run_sql entry.
 
     Args:
         turn_idx: Global turn index within the run.
         entry: Tool summary dict for a run_sql call.
-        counts: Mutable counter dict updated in place.
-        unexpected_fail_details: Unexpected failure details list updated in
-            place.
         expected_success: Whether the example expects this turn to succeed.
             When ``False``, a booking/modify failure is not penalised.
+
+    Returns:
+        Tuple of ``(outcome_matched, failure_detail)``. Returns ``(None, None)``
+        when the entry does not contain an atomic BOOK/MODIFY outcome.
 
     """
     rows = _extract_rows(entry)
     first_row = _extract_first_row(rows)
     op = _detect_atomic_op(first_row)
     if op is None or first_row is None:
-        return
+        return None, None
     success, detail = _score_atomic_outcome(op=op, row=first_row)
     if success:
-        counts["outcome_matches"] += 1
-        return
+        return True, None
     if expected_success is False:
-        counts["outcome_matches"] += 1
-        return
-    counts["unexpected_failures"] += 1
-    unexpected_fail_details.append({"turn": turn_idx, "op": op, **detail})
+        return True, None
+    return False, {"turn": turn_idx, "op": op, **detail}
 
 
 def _extract_rows(entry: dict[str, Any]) -> list[dict[str, Any]]:

@@ -41,6 +41,7 @@ def eval_info_expected_filters(
     labeled_turns = 0
     total_checks = 0
     passed_checks = 0
+    per_turn_pass_rates: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
     divergence_checks = 0
     divergence_failures = 0
@@ -67,6 +68,13 @@ def eval_info_expected_filters(
         passed_checks += pass_count
         divergence_checks += divergence_count
         divergence_failures += divergence_failed
+        if check_count:
+            per_turn_pass_rates.append(
+                {
+                    "turn_index": idx,
+                    "pass_rate": pass_count / check_count,
+                },
+            )
         if failure and len(failures) < limits.info_filter_failures_max:
             failures.append(failure)
 
@@ -102,6 +110,19 @@ def eval_info_expected_filters(
             "value": raw_failures,
         }
 
+    raw_per_turn = json_value(per_turn_pass_rates)
+    if len(raw_per_turn) > limits.json_value_max:
+        per_turn_entry = {
+            "key": "info_expected_filters_per_turn",
+            "value": json_value(per_turn_pass_rates, max_len=limits.json_value_max),
+            "comment": "JSON truncated",
+        }
+    else:
+        per_turn_entry = {
+            "key": "info_expected_filters_per_turn",
+            "value": raw_per_turn,
+        }
+
     return [
         {
             "key": "info_expected_filters_turns",
@@ -116,6 +137,7 @@ def eval_info_expected_filters(
             "score": convergence_rate,
             "comment": convergence_comment,
         },
+        per_turn_entry,
         failures_entry,
     ]
 

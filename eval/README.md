@@ -100,7 +100,8 @@ python -m eval.run_experiment --config eval/eval_config_200.toml
 
 Both commands write results to `eval/outputs/<experiment_name>/`:
 - `results.jsonl` — per-case evaluator feedback
-- `summary.json` — aggregate metrics and per-route latency quantiles
+- `summary.json` — run metadata plus separate `case_based_summary` and
+  `turn_based_summary` metric blocks, along with per-route latency quantiles
 
 Logs are written to `eval/logs/<experiment_name>.log` and mirrored to stdout.
 
@@ -174,6 +175,12 @@ and `turn["reference"]` to Ragas.
 
 Results are written to `results.jsonl` as LangSmith feedback items, then aggregated
 into `summary.json`.
+
+`summary.json` reports:
+- `case_based_summary` — arithmetic means over case-level evaluator scores
+- `turn_based_summary` — turn-weighted or direct per-turn aggregates for metrics
+  that expose turn-level scoring data
+- `latency_quantiles_ms` — per-route wall-clock latency quantiles
 
 ---
 
@@ -294,7 +301,11 @@ from contextlib import suppress
 
 RESULTS = "eval/outputs/<experiment_name>/results.jsonl"
 SKIP = {"route_confusions","judge_raw_json","info_reference_subset_failures",
-        "info_expected_filters_failures","rag_per_turn","latency_per_turn"}
+        "route_turns","info_reference_subset_turns",
+        "info_expected_filters_failures","info_expected_filters_turns",
+        "info_expected_filters_per_turn","injection_turns_labeled",
+        "injection_turns_scanned","rooms_outcome_per_turn",
+        "rag_per_turn","latency_per_turn"}
 
 scores = defaultdict(list)
 with open(RESULTS, encoding="utf-8") as f:

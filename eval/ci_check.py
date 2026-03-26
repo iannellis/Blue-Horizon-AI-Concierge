@@ -36,9 +36,16 @@ _DEFAULT_BASELINE = (
 _SKIP_KEYS: frozenset[str] = frozenset(
     {
         "route_confusions",
+        "route_turns",
         "judge_raw_json",
         "info_reference_subset_failures",
+        "info_reference_subset_turns",
         "info_expected_filters_failures",
+        "info_expected_filters_turns",
+        "info_expected_filters_per_turn",
+        "injection_turns_labeled",
+        "injection_turns_scanned",
+        "rooms_outcome_per_turn",
         "rag_per_turn",
         "latency_per_turn",
     },

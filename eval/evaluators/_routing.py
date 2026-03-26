@@ -33,6 +33,10 @@ def eval_routing_accuracy(run: Run, example: Example) -> list[dict[str, Any]]:
     if total_turns == 0:
         return [
             {
+                "key": "route_turns",
+                "score": 0.0,
+            },
+            {
                 "key": "route_accuracy",
                 "score": 0.0,
                 "comment": "No turns available to score.",
@@ -68,6 +72,10 @@ def eval_routing_accuracy(run: Run, example: Example) -> list[dict[str, Any]]:
     )
 
     return [
+        {
+            "key": "route_turns",
+            "score": float(total_turns),
+        },
         {
             "key": "route_accuracy",
             "score": score,

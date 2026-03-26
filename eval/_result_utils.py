@@ -11,6 +11,7 @@ import json
 import statistics
 from collections.abc import Iterable, Mapping
 from contextlib import suppress
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
 import pandas as pd
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
 
 _FEEDBACK_PAIR_LIST_ADAPTER = TypeAdapter(list[tuple[str, Any]])
 
-_SUMMARY_SCORE_KEY_MAP: dict[str, str] = {
+_CASE_SUMMARY_SCORE_KEY_MAP: dict[str, str] = {
     "route_accuracy": "route_accuracy",
     "routing_accuracy": "route_accuracy",
     "rooms_no_unexpected_failure_rate": "rooms_no_unexpected_failure_rate",
@@ -40,6 +41,29 @@ _SUMMARY_SCORE_KEY_MAP: dict[str, str] = {
     "rag_context_recall_mean": "rag_context_recall_mean",
     "info_reference_subset_pass_rate": "info_reference_subset_pass_rate",
     "info_expected_filters_pass_rate": "info_expected_filters_pass_rate",
+}
+
+_TURN_WEIGHTED_SCORE_KEY_MAP: dict[str, tuple[str, str]] = {
+    "route_accuracy": ("route_accuracy", "route_turns"),
+    "info_reference_subset_pass_rate": (
+        "info_reference_subset_pass_rate",
+        "info_reference_subset_turns",
+    ),
+}
+
+_PER_TURN_SCORE_VALUE_KEY_MAP: dict[str, tuple[str, str]] = {
+    "rooms_outcome_per_turn": ("rooms_no_unexpected_failure_rate", "pass_rate"),
+    "info_expected_filters_per_turn": (
+        "info_expected_filters_pass_rate",
+        "pass_rate",
+    ),
+}
+
+_RAG_PER_TURN_SCORE_KEY_MAP: dict[str, str] = {
+    "faithfulness": "rag_faithfulness_mean",
+    "answer_relevancy": "rag_answer_relevancy_mean",
+    "context_precision": "rag_context_precision_mean",
+    "context_recall": "rag_context_recall_mean",
 }
 
 
@@ -93,6 +117,23 @@ class ResultLike(SupportsAttrs, Protocol):
     evaluations: Mapping[str, object] | Iterable[FeedbackItemLike] | None
     error: object | None
     exception: object | None
+
+
+@dataclass
+class TurnMetricAggregation:
+    """Accumulates intermediate values for turn-based summary metrics.
+
+    Attributes:
+        weighted_score_totals: Sum of ``score * weight`` for weighted metrics.
+        weight_totals: Sum of weights for weighted metrics.
+        per_turn_scores: Raw per-turn score lists for metrics derived from
+            per-turn payloads.
+
+    """
+
+    weighted_score_totals: dict[str, float]
+    weight_totals: dict[str, float]
+    per_turn_scores: dict[str, list[float]]
 
 
 # ---------------------------------------------------------------------------
@@ -467,6 +508,31 @@ def _as_attr_source(
 # ---------------------------------------------------------------------------
 
 
+def _load_feedback_value_records(raw_value: object) -> list[dict[str, object]]:
+    """Load a feedback ``value`` payload into a list of record dicts.
+
+    Args:
+        raw_value: Feedback payload that may already be a list of mappings or a
+            JSON-encoded string containing such a list.
+
+    Returns:
+        List of dictionary records extracted from the payload.
+
+    """
+    if isinstance(raw_value, list):
+        return [dict(item) for item in raw_value if isinstance(item, Mapping)]
+
+    if not raw_value:
+        return []
+
+    with suppress(json.JSONDecodeError, TypeError):
+        parsed = json.loads(str(raw_value))
+        if isinstance(parsed, list):
+            return [dict(item) for item in parsed if isinstance(item, Mapping)]
+
+    return []
+
+
 def compute_latency_summary(results_path: Path) -> dict[str, object]:
     """Compute p50/p95/p99 per-route latency quantiles from results.jsonl.
 
@@ -493,20 +559,10 @@ def compute_latency_summary(results_path: Path) -> dict[str, object]:
             case = json.loads(stripped)
             feedback = _normalize_feedback(case.get("evaluators", {}))
             latency_payload = feedback.get("latency_per_turn", {})
-            raw_val = latency_payload.get("value")
-            if isinstance(raw_val, list):
+            if isinstance(latency_payload, Mapping):
                 records.extend(
-                    [item for item in raw_val if isinstance(item, dict)],
+                    _load_feedback_value_records(latency_payload.get("value")),
                 )
-                continue
-            if not raw_val:
-                continue
-            with suppress(json.JSONDecodeError, TypeError):
-                turn_records = json.loads(str(raw_val))
-                if isinstance(turn_records, list):
-                    records.extend(
-                        [item for item in turn_records if isinstance(item, dict)],
-                    )
 
     if not records:
         return {}
@@ -565,7 +621,8 @@ def _summarize_results(
         Summary dictionary with aggregate metrics.
 
     """
-    metric_values = _init_metric_values()
+    case_metric_values = _init_case_metric_values()
+    turn_metric_values = _init_turn_metric_values()
     num_examples = 0
     num_failed_runs = 0
 
@@ -575,14 +632,24 @@ def _summarize_results(
             num_failed_runs += 1
         feedback = row.get("evaluators", {})
         if isinstance(feedback, Mapping):
-            _update_metric_values(metric_values, feedback)
+            normalized_feedback = _normalize_feedback(feedback)
+            _update_case_metric_values(case_metric_values, normalized_feedback)
+            _update_turn_metric_values(turn_metric_values, normalized_feedback)
 
     summary = _build_summary_base(context, num_examples, num_failed_runs)
-    return summary | _mean_metrics(metric_values)
+    case_based_summary = _mean_metrics(case_metric_values)
+    turn_based_summary = _build_turn_based_summary(turn_metric_values)
+
+    if case_based_summary:
+        summary["case_based_summary"] = case_based_summary
+    if turn_based_summary:
+        summary["turn_based_summary"] = turn_based_summary
+
+    return summary
 
 
-def _init_metric_values() -> dict[str, list[float]]:
-    """Initialize metric storage for summary aggregation.
+def _init_case_metric_values() -> dict[str, list[float]]:
+    """Initialize storage for case-weighted summary aggregation.
 
     Returns:
         Mapping of metric names to collected float values.
@@ -603,21 +670,19 @@ def _init_metric_values() -> dict[str, list[float]]:
     }
 
 
-def _update_metric_values(
+def _update_case_metric_values(
     metric_values: dict[str, list[float]],
-    feedback: Mapping[str, object],
+    feedback: Mapping[str, dict[str, object]],
 ) -> None:
-    """Update aggregated metric values from evaluator feedback.
+    """Update case-weighted metric values from evaluator feedback.
 
     Args:
         metric_values: Aggregated metric values to update.
-        feedback: Evaluator feedback mapping.
+        feedback: Normalized evaluator feedback mapping.
 
     """
-    normalized_feedback = _normalize_feedback(feedback)
-
-    for key, payload in normalized_feedback.items():
-        summary_key = _SUMMARY_SCORE_KEY_MAP.get(key)
+    for key, payload in feedback.items():
+        summary_key = _CASE_SUMMARY_SCORE_KEY_MAP.get(key)
         if summary_key is None:
             continue
 
@@ -626,6 +691,164 @@ def _update_metric_values(
             continue
 
         metric_values[summary_key].append(score)
+
+
+def _init_turn_metric_values() -> TurnMetricAggregation:
+    """Initialize storage for turn-based summary aggregation.
+
+    Returns:
+        Aggregation container for weighted and per-turn turn metrics.
+
+    """
+    weighted_score_totals = dict.fromkeys(_TURN_WEIGHTED_SCORE_KEY_MAP, 0.0)
+    weight_totals = dict.fromkeys(_TURN_WEIGHTED_SCORE_KEY_MAP, 0.0)
+    per_turn_scores = {
+        "rooms_no_unexpected_failure_rate": [],
+        "info_expected_filters_pass_rate": [],
+        "rag_faithfulness_mean": [],
+        "rag_answer_relevancy_mean": [],
+        "rag_context_precision_mean": [],
+        "rag_context_recall_mean": [],
+    }
+    return TurnMetricAggregation(
+        weighted_score_totals=weighted_score_totals,
+        weight_totals=weight_totals,
+        per_turn_scores=per_turn_scores,
+    )
+
+
+def _update_turn_metric_values(
+    metric_values: TurnMetricAggregation,
+    feedback: Mapping[str, dict[str, object]],
+) -> None:
+    """Update turn-based metric aggregates from normalized evaluator feedback.
+
+    Args:
+        metric_values: Aggregation container updated in place.
+        feedback: Normalized evaluator feedback mapping.
+
+    """
+    for summary_key, (score_key, weight_key) in _TURN_WEIGHTED_SCORE_KEY_MAP.items():
+        _accumulate_weighted_turn_metric(
+            metric_values,
+            feedback,
+            summary_key=summary_key,
+            score_key=score_key,
+            weight_key=weight_key,
+        )
+
+    for feedback_key, (summary_key, score_field) in (
+        _PER_TURN_SCORE_VALUE_KEY_MAP.items()
+    ):
+        payload = feedback.get(feedback_key)
+        if not isinstance(payload, Mapping):
+            continue
+        _extend_turn_scores_from_payload(
+            metric_values.per_turn_scores[summary_key],
+            payload,
+            score_field=score_field,
+        )
+
+    rag_payload = feedback.get("rag_per_turn")
+    if isinstance(rag_payload, Mapping):
+        _extend_rag_turn_scores(metric_values.per_turn_scores, rag_payload)
+
+
+def _accumulate_weighted_turn_metric(
+    metric_values: TurnMetricAggregation,
+    feedback: Mapping[str, dict[str, object]],
+    *,
+    summary_key: str,
+    score_key: str,
+    weight_key: str,
+) -> None:
+    """Accumulate a turn-weighted metric using case score and turn count.
+
+    Args:
+        metric_values: Aggregation container updated in place.
+        feedback: Normalized evaluator feedback mapping.
+        summary_key: Destination summary metric name.
+        score_key: Feedback key containing the case-level score.
+        weight_key: Feedback key containing the number of scored turns.
+
+    """
+    score_payload = feedback.get(score_key)
+    weight_payload = feedback.get(weight_key)
+    if (
+        not isinstance(score_payload, Mapping)
+        or not isinstance(weight_payload, Mapping)
+    ):
+        return
+
+    score = _extract_numeric(score_payload.get("score"))
+    weight = _extract_numeric(weight_payload.get("score"))
+    if score is None or weight is None or weight <= 0:
+        return
+
+    metric_values.weighted_score_totals[summary_key] += score * weight
+    metric_values.weight_totals[summary_key] += weight
+
+
+def _extend_turn_scores_from_payload(
+    scores: list[float],
+    payload: Mapping[str, object],
+    *,
+    score_field: str,
+) -> None:
+    """Extend a metric score list from per-turn payload records.
+
+    Args:
+        scores: Score list updated in place.
+        payload: Feedback payload containing a ``value`` field.
+        score_field: Record field containing the per-turn numeric score.
+
+    """
+    for record in _load_feedback_value_records(payload.get("value")):
+        score = _extract_numeric(record.get(score_field))
+        if score is not None:
+            scores.append(score)
+
+
+def _extend_rag_turn_scores(
+    per_turn_scores: dict[str, list[float]],
+    payload: Mapping[str, object],
+) -> None:
+    """Extend turn-based RAG score lists from ``rag_per_turn`` payloads.
+
+    Args:
+        per_turn_scores: Per-metric score lists updated in place.
+        payload: Normalized ``rag_per_turn`` feedback payload.
+
+    """
+    for record in _load_feedback_value_records(payload.get("value")):
+        for record_key, summary_key in _RAG_PER_TURN_SCORE_KEY_MAP.items():
+            score = _extract_numeric(record.get(record_key))
+            if score is not None:
+                per_turn_scores[summary_key].append(score)
+
+
+def _build_turn_based_summary(
+    metric_values: TurnMetricAggregation,
+) -> dict[str, object]:
+    """Build the turn-based summary from accumulated intermediate values.
+
+    Args:
+        metric_values: Aggregation container populated across all cases.
+
+    Returns:
+        Mapping of metric names to turn-based summary values.
+
+    """
+    summary: dict[str, object] = {}
+
+    for metric_name, weighted_total in metric_values.weighted_score_totals.items():
+        total_weight = metric_values.weight_totals[metric_name]
+        if total_weight <= 0:
+            continue
+        summary[metric_name] = weighted_total / total_weight
+
+    summary.update(_mean_metrics(metric_values.per_turn_scores))
+    return summary
 
 
 def _extract_numeric(value: object) -> float | None:
@@ -679,21 +902,21 @@ def _build_summary_base(
 
 
 def _mean_metrics(metric_values: Mapping[str, list[float]]) -> dict[str, object]:
-    """Compute mean metrics, skipping keys with no collected values.
+    """Compute arithmetic means for metrics with collected values.
 
     Args:
-        metric_values: Mapping of metric base names to collected float values.
+        metric_values: Mapping of metric names to collected float values.
 
     Returns:
-        Mapping of ``mean_<key>`` names to their mean values, omitting keys
-        for which no values were collected.
+        Mapping of metric names to mean values, omitting keys with no values.
 
     """
-    return {
-        f"mean_{key}": statistics.mean(values)
-        for key, values in metric_values.items()
-        if values
-    }
+    means: dict[str, object] = {}
+    for key, values in metric_values.items():
+        if not values:
+            continue
+        means[key] = statistics.mean(values)
+    return means
 
 
 def _build_error_summary(

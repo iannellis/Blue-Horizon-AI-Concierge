@@ -49,7 +49,7 @@ The orchestration layer is a LangGraph state graph. A router LLM classifies each
 
 The information agent follows a RAG pipeline:
 
-1. A **parse** node extracts one or more sub-queries from the user message.
+1. A **parse** node extracts one or more sub-queries from the user message, along with any constraints (price bounds, duration bounds, booking requirements, and notice time).
 2. Three **retrieval** nodes run in parallel against separate Redis vector indices (FAQ, amenities, services).
 3. A **rerank** node merges and deduplicates retrieved context.
 4. A **respond** node generates the final answer.

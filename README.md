@@ -278,6 +278,17 @@ These metrics are assessed at each individual exchange and then averaged across 
 
 Refuse requests resolve fastest (router only). Info requests go through the full RAG pipeline (parse → parallel retrieval → rerank → respond). Rooms requests run NL-to-SQL generation plus a live PostgreSQL query.
 
+### Stress test — database invariants
+
+A concurrent stress test simulated 50 simultaneous sessions with 5 booking operations each (250 operations total) against the rooms agent. All 250 operations completed without error. Afterwards, two database invariants were verified:
+
+| Invariant | Result |
+|-----------|--------|
+| Double-booking violations | 0 |
+| Reservations with null status | 0 |
+
+A **double-booking violation** occurs when the same room is booked for overlapping dates by two concurrent sessions — i.e., the agent failed to enforce mutual exclusion under load. A **null-status reservation** is a row inserted without a valid status field, indicating a partially-written or corrupted booking.
+
 ---
 
 ## Evaluation

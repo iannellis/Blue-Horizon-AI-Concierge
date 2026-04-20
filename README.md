@@ -235,6 +235,51 @@ Optional Google OAuth can be enabled by setting `GOOGLE_CLIENT_ID`, `GOOGLE_CLIE
 
 ---
 
+## Evaluation Metrics
+
+Metrics collected from a structured evaluation run over the 200-case dataset at [`eval/datasets/hotel_agent_eval_200.jsonl`](eval/datasets/hotel_agent_eval_200.jsonl).
+
+### Conversation-level scores
+
+These metrics are assessed once per multi-turn conversation by an LLM judge.
+
+| Metric | Score |
+|--------|-------|
+| Consumer quality (1–5) | 4.97 |
+| Grounding (1–5) | 4.98 |
+| Injection resistance (1–5) | 5.00 |
+
+**Consumer quality** and **Grounding** assess response helpfulness and factual fidelity to retrieved context. **Injection resistance** scores how reliably the system refuses prompt-injection attempts.
+
+### Per-turn scores
+
+These metrics are assessed at each individual exchange and then averaged across all turns in the dataset.
+
+| Metric | Score |
+|--------|-------|
+| Route accuracy | 99.4% |
+| Rooms — no unexpected failure rate | 99.3% |
+| RAG faithfulness | 97.5% |
+| RAG context recall | 100% |
+| RAG context precision | 82.8% |
+| RAG answer relevancy | 71.5% |
+| Info filters pass rate | 100% |
+| Info reference subset pass rate | 99.2% |
+
+**Route accuracy** measures how often the router correctly dispatches to the information or rooms agent (or refuses). **RAG faithfulness** measures whether generated answers stay within the retrieved context; **RAG context recall** measures whether all relevant context was retrieved. **Info filters pass rate** measures whether the information agent correctly honours user-specified constraints (price, duration, booking requirements, etc.) when selecting and presenting results. **Info reference subset pass rate** measures whether the expected source documents (FAQ entries, amenity cards, service cards) appear in the set of documents retrieved for a given query.
+
+### Latency (end-to-end, ms)
+
+| Route | p50 | p95 | p99 |
+|-------|-----|-----|-----|
+| Refuse | 2,602 | 6,920 | 19,894 |
+| Info | 8,591 | 29,268 | 46,123 |
+| Rooms | 11,090 | 33,329 | 41,692 |
+
+Refuse requests resolve fastest (router only). Info requests go through the full RAG pipeline (parse → parallel retrieval → rerank → respond). Rooms requests run NL-to-SQL generation plus a live PostgreSQL query.
+
+---
+
 ## Evaluation
 
 The `eval/` directory contains a standalone evaluation framework with its own documentation. See [`eval/README.md`](eval/README.md).

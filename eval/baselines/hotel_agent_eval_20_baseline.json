@@ -1,5 +1,5 @@
 {
-  "generated_from": "hotel-agent-eval-20_20260304_004507_Small_dataset_with_just_20_cases",
+  "generated_from": "hotel-agent-eval-20_20260327_164529_Small_dataset_with_just_20_cases",
   "description": "Baseline metric thresholds for the 20-case smoke eval. strict=true metrics require every individual case score to equal 1.0; strict=false metrics require the mean across cases to be >= min_allowed.",
   "metrics": {
     "route_accuracy": {
@@ -33,7 +33,7 @@
       "strict": false
     },
     "info_expected_filters_pass_rate": {
-      "baseline": 0.9667,
+      "baseline": 1.0,
       "min_allowed": 0.85,
       "strict": false
     },
@@ -53,17 +53,17 @@
       "strict": false
     },
     "rag_faithfulness_mean": {
-      "baseline": 0.9563,
+      "baseline": 0.9657,
       "min_allowed": 0.80,
       "strict": false
     },
     "rag_answer_relevancy_mean": {
-      "baseline": 0.6306,
+      "baseline": 0.6435,
       "min_allowed": 0.55,
       "strict": false
     },
     "rag_context_precision_mean": {
-      "baseline": 0.8486,
+      "baseline": 0.8662,
       "min_allowed": 0.75,
       "strict": false
     },

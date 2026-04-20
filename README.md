@@ -16,7 +16,7 @@ The **agent backend** is built with [LangGraph](https://github.com/langchain-ai/
 
 The **chat UI** is built with [Streamlit](https://streamlit.io). It connects to the FastAPI backend and displays a stage-aware progress indicator inside the assistant bubble as each request is processed, then renders the final response.
 
-Documentation is available in `documentation.pdf`.
+Documentation is available in `documentation.pdf` (to be written).
 
 ---
 
@@ -278,7 +278,9 @@ These metrics are assessed at each individual exchange and then averaged across 
 
 Refuse requests resolve fastest (router only). Info requests go through the full RAG pipeline (parse → parallel retrieval → rerank → respond). Rooms requests run NL-to-SQL generation plus a live PostgreSQL query.
 
-### Stress test — database invariants
+---
+
+## Stress Test
 
 A concurrent stress test simulated 50 simultaneous sessions with 5 booking operations each (250 operations total) against the rooms agent. All 250 operations completed without error. Afterwards, two database invariants were verified:
 

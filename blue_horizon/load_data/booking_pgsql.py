@@ -91,7 +91,11 @@ def get_pgsql_conn_string() -> str:
         RuntimeError: If PGSQL_ROOT_DB_URL is unset.
 
     """
-    return load_app_config().pgsql_root_db_url
+    conn_string = load_app_config().pgsql_root_db_url
+    if conn_string is None:
+        msg = "PGSQL_ROOT_DB_URL is unset."
+        raise RuntimeError(msg)
+    return conn_string
 
 
 def build_enum_definition(values: Iterable[str]) -> Composed:

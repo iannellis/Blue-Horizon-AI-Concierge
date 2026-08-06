@@ -457,7 +457,9 @@ class AppConfig(BaseSettings):
         booking: Booking SQL agent settings.
         load_data: Data ingestion settings for local loaders.
         redis_url: Redis connection URL from environment.
-        pgsql_root_db_url: PostgreSQL connection URL from environment for root DB.
+        pgsql_root_db_url: PostgreSQL connection URL from environment for root
+            DB.  Optional; ``None`` when unset (e.g. environments that never
+            run the root-DB data loaders).
         pgsql_db_url: PostgreSQL connection URL from environment for branch DB.
         neon_api_key: Neon management API key.  When ``None``, the reset
             endpoint is disabled.
@@ -476,7 +478,9 @@ class AppConfig(BaseSettings):
     booking: BookingSqlConfig
     load_data: LoadDataConfig
     redis_url: str = Field(validation_alias="REDIS_URL")
-    pgsql_root_db_url: str = Field(validation_alias="PGSQL_ROOT_DB_URL")
+    pgsql_root_db_url: str | None = Field(
+        default=None, validation_alias="PGSQL_ROOT_DB_URL",
+    )
     pgsql_db_url: str = Field(validation_alias="PGSQL_DB_URL")
     neon_api_key: str | None = Field(default=None, validation_alias="NEON_API_KEY")
     neon: NeonConfig

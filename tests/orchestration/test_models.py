@@ -18,7 +18,7 @@ from blue_horizon.agents.orchestration.models import RouteDecision, _route_from_
 class TestRouteFromState:
     """_route_from_state extracts the route key or falls back to 'error'."""
 
-    @pytest.mark.parametrize("route", ["info", "rooms", "refuse", "error"])
+    @pytest.mark.parametrize("route", ["info", "booking", "refuse", "error"])
     def test_valid_route_returned(self, route: str) -> None:
         """All valid RouteStep values are passed through unchanged."""
         state = {"messages": [], "route": route}
@@ -48,7 +48,7 @@ class TestRouteFromState:
 class TestRouteDecision:
     """RouteDecision validates its step field."""
 
-    @pytest.mark.parametrize("step", ["info", "rooms", "refuse", "error"])
+    @pytest.mark.parametrize("step", ["info", "booking", "refuse", "error"])
     def test_valid_steps_accepted(self, step: str) -> None:
         """All four valid steps parse without error."""
         decision = RouteDecision(step=step)  # type: ignore[arg-type]

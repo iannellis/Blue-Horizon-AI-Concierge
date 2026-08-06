@@ -237,7 +237,7 @@ class TestAinvokeStreamStages:
     def test_done_event_is_last(self) -> None:
         """The done event is always the final event in the stream."""
         manager = _make_manager(
-            agent=_mock_agent([_chain_start("router"), _chain_start("rooms")]),
+            agent=_mock_agent([_chain_start("router"), _chain_start("booking")]),
         )
         events = asyncio.run(
             _collect(manager.ainvoke_stream(thread_id="t1", user_text="hi")),

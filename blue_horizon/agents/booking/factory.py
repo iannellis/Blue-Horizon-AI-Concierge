@@ -1,4 +1,4 @@
-"""Factory for building the rooms SQL agent."""
+"""Factory for building the booking SQL agent."""
 
 from __future__ import annotations
 
@@ -11,12 +11,12 @@ from langchain_openai import ChatOpenAI
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
-    from blue_horizon.agents.rooms.resources import RoomsSqlResources
-    from blue_horizon.config import RoomsSqlConfig
+    from blue_horizon.agents.booking.resources import BookingSqlResources
+    from blue_horizon.config import BookingSqlConfig
 
 
-class RoomsAgentFactory:
-    """Build the rooms agent using initialized resources.
+class BookingAgentFactory:
+    """Build the booking agent using initialized resources.
 
     Attributes:
         config: Parsed configuration.
@@ -26,11 +26,16 @@ class RoomsAgentFactory:
 
     __slots__ = ("config", "resources")
 
-    config: RoomsSqlConfig
-    resources: RoomsSqlResources
+    config: BookingSqlConfig
+    resources: BookingSqlResources
 
-    def __init__(self, *, config: RoomsSqlConfig, resources: RoomsSqlResources) -> None:
-        """Construct the rooms agent factory.
+    def __init__(
+        self,
+        *,
+        config: BookingSqlConfig,
+        resources: BookingSqlResources,
+    ) -> None:
+        """Construct the booking agent factory.
 
         Args:
             config: Parsed configuration loaded from TOML.
@@ -41,7 +46,7 @@ class RoomsAgentFactory:
         self.resources = resources
 
     def build(self) -> CompiledStateGraph:
-        """Build and return a compiled rooms agent.
+        """Build and return a compiled booking agent.
 
         Returns:
             Compiled LangGraph agent.

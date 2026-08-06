@@ -8,11 +8,11 @@ from typing import TYPE_CHECKING, cast
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
 
+from blue_horizon.agents.booking import BookingAgentFactory, BookingSqlResources
 from blue_horizon.agents.exceptions import OperationalError
 from blue_horizon.agents.information import InfoAgentFactory, InfoRagResources
 from blue_horizon.agents.orchestration.models import RouteDecision
 from blue_horizon.agents.prompt_utils import load_packaged_text
-from blue_horizon.agents.rooms import RoomsAgentFactory, RoomsSqlResources
 from blue_horizon.config import load_app_config
 
 if TYPE_CHECKING:
@@ -20,7 +20,11 @@ if TYPE_CHECKING:
     from langchain_core.runnables import Runnable
     from langgraph.graph.state import CompiledStateGraph
 
-    from blue_horizon.config import InfoRagConfig, OrchestrationConfig, RoomsSqlConfig
+    from blue_horizon.config import (
+        BookingSqlConfig,
+        InfoRagConfig,
+        OrchestrationConfig,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +36,7 @@ class OrchestrationResources:
         - Load orchestration configuration.
         - Resolve and load the orchestration system prompt.
         - Construct and hold the router LLM runnable.
-        - Construct and hold sub-resources (InfoRagResources, RoomsSqlResources).
+        - Construct and hold sub-resources (InfoRagResources, BookingSqlResources).
         - Build and hold the compiled sub-agents for info + rooms.
         - Provide a process-lifetime MemorySaver checkpointer for message history.
 
@@ -48,14 +52,14 @@ class OrchestrationResources:
     """
 
     __slots__ = (
+        "_booking_agent",
+        "_booking_config",
+        "_booking_resources",
         "_checkpointer",
         "_config",
         "_info_agent",
         "_info_config",
         "_info_resources",
-        "_rooms_agent",
-        "_rooms_config",
-        "_rooms_resources",
         "_router",
         "_system_prompt",
         "_system_prompt_resource",
@@ -69,9 +73,9 @@ class OrchestrationResources:
     _info_resources: InfoRagResources
     _info_agent: CompiledStateGraph | None
 
-    _rooms_config: RoomsSqlConfig
-    _rooms_resources: RoomsSqlResources
-    _rooms_agent: CompiledStateGraph | None
+    _booking_config: BookingSqlConfig
+    _booking_resources: BookingSqlResources
+    _booking_agent: CompiledStateGraph | None
 
     _router: Runnable[list[BaseMessage], RouteDecision]
     _checkpointer: MemorySaver
@@ -86,7 +90,7 @@ class OrchestrationResources:
         Heavy work (connectivity checks, agent compilation) occurs in startup_check().
 
         Args:
-            pgsql_db_url: Optional database URL override for the rooms SQL agent.
+            pgsql_db_url: Optional database URL override for the booking SQL agent.
                 When provided, takes precedence over the ``PGSQL_DB_URL`` value
                 from the application configuration.  Pass this when the caller
                 (e.g., the stress-test harness) operates against a separate
@@ -118,13 +122,13 @@ class OrchestrationResources:
         )
         self._info_agent = None
 
-        rooms_db_url = pgsql_db_url or app_config.pgsql_db_url
-        self._rooms_config = app_config.rooms
-        self._rooms_resources = RoomsSqlResources(
-            pgsql_db_url=rooms_db_url,
-            config=self._rooms_config,
+        booking_db_url = pgsql_db_url or app_config.pgsql_db_url
+        self._booking_config = app_config.booking
+        self._booking_resources = BookingSqlResources(
+            pgsql_db_url=booking_db_url,
+            config=self._booking_config,
         )
-        self._rooms_agent = None
+        self._booking_agent = None
 
         llm_cfg = self._config.llm
         llm = ChatOpenAI(
@@ -161,10 +165,10 @@ class OrchestrationResources:
                 config=self._info_config,
             ).build()
 
-            await self._rooms_resources.startup_check()
-            self._rooms_agent = RoomsAgentFactory(
-                config=self._rooms_config,
-                resources=self._rooms_resources,
+            await self._booking_resources.startup_check()
+            self._booking_agent = BookingAgentFactory(
+                config=self._booking_config,
+                resources=self._booking_resources,
             ).build()
 
         except OperationalError:
@@ -179,7 +183,7 @@ class OrchestrationResources:
         This should be called during FastAPI shutdown.
 
         """
-        await self._rooms_resources.aclose()
+        await self._booking_resources.aclose()
         await self._info_resources.aclose()
 
     def reset_runtime_state(self) -> None:
@@ -191,7 +195,7 @@ class OrchestrationResources:
         """
         self._system_prompt = None
         self._info_agent = None
-        self._rooms_agent = None
+        self._booking_agent = None
 
     def get_config(self) -> OrchestrationConfig:
         """Return the loaded orchestration configuration.
@@ -250,20 +254,20 @@ class OrchestrationResources:
             raise RuntimeError(msg)
         return self._info_agent
 
-    def get_rooms_agent(self) -> CompiledStateGraph:
-        """Return the compiled rooms agent.
+    def get_booking_agent(self) -> CompiledStateGraph:
+        """Return the compiled booking agent.
 
         Returns:
-            Compiled rooms agent.
+            Compiled booking agent.
 
         Raises:
             RuntimeError: If startup_check() has not been called.
 
         """
-        if self._rooms_agent is None:
-            msg = "Rooms agent not initialized. Call startup_check() first."
+        if self._booking_agent is None:
+            msg = "Booking agent not initialized. Call startup_check() first."
             raise RuntimeError(msg)
-        return self._rooms_agent
+        return self._booking_agent
 
     def get_info_resources(self) -> InfoRagResources:
         """Return the info RAG resources instance.
@@ -274,11 +278,11 @@ class OrchestrationResources:
         """
         return self._info_resources
 
-    def get_rooms_resources(self) -> RoomsSqlResources:
-        """Return the rooms SQL resources instance.
+    def get_booking_resources(self) -> BookingSqlResources:
+        """Return the booking SQL resources instance.
 
         Returns:
-            RoomsSqlResources: Shared database resources.
+            BookingSqlResources: Shared database resources.
 
         """
-        return self._rooms_resources
+        return self._booking_resources

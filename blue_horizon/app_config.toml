@@ -25,8 +25,8 @@ init_retry_max_s = 60.0
 router_timeout_s = 30.0
 # Wall-clock cap for the info node (wraps the info LLM call)
 info_timeout_s = 60
-# Wall-clock cap for the rooms node (wraps the rooms LLM call)
-rooms_timeout_s = 60
+# Wall-clock cap for the booking node (wraps the booking LLM call)
+booking_timeout_s = 60
 # Maximum concurrent LLM pipeline executions. Prevents token-per-minute
 # exhaustion under high concurrency (e.g. stress tests, production traffic spikes).
 llm_concurrency = 15
@@ -102,8 +102,8 @@ folder = "system_prompts"
 system_prompt_filename = "information.txt"
 parser_prompt_filename = "information_parser.txt"
 
-# Non-secret configuration for the Rooms Agent.
-[rooms.llm]
+# Non-secret configuration for the Booking Agent.
+[booking.llm]
 # Chat model name.
 model = "gpt-5.2"
 # OpenAI reasoning effort hint (if supported by your model).
@@ -113,17 +113,17 @@ timeout_s = 20.0
 # Max retries for LLM requests.
 max_retries = 2
 
-[rooms.prompts]
+[booking.prompts]
 # Folder (relative to blue_horizon package root) containing prompt files
 folder = "system_prompts"
 # Prompt template filename inside the folder.
-system_prompt_filename = "rooms.txt"
+system_prompt_filename = "booking.txt"
 
-[rooms.agent]
+[booking.agent]
 # The default number of rooms to return to the user
 top_k = 4
 
-[rooms.db.pool]
+[booking.db.pool]
 # App-side pool. Even with Neon pooler this provides sane backpressure.
 # min_size=0: don't proactively hold connections; open on demand only.
 min_size = 0
@@ -135,7 +135,7 @@ timeout_s = 10.0
 # threshold so stale connections are dropped before the server kills them.
 max_idle_s = 240.0
 
-[rooms.db.guardrails]
+[booking.db.guardrails]
 # Prevent huge responses from drowning your LLM.
 max_rows = 50
 # Restrict queries to known hotel tables. Good safety belt.
@@ -146,7 +146,7 @@ allow_only_hotel_tables = true
 #   ALTER ROLE <role> SET search_path = public;
 # This ensures they apply correctly under PgBouncer transaction pooling.
 
-[rooms.db.retry]
+[booking.db.retry]
 # Retries for transient connection errors like connection closed unexpectedly.
 max_transient_retries = 3
 # Small backoff (seconds) before retry.
@@ -171,7 +171,7 @@ lock_retry_delay_s = 5.0
 # Specified from the same level as the blue_horizon package.
 data_path = "data/pandas"
 
-[load_data.rooms_pgsql]
+[load_data.booking_pgsql]
 # Folder containing the PostgreSQL ingestion pickle files.
 # Specified from the same level as the blue_horizon package.
 data_path = "data/pandas"

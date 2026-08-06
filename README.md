@@ -35,7 +35,7 @@ If the Space has gone to sleep and returns a 500 error, it can be restarted from
 The system is composed of an **orchestration layer** that routes between two agents:
 
 - **Information agent** — answers questions about hotel services, amenities, and policies using RAG over a Redis vector store.
-- **Rooms agent** — searches availability and creates bookings using LLM-generated SQL against a PostgreSQL database.
+- **Booking agent** — searches availability and creates bookings using LLM-generated SQL against a PostgreSQL database.
 
 ### Orchestration
 
@@ -56,9 +56,9 @@ The information agent follows a RAG pipeline:
 
 Embeddings are produced with OpenAI and stored in Redis via LlamaIndex.
 
-### Rooms Agent
+### Booking SQL Agent
 
-The rooms agent translates user requests into parameterised SQL queries against a PostgreSQL database (hosted on [Neon](https://neon.tech)). SQL guardrails enforce a table allowlist and cap query results at 50 rows before passing them to the LLM, limiting context size and cost.
+The booking agent translates user requests into parameterised SQL queries against a PostgreSQL database (hosted on [Neon](https://neon.tech)). SQL guardrails enforce a table allowlist and cap query results at 50 rows before passing them to the LLM, limiting context size and cost.
 
 > **Note:** The rooms database currently has no concept of user identity. There is a single shared pool of reservations with no per-guest ownership, so the agent cannot distinguish one user's bookings from another's.
 
@@ -70,13 +70,13 @@ The rooms agent translates user requests into parameterised SQL queries against 
 blue_horizon/          # Main application package
   agents/
     information/       # RAG-based information agent
-    rooms/             # SQL-based rooms/booking agent
+    booking/           # SQL-based rooms/booking agent
     orchestration/     # LangGraph router and manager
   api/
     app.py             # FastAPI application
   load_data/
     information_redis.py  # Loads FAQ/services/amenities into Redis
-    rooms_pgsql.py        # Loads room/availability data into PostgreSQL
+    booking_pgsql.py      # Loads room/availability data and rebuilds booking tables in PostgreSQL
   system_prompts/      # System prompt templates (.txt)
   config.py            # Pydantic configuration models
   neon.py              # Neon branch reset utility
@@ -145,7 +145,7 @@ All tunable parameters live in [`blue_horizon/app_config.toml`](blue_horizon/app
 |---------|----------|
 | `[orchestration]` | Router LLM, timeouts, retry backoff, concurrency limit |
 | `[info]` | Information agent LLM, embeddings model, Redis tuning, retrieval `top_k` |
-| `[rooms]` | Rooms agent LLM, SQL guardrails, DB pool settings |
+| `[booking]` | Booking agent LLM, SQL guardrails, DB pool settings |
 | `[load_data]` | Paths to the source data pickles |
 | `[neon]` | Neon project ID and branch name for the `/v1/reset` endpoint |
 
@@ -197,7 +197,7 @@ python -m blue_horizon.load_data.information_redis
 Populate PostgreSQL with room and availability data:
 
 ```bash
-python -m blue_horizon.load_data.rooms_pgsql
+python -m blue_horizon.load_data.booking_pgsql
 ```
 
 ### 2. Start the API
@@ -258,7 +258,7 @@ These metrics are assessed at each individual exchange and then averaged across 
 | Metric | Score |
 |--------|-------|
 | Route accuracy | 99.4% |
-| Rooms — no unexpected failure rate | 99.3% |
+| Booking — no unexpected failure rate | 99.3% |
 | RAG faithfulness | 97.5% |
 | RAG context recall | 100% |
 | RAG context precision | 82.8% |
@@ -274,15 +274,15 @@ These metrics are assessed at each individual exchange and then averaged across 
 |-------|-----|-----|-----|
 | Refuse | 2,602 | 6,920 | 19,894 |
 | Info | 8,591 | 29,268 | 46,123 |
-| Rooms | 11,090 | 33,329 | 41,692 |
+| Booking | 11,090 | 33,329 | 41,692 |
 
-Refuse requests resolve fastest (router only). Info requests go through the full RAG pipeline (parse → parallel retrieval → rerank → respond). Rooms requests run NL-to-SQL generation plus a live PostgreSQL query.
+Refuse requests resolve fastest (router only). Info requests go through the full RAG pipeline (parse → parallel retrieval → rerank → respond). Booking requests run NL-to-SQL generation plus a live PostgreSQL query.
 
 ---
 
 ## Stress Test
 
-A concurrent stress test simulated 50 simultaneous sessions with 5 booking operations each (250 operations total) against the rooms agent. All 250 operations completed without error. Afterwards, two database invariants were verified:
+A concurrent stress test simulated 50 simultaneous sessions with 5 booking operations each (250 operations total) against the booking agent. All 250 operations completed without error. Afterwards, two database invariants were verified:
 
 | Invariant | Result |
 |-----------|--------|

@@ -29,19 +29,19 @@ from eval._result_utils import (
     format_latency_table,
 )
 from eval._utils import configure_logging, json_safe
+from eval.booking_db_manager import reset_neon_branch
 from eval.config import MetadataConfig, load_eval_config
 from eval.evaluators import (
+    eval_booking_outcome_and_invariants,
     eval_info_expected_filters,
     eval_info_reference_subset,
     eval_injection_tripwires,
     eval_llm_rubrics,
     eval_rag_metrics_info_turns,
-    eval_rooms_outcome_and_invariants,
     eval_routing_accuracy,
     eval_turn_latency,
 )
 from eval.langsmith_target import run_example
-from eval.rooms_db_manager import reset_neon_branch
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, MutableMapping
@@ -210,23 +210,23 @@ def _load_dataset_examples(
     return loaded
 
 
-_ROOMS_TAGS: frozenset[str] = frozenset({"rooms", "mixed"})
+_BOOKING_TAGS: frozenset[str] = frozenset({"booking", "mixed"})
 
 
-def _has_rooms_cases(examples: Iterable[Example]) -> bool:
-    """Return ``True`` if any example carries a rooms-path tag.
+def _has_booking_cases(examples: Iterable[Example]) -> bool:
+    """Return ``True`` if any example carries a booking-path tag.
 
     Args:
         examples: Loaded LangSmith examples.
 
     Returns:
-        Whether at least one example has a ``"rooms"`` or ``"mixed"`` tag.
+        Whether at least one example has a ``"booking"`` or ``"mixed"`` tag.
 
     """
     for ex in examples:
         inputs = getattr(ex, "inputs", None) or {}
         tags = inputs.get("tags") or []
-        if _ROOMS_TAGS.intersection(tags):
+        if _BOOKING_TAGS.intersection(tags):
             return True
         turns = inputs.get("turns") or []
         if not isinstance(turns, list):
@@ -235,7 +235,7 @@ def _has_rooms_cases(examples: Iterable[Example]) -> bool:
             if not isinstance(turn, Mapping):
                 continue
             route = turn.get("expected_route")
-            if isinstance(route, str) and route == "rooms":
+            if isinstance(route, str) and route == "booking":
                 return True
     return False
 
@@ -243,7 +243,7 @@ def _has_rooms_cases(examples: Iterable[Example]) -> bool:
 async def _prepare_eval_database(cfg: EvalConfig) -> None:
     """Redirect the DB URL to the eval database and reset the Neon branch.
 
-    Applies any ``PGSQL_EVAL_DB_URL`` override so the rooms agent connects to
+    Applies any ``PGSQL_EVAL_DB_URL`` override so the booking agent connects to
     the eval database, then calls the Neon management API to restore the
     configured branch to its parent baseline.
 
@@ -270,7 +270,7 @@ def _override_eval_db_url(cfg: EvalConfig) -> None:
     If ``PGSQL_EVAL_DB_URL`` is present in *cfg*, this function writes its
     value to ``PGSQL_DB_URL`` and clears the ``load_app_config`` LRU cache so
     the next ``load_app_config()`` call picks up the overridden URL.  This
-    ensures the rooms agent inside ``OrchestrationManager`` connects to the
+    ensures the booking agent inside ``OrchestrationManager`` connects to the
     correct Neon branch database rather than the default application database.
 
     If ``PGSQL_EVAL_DB_URL`` is not set, this function is a no-op.
@@ -471,7 +471,7 @@ async def main() -> None:
     evaluators = [
         eval_routing_accuracy,
         partial(eval_injection_tripwires, cfg=cfg),
-        partial(eval_rooms_outcome_and_invariants, cfg=cfg),
+        partial(eval_booking_outcome_and_invariants, cfg=cfg),
         partial(eval_llm_rubrics, cfg=cfg),
         partial(eval_rag_metrics_info_turns, cfg=cfg),
         partial(eval_info_reference_subset, cfg=cfg),
@@ -483,7 +483,7 @@ async def main() -> None:
     )
 
     examples = _load_dataset_examples(dataset_name, cfg.experiment.limit)
-    if _has_rooms_cases(examples):
+    if _has_booking_cases(examples):
         await _prepare_eval_database(cfg)
 
     await _run_and_write_results(cfg, artifacts, examples, aevaluate_kwargs, started_at)

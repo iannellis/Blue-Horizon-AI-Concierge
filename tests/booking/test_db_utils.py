@@ -1,4 +1,4 @@
-"""Tests for rooms database utility helpers.
+"""Tests for booking database utility helpers.
 
 No real database connection is required. psycopg_pool.PoolTimeout is
 instantiated directly, and database metadata tests use async mocks.
@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from psycopg_pool import PoolTimeout
 
-from blue_horizon.agents.rooms.db_utils import (
+from blue_horizon.agents.booking.db_utils import (
     _is_transient_conn_error,
     _truncate_rows,
     _user_facing_db_message,
@@ -51,7 +51,7 @@ class TestFetchRoomsMetadata:
         conn.cursor.return_value = cursor
 
         with patch(
-            "blue_horizon.agents.rooms.db_utils.psycopg.AsyncConnection.connect",
+            "blue_horizon.agents.booking.db_utils.psycopg.AsyncConnection.connect",
             new=AsyncMock(return_value=conn),
         ):
             (

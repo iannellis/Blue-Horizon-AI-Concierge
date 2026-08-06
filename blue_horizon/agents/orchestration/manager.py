@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 _NODE_TO_STAGE: dict[str, tuple[str, str]] = {
     "router": ("routing", "Routing your request\u2026"),
     "info": ("search", "Searching hotel information\u2026"),
-    "rooms": ("rooms", "Processing your room request\u2026"),
+    "booking": ("booking", "Processing your room request\u2026"),
     "parse": ("parse", "Understanding your request\u2026"),
     "query_faq": ("search", "Searching hotel information\u2026"),
     "query_amenities": ("search", "Searching hotel information\u2026"),

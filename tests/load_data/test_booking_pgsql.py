@@ -1,4 +1,4 @@
-"""Tests for the rooms PostgreSQL loader helpers."""
+"""Tests for the booking PostgreSQL loader helpers."""
 
 # ruff: noqa: S101
 
@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Self
 
 import pandas as pd
 
-from blue_horizon.load_data.rooms_pgsql import (
+from blue_horizon.load_data.booking_pgsql import (
     ROOM_AVAIL_COLUMNS,
     ROOMS_COLUMNS,
     copy_dataframe_into_table,

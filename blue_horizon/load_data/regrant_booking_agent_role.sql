@@ -1,5 +1,5 @@
 -- Reapply least-privilege grants for the rooms runtime agent role after
--- `blue_horizon/load_data/rooms_pgsql.py` recreates the `rooms`,
+-- `blue_horizon/load_data/booking_pgsql.py` recreates the `rooms`,
 -- `room_availability`, and enum-type objects.
 --
 -- What it does:

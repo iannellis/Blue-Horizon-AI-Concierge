@@ -14,7 +14,7 @@ eval/
 ├── ci_check.py                # Baseline comparison tool for CI
 ├── create_langsmith_dataset.py# Upload JSONL cases to a LangSmith dataset
 ├── config.py                  # Pydantic config models and TOML loader
-├── rooms_db_manager.py        # Neon branch reset helper
+├── booking_db_manager.py      # Neon branch reset helper
 ├── _result_utils.py           # Result aggregation and latency utilities
 ├── _utils.py                  # Shared helpers (json_safe, truncate, …)
 ├── analyze_results.py         # Ad-hoc results analysis script
@@ -22,7 +22,7 @@ eval/
 ├── evaluators/                # One module per evaluator
 │   ├── _routing.py            # Route accuracy
 │   ├── _injection.py          # Injection tripwire detection
-│   ├── _rooms.py              # Rooms tool outcomes + DB invariants
+│   ├── _booking.py            # Rooms tool outcomes + DB invariants
 │   ├── _judge.py              # LLM-as-judge rubric scoring (Gemini)
 │   ├── _rag.py                # Ragas faithfulness / relevancy / precision / recall
 │   ├── _info_references.py    # Info agent reference subset pass rate
@@ -114,7 +114,7 @@ Logs are written to `eval/logs/<experiment_name>.log` and mirrored to stdout.
 ```
 run_experiment.py
 │
-├── rooms_db_manager.py  ← reset Neon branch to clean snapshot
+├── booking_db_manager.py  ← reset Neon branch to clean snapshot
 │
 └── aevaluate(run_example, evaluators=[...])
     │
@@ -217,9 +217,9 @@ Each line in a JSONL dataset file is a single JSON object:
 | Field | Required | Used by | Description |
 |---|---|---|---|
 | `case_id` | Yes | harness | Unique string identifier |
-| `tags` | No | harness | Labels used for filtering (`rooms`, `info`, `refuse`, `mixed`, `injection`) |
+| `tags` | No | harness | Labels used for filtering (`booking`, `info`, `refuse`, `mixed`, `injection`) |
 | `turns[].user` | Yes | harness | User message text sent to the agent |
-| `turns[].expected_route` | Yes | `eval_routing_accuracy` | Expected route: `rooms`, `info`, or `refuse` |
+| `turns[].expected_route` | Yes | `eval_routing_accuracy` | Expected route: `booking`, `info`, or `refuse` |
 | `turns[].expect_injection` | No | `eval_injection_tripwires` | `true` if this turn is a prompt-injection attempt |
 | `turns[].injection_grade_rubric` | No | `eval_llm_rubrics` | Rubric text for the LLM judge on injection turns |
 | `turns[].reference` | No | `eval_llm_rubrics`, `eval_info_reference_subset`, `eval_rag_metrics_info_turns` | Ground-truth or reference answer; used for judge scoring, reference-subset pass rate, and Ragas recall |
@@ -261,7 +261,7 @@ threshold, followed by per-route p50/p95/p99 latency stats. Exits with code
 |---|---|---|
 | `eval_routing_accuracy` | `route_accuracy` | Fraction of turns routed correctly |
 | `eval_injection_tripwires` | `injection_tripwire_pass` | All injection-labeled turns resisted |
-| `eval_rooms_outcome_and_invariants` | `rooms_no_unexpected_failure_rate`, `db_invariants_pass`, `db_no_double_booking`, `db_no_null_status`, `rooms_tool_errors` | Booking outcomes + live DB invariant checks |
+| `eval_booking_outcome_and_invariants` | `booking_no_unexpected_failure_rate`, `db_invariants_pass`, `db_no_double_booking`, `db_no_null_status`, `booking_tool_errors` | Booking outcomes + live DB invariant checks |
 | `eval_llm_rubrics` | `judge_consumer_quality`, `judge_injection_resistance`, `judge_grounding_faithfulness` | LLM-as-judge rubric scores (1–5) via Gemini |
 | `eval_rag_metrics_info_turns` | `rag_faithfulness_mean`, `rag_answer_relevancy_mean`, `rag_context_precision_mean`, `rag_context_recall_mean` | Ragas RAG quality metrics for info turns |
 | `eval_info_reference_subset` | `info_reference_subset_pass_rate` | Agent response covers expected reference items |
@@ -304,7 +304,7 @@ SKIP = {"route_confusions","judge_raw_json","info_reference_subset_failures",
         "route_turns","info_reference_subset_turns",
         "info_expected_filters_failures","info_expected_filters_turns",
         "info_expected_filters_per_turn","injection_turns_labeled",
-        "injection_turns_scanned","rooms_outcome_per_turn",
+        "injection_turns_scanned","booking_outcome_per_turn",
         "rag_per_turn","latency_per_turn"}
 
 scores = defaultdict(list)
@@ -329,7 +329,7 @@ EOF
 ## Stress test
 
 Simulates concurrent users performing BOOK / MODIFY / CANCEL operations
-against the rooms agent, then checks DB invariants (double-booking, null
+against the booking agent, then checks DB invariants (double-booking, null
 status) and reconciles expected vs actual state.
 
 ```bash

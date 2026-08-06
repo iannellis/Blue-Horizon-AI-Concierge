@@ -65,7 +65,7 @@ class TestNormalizeFeedback:
             _feedback_item("route_accuracy", score=1.0, comment="all good"),
             _feedback_item(
                 "latency_per_turn",
-                value='[{"route": "rooms", "latency_ms": 12.5}]',
+                value='[{"route": "booking", "latency_ms": 12.5}]',
             ),
         )
 
@@ -74,7 +74,7 @@ class TestNormalizeFeedback:
         assert normalized["route_accuracy"]["score"] == 1.0
         assert normalized["route_accuracy"]["comment"] == "all good"
         assert normalized["latency_per_turn"]["value"] == (
-            '[{"route": "rooms", "latency_ms": 12.5}]'
+            '[{"route": "booking", "latency_ms": 12.5}]'
         )
 
 
@@ -89,7 +89,7 @@ class TestSummarizeResults:
         expected_case_filter_pass_rate = 0.5
         expected_turn_route_accuracy = (1.0 * 2.0 + 0.5 * 4.0) / 6.0
         expected_turn_reference_pass_rate = (0.5 * 2.0 + 1.0 * 1.0) / 3.0
-        expected_turn_rooms_pass_rate = (0.0 + 1.0 + 1.0) / 3.0
+        expected_turn_booking_pass_rate = (0.0 + 1.0 + 1.0) / 3.0
         expected_turn_filter_pass_rate = (0.0 + 0.5 + 1.0) / 3.0
         expected_turn_rag_faithfulness = (0.4 + 0.6 + 1.0) / 3.0
         expected_turn_rag_precision = (0.5 + 0.25) / 2.0
@@ -98,9 +98,9 @@ class TestSummarizeResults:
                 "evaluators": _persisted_evaluators(
                     _feedback_item("route_accuracy", score=1.0),
                     _feedback_item("route_turns", score=2.0),
-                    _feedback_item("rooms_no_unexpected_failure_rate", score=0.5),
+                    _feedback_item("booking_no_unexpected_failure_rate", score=0.5),
                     _feedback_item(
-                        "rooms_outcome_per_turn",
+                        "booking_outcome_per_turn",
                         value=json.dumps(
                             [
                                 {"turn_index": 0, "pass_rate": 0.0},
@@ -150,9 +150,9 @@ class TestSummarizeResults:
                 "evaluators": _persisted_evaluators(
                     _feedback_item("route_accuracy", score=0.5),
                     _feedback_item("route_turns", score=4.0),
-                    _feedback_item("rooms_no_unexpected_failure_rate", score=1.0),
+                    _feedback_item("booking_no_unexpected_failure_rate", score=1.0),
                     _feedback_item(
-                        "rooms_outcome_per_turn",
+                        "booking_outcome_per_turn",
                         value=json.dumps(
                             [{"turn_index": 0, "pass_rate": 1.0}],
                         ),
@@ -216,8 +216,8 @@ class TestSummarizeResults:
         assert summary["turn_based_summary"]["info_reference_subset_pass_rate"] == (
             expected_turn_reference_pass_rate
         )
-        assert summary["turn_based_summary"]["rooms_no_unexpected_failure_rate"] == (
-            expected_turn_rooms_pass_rate
+        assert summary["turn_based_summary"]["booking_no_unexpected_failure_rate"] == (
+            expected_turn_booking_pass_rate
         )
         assert summary["turn_based_summary"]["info_expected_filters_pass_rate"] == (
             expected_turn_filter_pass_rate
@@ -239,7 +239,7 @@ class TestComputeLatencySummary:
         tmp_path: Path,
     ) -> None:
         """Latency quantiles are computed from persisted ``latency_per_turn`` data."""
-        expected_rooms_p50 = 15.0
+        expected_booking_p50 = 15.0
         expected_info_p95 = 5.0
         results_path = tmp_path / "results.jsonl"
         row = {
@@ -248,8 +248,8 @@ class TestComputeLatencySummary:
                     "latency_per_turn",
                     value=json.dumps(
                         [
-                            {"route": "rooms", "latency_ms": 10.0},
-                            {"route": "rooms", "latency_ms": 20.0},
+                            {"route": "booking", "latency_ms": 10.0},
+                            {"route": "booking", "latency_ms": 20.0},
                             {"route": "info", "latency_ms": 5.0},
                         ],
                     ),
@@ -260,5 +260,7 @@ class TestComputeLatencySummary:
 
         summary = compute_latency_summary(results_path)
 
-        assert summary["latency_quantiles_ms"]["rooms"]["p50_ms"] == expected_rooms_p50
+        assert (
+            summary["latency_quantiles_ms"]["booking"]["p50_ms"] == expected_booking_p50
+        )
         assert summary["latency_quantiles_ms"]["info"]["p95_ms"] == expected_info_p95

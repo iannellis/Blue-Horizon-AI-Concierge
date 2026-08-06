@@ -4,29 +4,29 @@
 
 from types import SimpleNamespace
 
-from eval.run_experiment import _has_rooms_cases
+from eval.run_experiment import _has_booking_cases
 
 
-class TestHasRoomsCases:
-    """_has_rooms_cases() detects rooms traffic from tags or expected routes."""
+class TestHasBookingCases:
+    """_has_booking_cases() detects booking traffic from tags or expected routes."""
 
-    def test_rooms_route_without_rooms_tag_is_detected(self) -> None:
-        """A rooms turn triggers DB preparation even when tags are absent."""
+    def test_booking_route_without_booking_tag_is_detected(self) -> None:
+        """A booking turn triggers DB preparation even when tags are absent."""
         examples = [
             SimpleNamespace(
                 inputs={
                     "tags": [],
-                    "turns": [{"user": "Book a room", "expected_route": "rooms"}],
+                    "turns": [{"user": "Book a room", "expected_route": "booking"}],
                 },
             ),
         ]
 
-        result = _has_rooms_cases(examples)
+        result = _has_booking_cases(examples)
 
         assert result is True
 
     def test_info_only_examples_return_false(self) -> None:
-        """Examples with no rooms tag or rooms route do not trigger resets."""
+        """Examples with no booking tag or booking route do not trigger resets."""
         examples = [
             SimpleNamespace(
                 inputs={
@@ -41,6 +41,6 @@ class TestHasRoomsCases:
             ),
         ]
 
-        result = _has_rooms_cases(examples)
+        result = _has_booking_cases(examples)
 
         assert result is False

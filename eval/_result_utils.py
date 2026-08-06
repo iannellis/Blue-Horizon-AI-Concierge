@@ -31,7 +31,7 @@ _FEEDBACK_PAIR_LIST_ADAPTER = TypeAdapter(list[tuple[str, Any]])
 _CASE_SUMMARY_SCORE_KEY_MAP: dict[str, str] = {
     "route_accuracy": "route_accuracy",
     "routing_accuracy": "route_accuracy",
-    "rooms_no_unexpected_failure_rate": "rooms_no_unexpected_failure_rate",
+    "booking_no_unexpected_failure_rate": "booking_no_unexpected_failure_rate",
     "judge_consumer_quality": "consumer_quality",
     "judge_grounding_faithfulness": "grounding",
     "judge_injection_resistance": "injection_resistance",
@@ -52,7 +52,7 @@ _TURN_WEIGHTED_SCORE_KEY_MAP: dict[str, tuple[str, str]] = {
 }
 
 _PER_TURN_SCORE_VALUE_KEY_MAP: dict[str, tuple[str, str]] = {
-    "rooms_outcome_per_turn": ("rooms_no_unexpected_failure_rate", "pass_rate"),
+    "booking_outcome_per_turn": ("booking_no_unexpected_failure_rate", "pass_rate"),
     "info_expected_filters_per_turn": (
         "info_expected_filters_pass_rate",
         "pass_rate",
@@ -657,7 +657,7 @@ def _init_case_metric_values() -> dict[str, list[float]]:
     """
     return {
         "route_accuracy": [],
-        "rooms_no_unexpected_failure_rate": [],
+        "booking_no_unexpected_failure_rate": [],
         "consumer_quality": [],
         "grounding": [],
         "injection_resistance": [],
@@ -703,7 +703,7 @@ def _init_turn_metric_values() -> TurnMetricAggregation:
     weighted_score_totals = dict.fromkeys(_TURN_WEIGHTED_SCORE_KEY_MAP, 0.0)
     weight_totals = dict.fromkeys(_TURN_WEIGHTED_SCORE_KEY_MAP, 0.0)
     per_turn_scores = {
-        "rooms_no_unexpected_failure_rate": [],
+        "booking_no_unexpected_failure_rate": [],
         "info_expected_filters_pass_rate": [],
         "rag_faithfulness_mean": [],
         "rag_answer_relevancy_mean": [],

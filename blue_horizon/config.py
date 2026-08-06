@@ -136,8 +136,8 @@ class InfoRagConfig(BaseModel):
     prompts: InfoPromptsConfig
 
 
-class RoomsLlmConfig(BaseModel):
-    """LLM settings for the rooms SQL agent.
+class BookingLlmConfig(BaseModel):
+    """LLM settings for the booking SQL agent.
 
     Attributes:
         model: Chat model identifier.
@@ -155,7 +155,7 @@ class RoomsLlmConfig(BaseModel):
     max_retries: int
 
 
-class RoomsAgentConfig(BaseModel):
+class BookingAgentConfig(BaseModel):
     """Agent prompt settings for SQL generation.
 
     Attributes:
@@ -168,12 +168,12 @@ class RoomsAgentConfig(BaseModel):
     top_k: int
 
 
-class RoomsPromptsConfig(BaseModel):
-    """Prompt template location for the rooms agent.
+class BookingPromptsConfig(BaseModel):
+    """Prompt template location for the booking agent.
 
     Attributes:
         folder: Directory relative to the package containing prompts.
-        system_prompt_filename: Filename of the rooms system prompt template.
+        system_prompt_filename: Filename of the booking system prompt template.
 
     """
 
@@ -209,7 +209,7 @@ class DbPoolConfig(BaseModel):
 
 
 class DbGuardrailsConfig(BaseModel):
-    """SQL guardrail settings for the rooms agent.
+    """SQL guardrail settings for the booking agent.
 
     Attributes:
         max_rows: Maximum number of rows returned to the model.
@@ -240,8 +240,8 @@ class DbRetryConfig(BaseModel):
     retry_writes_on_transient_errors: bool
 
 
-class RoomsDbConfig(BaseModel):
-    """Combined database configuration for the rooms agent.
+class BookingDbConfig(BaseModel):
+    """Combined database configuration for the booking agent.
 
     Note:
         Statement timeout and search_path are set at the database role level
@@ -263,8 +263,8 @@ class RoomsDbConfig(BaseModel):
     retry: DbRetryConfig
 
 
-class RoomsSqlConfig(BaseModel):
-    """Top-level configuration for the rooms SQL agent.
+class BookingSqlConfig(BaseModel):
+    """Top-level configuration for the booking SQL agent.
 
     Attributes:
         llm: Chat model configuration.
@@ -276,10 +276,10 @@ class RoomsSqlConfig(BaseModel):
 
     model_config = {"frozen": True}
 
-    llm: RoomsLlmConfig
-    agent: RoomsAgentConfig
-    prompts: RoomsPromptsConfig
-    db: RoomsDbConfig
+    llm: BookingLlmConfig
+    agent: BookingAgentConfig
+    prompts: BookingPromptsConfig
+    db: BookingDbConfig
 
 
 class LoadDataInfoConfig(BaseModel):
@@ -295,11 +295,11 @@ class LoadDataInfoConfig(BaseModel):
     data_path: Path
 
 
-class LoadDataRoomsConfig(BaseModel):
+class LoadDataBookingConfig(BaseModel):
     """Data ingestion configuration for PostgreSQL loaders.
 
     Attributes:
-        data_path: Relative path to the rooms pickle dataset folder.
+        data_path: Relative path to the booking pickle dataset folder.
 
     """
 
@@ -313,14 +313,14 @@ class LoadDataConfig(BaseModel):
 
     Attributes:
         information_redis: Redis data loader configuration.
-        rooms_pgsql: PostgreSQL data loader configuration.
+        booking_pgsql: PostgreSQL data loader configuration.
 
     """
 
     model_config = {"frozen": True}
 
     information_redis: LoadDataInfoConfig
-    rooms_pgsql: LoadDataRoomsConfig
+    booking_pgsql: LoadDataBookingConfig
 
 
 class OrchestrationLlmConfig(BaseModel):
@@ -350,7 +350,7 @@ class OrchestrationRuntimeConfig(BaseModel):
         init_retry_max_s: Maximum backoff between retries.
         router_timeout_s: Timeout for the router decision step.
         info_timeout_s: Timeout for the info agent node.
-        rooms_timeout_s: Timeout for the rooms agent node.
+        booking_timeout_s: Timeout for the booking agent node.
         llm_concurrency: Maximum number of concurrent LLM pipeline executions.
             Limits simultaneous ainvoke calls to prevent token-per-minute
             exhaustion under high concurrency.
@@ -363,7 +363,7 @@ class OrchestrationRuntimeConfig(BaseModel):
     init_retry_max_s: float
     router_timeout_s: float
     info_timeout_s: float
-    rooms_timeout_s: float
+    booking_timeout_s: float
     llm_concurrency: Annotated[int, Field(ge=1)] = 10
 
 
@@ -454,10 +454,11 @@ class AppConfig(BaseSettings):
     Attributes:
         orchestration: Router/orchestrator settings.
         info: Information agent settings.
-        rooms: Rooms SQL agent settings.
+        booking: Booking SQL agent settings.
         load_data: Data ingestion settings for local loaders.
         redis_url: Redis connection URL from environment.
-        pgsql_db_url: PostgreSQL connection URL from environment.
+        pgsql_root_db_url: PostgreSQL connection URL from environment for root DB.
+        pgsql_db_url: PostgreSQL connection URL from environment for branch DB.
         neon_api_key: Neon management API key.  When ``None``, the reset
             endpoint is disabled.
         neon: Neon branch configuration (project ID and branch name).
@@ -472,9 +473,10 @@ class AppConfig(BaseSettings):
 
     orchestration: OrchestrationConfig
     info: InfoRagConfig
-    rooms: RoomsSqlConfig
+    booking: BookingSqlConfig
     load_data: LoadDataConfig
     redis_url: str = Field(validation_alias="REDIS_URL")
+    pgsql_root_db_url: str = Field(validation_alias="PGSQL_ROOT_DB_URL")
     pgsql_db_url: str = Field(validation_alias="PGSQL_DB_URL")
     neon_api_key: str | None = Field(default=None, validation_alias="NEON_API_KEY")
     neon: NeonConfig

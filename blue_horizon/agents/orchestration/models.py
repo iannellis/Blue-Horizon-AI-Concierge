@@ -7,7 +7,7 @@ from typing import Literal, cast
 from langgraph.graph import MessagesState
 from pydantic import BaseModel, Field
 
-type RouteStep = Literal["info", "rooms", "refuse", "error"]
+type RouteStep = Literal["info", "booking", "refuse", "error"]
 
 
 class RouteDecision(BaseModel):

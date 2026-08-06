@@ -1,31 +1,31 @@
-"""Configuration loading and prompt rendering for the rooms SQL agent."""
+"""Configuration loading and prompt rendering for the booking SQL agent."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from blue_horizon.config import RoomsSqlConfig, load_app_config
+from blue_horizon.config import BookingSqlConfig, load_app_config
 
 if TYPE_CHECKING:
     from pathlib import Path
     from string import Template
 
 
-def load_rooms_config(config_path: Path | str | None = None) -> RoomsSqlConfig:
-    """Load the rooms SQL configuration section.
+def load_booking_config(config_path: Path | str | None = None) -> BookingSqlConfig:
+    """Load the booking SQL configuration section.
 
-    For when using the rooms agent standalone.
+    For when using the booking agent standalone.
 
     Args:
         config_path: Optional path to override the packaged config. If unset,
             ``app_config.toml`` from the package resources is used.
 
     Returns:
-        RoomsSqlConfig: Parsed configuration for the rooms agent.
+        BookingSqlConfig: Parsed configuration for the booking agent.
 
     """
     app_config = load_app_config(path=config_path)
-    return app_config.rooms
+    return app_config.booking
 
 
 def render_system_prompt(  # noqa: PLR0913
@@ -40,7 +40,7 @@ def render_system_prompt(  # noqa: PLR0913
     """Render the system prompt template with runtime substitutions.
 
     Args:
-        template: String Template loaded from the rooms prompt resource.
+        template: String Template loaded from the booking prompt resource.
         top_k: Maximum number of rooms to surface in the prompt.
         enum_values: Mapping of enum type name to list of valid values.
         basic_amenities: Distinct basic amenity values from the database.
@@ -61,5 +61,3 @@ def render_system_prompt(  # noqa: PLR0913
         room_status_type=enum_values.get("room_status_type", []),
         availability_status_type=enum_values.get("availability_status_type", []),
     )
-
-

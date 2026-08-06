@@ -26,7 +26,7 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
             "init_retry_max_s": 60.0,
             "router_timeout_s": 30.0,
             "info_timeout_s": 60,
-            "rooms_timeout_s": 60,
+            "booking_timeout_s": 60,
         },
         "prompts": {
             "folder": "system_prompts",
@@ -80,7 +80,7 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
             "parser_prompt_filename": "information_parser.txt",
         },
     },
-    "rooms": {
+    "booking": {
         "llm": {
             "model": "gpt-5-mini",
             "reasoning_effort": "low",
@@ -112,7 +112,7 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
     },
     "load_data": {
         "information_redis": {"data_path": str(EXPECTED_DATA_PATH)},
-        "rooms_pgsql": {"data_path": str(EXPECTED_DATA_PATH)},
+        "booking_pgsql": {"data_path": str(EXPECTED_DATA_PATH)},
     },
     "neon": {
         "project_id": "test-project-id",
@@ -132,8 +132,8 @@ def test_parse_app_config_from_dict() -> None:
     cfg = AppConfig.model_validate(SAMPLE_APP_CONFIG)
     assert cfg.orchestration.llm.model == "gpt-5-nano"
     assert cfg.info.embeddings.batch_size == EXPECTED_BATCH_SIZE
-    assert cfg.rooms.db.guardrails.max_rows == EXPECTED_MAX_ROWS
-    assert cfg.rooms.agent.top_k == EXPECTED_ROOMS_TOP_K
+    assert cfg.booking.db.guardrails.max_rows == EXPECTED_MAX_ROWS
+    assert cfg.booking.agent.top_k == EXPECTED_ROOMS_TOP_K
     assert cfg.load_data.information_redis.data_path == EXPECTED_DATA_PATH
     assert cfg.neon.branch_name == "Working"
     assert cfg.neon.lock_retry_attempts == EXPECTED_NEON_LOCK_RETRY_ATTEMPTS
@@ -150,8 +150,8 @@ def test_load_packaged_app_config() -> None:
     cfg = AppConfig.model_validate(data)
     assert cfg.orchestration.messages.unavailable.startswith("Sorry")
     assert cfg.info.redis.health_check_interval_s == EXPECTED_HEALTH_CHECK_INTERVAL_S
-    assert cfg.rooms.agent.top_k == EXPECTED_ROOMS_TOP_K
-    assert cfg.load_data.rooms_pgsql.data_path == EXPECTED_DATA_PATH
+    assert cfg.booking.agent.top_k == EXPECTED_ROOMS_TOP_K
+    assert cfg.load_data.booking_pgsql.data_path == EXPECTED_DATA_PATH
     assert cfg.neon.branch_name == "Working"
     assert cfg.neon.lock_retry_attempts == EXPECTED_NEON_LOCK_RETRY_ATTEMPTS
     assert cfg.neon.lock_retry_delay_s == EXPECTED_NEON_LOCK_RETRY_DELAY_S

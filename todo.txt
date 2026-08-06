@@ -1,2 +1,2 @@
-Database user with limited permissions
 Make sure notebooks are well-annotated.
+Test multiple items with different prices

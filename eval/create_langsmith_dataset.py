@@ -33,7 +33,7 @@ class TurnInputModel(BaseModel):
 
     Attributes:
         user: End-user utterance for the turn.
-        expected_route: Expected agent route for the turn (rooms/info/refuse).
+        expected_route: Expected agent route for the turn (booking/info/refuse).
         expect_injection: Whether the turn is an injection attempt.
 
     """
@@ -41,7 +41,7 @@ class TurnInputModel(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     user: str = Field(..., min_length=1)
-    expected_route: Literal["info", "rooms", "refuse"]
+    expected_route: Literal["info", "booking", "refuse"]
     expect_injection: bool = False
 
 
@@ -206,7 +206,7 @@ def main() -> None:
         client.create_examples(dataset_id=dataset_id, examples=batch)
         examples_uploaded += len(batch)
 
-    route_counts = {"info": 0, "rooms": 0, "refuse": 0}
+    route_counts = {"info": 0, "booking": 0, "refuse": 0}
     for case in cases:
         for turn in case.turns:
             route_counts[turn.expected_route] += 1
@@ -216,7 +216,7 @@ def main() -> None:
     print(  # noqa: T201
         "routes_seen="
         f"info:{route_counts['info']} "
-        f"rooms:{route_counts['rooms']} "
+        f"booking:{route_counts['booking']} "
         f"refuse:{route_counts['refuse']}",
     )
 

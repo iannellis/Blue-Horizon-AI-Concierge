@@ -45,7 +45,7 @@ _SKIP_KEYS: frozenset[str] = frozenset(
         "info_expected_filters_per_turn",
         "injection_turns_labeled",
         "injection_turns_scanned",
-        "rooms_outcome_per_turn",
+        "booking_outcome_per_turn",
         "rag_per_turn",
         "latency_per_turn",
     },

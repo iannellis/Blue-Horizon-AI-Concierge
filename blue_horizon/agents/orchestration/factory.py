@@ -168,10 +168,10 @@ class OrchestrationAgentFactory:
             resources.get_info_agent,
             cfg.orchestration.info_timeout_s,
         )
-        rooms_node = _make_dispatch_node(
-            "rooms",
-            resources.get_rooms_agent,
-            cfg.orchestration.rooms_timeout_s,
+        booking_node = _make_dispatch_node(
+            "booking",
+            resources.get_booking_agent,
+            cfg.orchestration.booking_timeout_s,
         )
 
         def refuse_node(state: ConversationState) -> dict[str, Any]:  # noqa: ARG001
@@ -280,7 +280,7 @@ class OrchestrationAgentFactory:
         graph = StateGraph(ConversationState)
         graph.add_node("router", router_node)
         graph.add_node("info", info_node)
-        graph.add_node("rooms", rooms_node)
+        graph.add_node("booking", booking_node)
         graph.add_node("refuse", refuse_node)
         graph.add_node("error", error_node)
         graph.add_node("finalize", finalize_node)
@@ -289,11 +289,16 @@ class OrchestrationAgentFactory:
         graph.add_conditional_edges(
             "router",
             _route_from_state,
-            {"info": "info", "rooms": "rooms", "refuse": "refuse", "error": "error"},
+            {
+                "info": "info",
+                "booking": "booking",
+                "refuse": "refuse",
+                "error": "error",
+            },
         )
 
         graph.add_edge("info", "finalize")
-        graph.add_edge("rooms", "finalize")
+        graph.add_edge("booking", "finalize")
         graph.add_edge("refuse", "finalize")
         graph.add_edge("error", "finalize")
         graph.add_edge("finalize", END)

@@ -6,7 +6,7 @@ All tests are pure: no I/O, no mocking.
 
 import pytest
 
-from blue_horizon.agents.rooms.guardrails import validate_sql
+from blue_horizon.agents.booking.guardrails import validate_sql
 
 # ---------------------------------------------------------------------------
 # Helpers

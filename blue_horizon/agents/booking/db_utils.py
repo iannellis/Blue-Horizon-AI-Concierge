@@ -1,4 +1,4 @@
-"""Database utilities for the rooms SQL agent.
+"""Database utilities for the booking SQL agent.
 
 Provides metadata fetching, backoff helpers, transient-error detection,
 row truncation, and user-facing error messages.

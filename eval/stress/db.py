@@ -20,7 +20,7 @@ from tenacity import (
     wait_exponential,
 )
 
-from eval.rooms_db_manager import reset_neon_branch
+from eval.booking_db_manager import reset_neon_branch
 
 if TYPE_CHECKING:
     from psycopg_pool import AsyncConnectionPool

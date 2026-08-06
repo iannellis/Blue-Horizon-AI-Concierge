@@ -1,4 +1,4 @@
-"""SQL guardrails for the rooms agent.
+"""SQL guardrails for the booking agent.
 
 Validates SQL statements against conservative security rules before execution
 using a PostgreSQL-aware AST parser. Supports room search plus booking-state
@@ -115,7 +115,7 @@ def _validate_statement_type(statement: exp.Expr) -> None:
         statement: Parsed SQL expression.
 
     Raises:
-        ValueError: If the parsed statement is not allowed for the rooms agent.
+        ValueError: If the parsed statement is not allowed for the booking agent.
 
     """
     if statement.key not in _ALLOWED_STATEMENT_KEYS:

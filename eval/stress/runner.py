@@ -18,10 +18,10 @@ from dotenv import load_dotenv
 
 from blue_horizon.config import load_app_config
 from eval._utils import configure_logging as _configure_logging
+from eval.booking_db_manager import open_schema_pool
 from eval.config import load_stress_config
 from eval.langsmith_target import OrchestrationManager
 from eval.langsmith_target._orchestration_utils import wait_for_orchestration_ready
-from eval.rooms_db_manager import open_schema_pool
 from eval.stress.artifacts import _build_summary, _write_artifacts
 from eval.stress.db import _check_invariants, _init_branch_and_targets
 from eval.stress.models import StressRunConfig
@@ -99,13 +99,13 @@ async def _start_orchestration(
     """Start the orchestrator and wait for readiness with a configured timeout.
 
     The ``db_url`` is forwarded to :class:`OrchestrationManager` so that the
-    rooms SQL agent writes to the same database that the reconciliation pool
+    booking SQL agent writes to the same database that the reconciliation pool
     reads from.  When ``PGSQL_EVAL_DB_URL`` is set, ``db_url`` is that eval
     URL; without it, ``db_url`` is ``PGSQL_DB_URL``.  Either way, agent
     writes and reconciliation queries share one database.
 
     Args:
-        db_url: Postgres connection URL used by the rooms SQL agent.
+        db_url: Postgres connection URL used by the booking SQL agent.
         ready_timeout_s: Maximum number of seconds to wait for readiness.
 
     Returns:

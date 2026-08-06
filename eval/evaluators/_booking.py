@@ -1,4 +1,4 @@
-"""Rooms evaluators for Blue Horizon hotel agent.
+"""Booking evaluators for Blue Horizon hotel agent.
 
 This module provides evaluators for rooms tool outcomes and database invariant
 checks, ensuring booking operations behave correctly.
@@ -36,7 +36,7 @@ _EVAL_POOL: AsyncConnectionPool[Any] | None = None
 
 
 @dataclass
-class RoomsOutcomeState:
+class BookingOutcomeState:
     """Mutable aggregation state for rooms outcome scoring.
 
     Attributes:
@@ -52,7 +52,7 @@ class RoomsOutcomeState:
     unexpected_fail_details: list[dict[str, Any]]
 
 
-async def eval_rooms_outcome_and_invariants(
+async def eval_booking_outcome_and_invariants(
     run: Run,
     example: Example,
     *,
@@ -72,26 +72,26 @@ async def eval_rooms_outcome_and_invariants(
     outputs = run.outputs or {}
     turn_outputs = outputs.get("turn_outputs") or []
     has_rooms = any(
-        t.get("route_pred") == "rooms" for t in turn_outputs if isinstance(t, dict)
+        t.get("route_pred") == "booking" for t in turn_outputs if isinstance(t, dict)
     )
     if not has_rooms:
         return [
             {
-                "key": "rooms_invariants_skipped",
+                "key": "booking_invariants_skipped",
                 "score": 1.0,
                 "comment": "No rooms turns detected.",
             },
         ]
 
-    outcome_metrics = _score_rooms_tool_outcomes(run, example, cfg)
-    invariants_results = await _check_rooms_db_invariants(cfg)
+    outcome_metrics = _score_booking_tool_outcomes(run, example, cfg)
+    invariants_results = await _check_booking_db_invariants(cfg)
     return [
         *outcome_metrics,
         *invariants_results,
     ]
 
 
-def _score_rooms_tool_outcomes(
+def _score_booking_tool_outcomes(
     run: Run,
     example: Example,
     cfg: EvalConfig,
@@ -112,14 +112,14 @@ def _score_rooms_tool_outcomes(
     turn_outputs = _iter_turn_outputs(run)
     example_turns = _get_example_turns(example)
 
-    state = RoomsOutcomeState(
-        counts=_init_rooms_outcome_counts(),
+    state = BookingOutcomeState(
+        counts=_init_booking_outcome_counts(),
         per_turn_outcomes=[],
         unexpected_fail_details=[],
     )
 
     for global_idx, turn in enumerate(turn_outputs):
-        if turn.get("route_pred") != "rooms":
+        if turn.get("route_pred") != "booking":
             continue
         tool_summary = turn.get("tool_summary") or []
         if not isinstance(tool_summary, list):
@@ -131,7 +131,7 @@ def _score_rooms_tool_outcomes(
             if isinstance(es, bool):
                 expected_success = es
 
-        _accumulate_rooms_turn(
+        _accumulate_booking_turn(
             turn_idx=global_idx,
             tool_summary=tool_summary,
             state=state,
@@ -144,17 +144,17 @@ def _score_rooms_tool_outcomes(
 
     metrics: list[dict[str, Any]] = [
         {
-            "key": "rooms_tool_errors",
+            "key": "booking_tool_errors",
             "score": tool_error_score,
             "comment": tool_error_comment,
         },
         {
-            "key": "rooms_no_unexpected_failure_rate",
+            "key": "booking_no_unexpected_failure_rate",
             "score": match_rate,
             "comment": match_comment,
         },
         {
-            "key": "rooms_rowcount_sanity",
+            "key": "booking_rowcount_sanity",
             "score": rowcount_score,
             "comment": rowcount_comment,
         },
@@ -164,7 +164,7 @@ def _score_rooms_tool_outcomes(
         if len(raw_per_turn) > limits.json_value_max:
             metrics.append(
                 {
-                    "key": "rooms_outcome_per_turn",
+                    "key": "booking_outcome_per_turn",
                     "value": json_value(
                         state.per_turn_outcomes,
                         max_len=limits.json_value_max,
@@ -173,13 +173,13 @@ def _score_rooms_tool_outcomes(
                 },
             )
         else:
-            metrics.append({"key": "rooms_outcome_per_turn", "value": raw_per_turn})
+            metrics.append({"key": "booking_outcome_per_turn", "value": raw_per_turn})
     if state.unexpected_fail_details:
         raw_failures = json_value(state.unexpected_fail_details)
         if len(raw_failures) > limits.json_value_max:
             metrics.append(
                 {
-                    "key": "rooms_unexpected_failures",
+                    "key": "booking_unexpected_failures",
                     "value": json_value(
                         state.unexpected_fail_details,
                         max_len=limits.json_value_max,
@@ -189,12 +189,12 @@ def _score_rooms_tool_outcomes(
             )
         else:
             metrics.append(
-                {"key": "rooms_unexpected_failures", "value": raw_failures},
+                {"key": "booking_unexpected_failures", "value": raw_failures},
             )
     return metrics
 
 
-def _init_rooms_outcome_counts() -> dict[str, int]:
+def _init_booking_outcome_counts() -> dict[str, int]:
     """Initialize counters used for rooms tool outcome scoring.
 
     Returns:
@@ -210,11 +210,11 @@ def _init_rooms_outcome_counts() -> dict[str, int]:
     }
 
 
-def _accumulate_rooms_turn(
+def _accumulate_booking_turn(
     *,
     turn_idx: int,
     tool_summary: list[object],
-    state: RoomsOutcomeState,
+    state: BookingOutcomeState,
     expected_success: bool | None,
 ) -> None:
     """Accumulate outcome counts for a single rooms turn.
@@ -437,7 +437,7 @@ def _format_tool_error_metric(counts: dict[str, int]) -> tuple[float, str]:
         counts: Counter dict accumulated across rooms turns.
 
     Returns:
-        Tuple of (score, comment) for rooms_tool_errors.
+        Tuple of (score, comment) for booking_tool_errors.
 
     """
     tool_errors = counts["tool_errors"]
@@ -453,7 +453,7 @@ def _format_outcome_match_metric(counts: dict[str, int]) -> tuple[float, str]:
         counts: Counter dict accumulated across rooms turns.
 
     Returns:
-        Tuple of (score, comment) for rooms_outcome_match_rate.
+        Tuple of (score, comment) for booking_no_unexpected_failure_rate.
 
     """
     matches = counts["outcome_matches"]
@@ -474,7 +474,7 @@ def _format_rowcount_metric(counts: dict[str, int]) -> tuple[float, str]:
         counts: Counter dict accumulated across rooms turns.
 
     Returns:
-        Tuple of (score, comment) for rooms_rowcount_sanity.
+        Tuple of (score, comment) for booking_rowcount_sanity.
 
     """
     run_sql_calls = counts["run_sql_calls"]
@@ -486,7 +486,7 @@ def _format_rowcount_metric(counts: dict[str, int]) -> tuple[float, str]:
     return score, comment
 
 
-async def _check_rooms_db_invariants(cfg: EvalConfig) -> list[dict[str, Any]]:
+async def _check_booking_db_invariants(cfg: EvalConfig) -> list[dict[str, Any]]:
     """Check rooms DB invariants in the public schema.
 
     Args:

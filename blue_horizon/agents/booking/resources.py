@@ -1,4 +1,4 @@
-"""Long-lived resources for the rooms SQL agent.
+"""Long-lived resources for the booking SQL agent.
 
 Owns the async connection pool, rendered system prompt, and SQL execution
 with guardrails and retry logic.
@@ -20,19 +20,19 @@ from tenacity import (
     wait_exponential,
 )
 
-from blue_horizon.agents.exceptions import OperationalError
-from blue_horizon.agents.prompt_utils import load_prompt_template
-from blue_horizon.agents.rooms.config import render_system_prompt
-from blue_horizon.agents.rooms.db_utils import (
+from blue_horizon.agents.booking.config import render_system_prompt
+from blue_horizon.agents.booking.db_utils import (
     _is_transient_conn_error,
     _truncate_rows,
     _user_facing_db_message,
     fetch_rooms_metadata,
 )
-from blue_horizon.agents.rooms.guardrails import _is_write_sql, validate_sql
+from blue_horizon.agents.booking.guardrails import _is_write_sql, validate_sql
+from blue_horizon.agents.exceptions import OperationalError
+from blue_horizon.agents.prompt_utils import load_prompt_template
 
 if TYPE_CHECKING:
-    from blue_horizon.config import RoomsSqlConfig
+    from blue_horizon.config import BookingSqlConfig
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +56,8 @@ def _sql_error_result(error: str) -> dict[str, Any]:
     }
 
 
-class RoomsSqlResources:
-    """Own long-lived resources for the rooms SQL agent.
+class BookingSqlResources:
+    """Own long-lived resources for the booking SQL agent.
 
     The pool, rendered system prompt, and helper methods live here.
 
@@ -77,14 +77,14 @@ class RoomsSqlResources:
         "system_prompt",
     )
 
-    config: RoomsSqlConfig
+    config: BookingSqlConfig
     pgsql_db_url: str
     pool: AsyncConnectionPool[Any] | None
     system_prompt: str | None
     _system_prompt_resource: str
 
-    def __init__(self, *, config: RoomsSqlConfig, pgsql_db_url: str) -> None:
-        """Construct rooms SQL resources.
+    def __init__(self, *, config: BookingSqlConfig, pgsql_db_url: str) -> None:
+        """Construct booking SQL resources.
 
         This initializer performs only lightweight setup and validation:
         - Store configuration and the database URL.
@@ -129,7 +129,7 @@ class RoomsSqlResources:
         except OperationalError:
             raise
         except Exception as exc:
-            msg = "Rooms SQL resources failed during startup"
+            msg = "Booking SQL resources failed during startup"
             raise OperationalError(msg) from exc
 
     def get_system_prompt(self) -> str:
@@ -144,7 +144,9 @@ class RoomsSqlResources:
 
         """
         if self.system_prompt is None:
-            msg = "RoomsSqlResources not initialized; call await startup_check() first"
+            msg = (
+                "BookingSqlResources not initialized; call await startup_check() first"
+            )
             raise RuntimeError(msg)
         return self.system_prompt
 
@@ -188,7 +190,9 @@ class RoomsSqlResources:
 
         """
         if self.pool is None:
-            msg = "RoomsSqlResources not initialized; call await startup_check() first"
+            msg = (
+                "BookingSqlResources not initialized; call await startup_check() first"
+            )
             raise RuntimeError(msg)
 
         try:
@@ -344,7 +348,7 @@ class RoomsSqlResources:
             )
             await pool.open()
         except Exception as exc:
-            msg = "Failed to open rooms DB pool"
+            msg = "Failed to open booking DB pool"
             raise OperationalError(msg) from exc
 
         self.pool = pool
@@ -375,5 +379,5 @@ class RoomsSqlResources:
             )
 
         except Exception as exc:
-            msg = "Failed to render rooms system prompt"
+            msg = "Failed to render booking system prompt"
             raise OperationalError(msg) from exc

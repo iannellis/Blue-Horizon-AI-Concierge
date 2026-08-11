@@ -12,12 +12,26 @@ from blue_horizon.agents.booking.config import (
 from blue_horizon.agents.booking.db_utils import ENUM_TYPES, fetch_rooms_metadata
 from blue_horizon.agents.booking.factory import BookingAgentFactory
 from blue_horizon.agents.booking.guardrails import validate_sql
+from blue_horizon.agents.booking.proposals import (
+    Proposal,
+    ProposalError,
+    ProposalNotFoundError,
+    ProposalOwnershipError,
+    ProposalStore,
+)
 from blue_horizon.agents.booking.resources import BookingSqlResources
+from blue_horizon.agents.booking.write_ops import BookingWriteError
 
 __all__ = [
     "ENUM_TYPES",
     "BookingAgentFactory",
     "BookingSqlResources",
+    "BookingWriteError",
+    "Proposal",
+    "ProposalError",
+    "ProposalNotFoundError",
+    "ProposalOwnershipError",
+    "ProposalStore",
     "fetch_rooms_metadata",
     "load_booking_config",
     "render_system_prompt",

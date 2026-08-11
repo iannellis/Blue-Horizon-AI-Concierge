@@ -1,9 +1,13 @@
 """SQL guardrails for the booking agent.
 
 Validates SQL statements against conservative security rules before execution
-using a PostgreSQL-aware AST parser. Supports room search plus booking-state
-updates while blocking unsupported statements, catalog access, and
-multi-statement input.
+using a PostgreSQL-aware AST parser. Supports read-only room search only;
+every write goes through dedicated write_ops functions the model never calls
+directly. This module is deliberately a redundant, code-level restatement of
+the database-level grants on the `bh_agent_ro` role (see
+`blue_horizon/load_data/regrant_booking_agent_role.sql`) rather than the sole
+enforcement mechanism: a bug here fails closed at the database instead of
+silently permitting a write.
 """
 
 from __future__ import annotations
@@ -23,8 +27,7 @@ _FORBIDDEN_FUNCTIONS: Final[set[str]] = {
     "pg_sleep",
 }
 _FORBIDDEN_SCHEMAS: Final[set[str]] = {"information_schema", "pg_catalog"}
-_ALLOWED_STATEMENT_KEYS: Final[set[str]] = {"select", "update"}
-_WRITE_STATEMENT_KEYS: Final[set[str]] = {"update"}
+_ALLOWED_STATEMENT_KEYS: Final[set[str]] = {"select"}
 
 
 def validate_sql(query: str, *, allow_only_hotel_tables: bool) -> None:
@@ -34,7 +37,7 @@ def validate_sql(query: str, *, allow_only_hotel_tables: bool) -> None:
       - Exactly one statement per call.
       - Blocks disallowed function calls such as ``pg_sleep`` and ``dblink``.
       - Blocks system-catalog access.
-      - Blocks all statement types other than ``SELECT`` and ``UPDATE``.
+      - Blocks all statement types other than ``SELECT``.
       - Optionally restricts table references to a hotel-table allowlist, with
         CTE names treated as allowed references.
 
@@ -53,25 +56,6 @@ def validate_sql(query: str, *, allow_only_hotel_tables: bool) -> None:
 
     if allow_only_hotel_tables:
         _validate_table_allowlist(statement)
-
-
-def _is_write_sql(query: str) -> bool:
-    """Determine whether the SQL statement is a write statement.
-
-    Args:
-        query: SQL statement.
-
-    Returns:
-        True when the parsed statement is ``UPDATE``. Returns False when
-        parsing fails or the statement is not write-oriented.
-
-    """
-    try:
-        statement = _parse_single_statement(query)
-    except ValueError:
-        return False
-
-    return statement.key in _WRITE_STATEMENT_KEYS
 
 
 def _parse_single_statement(query: str) -> exp.Expr:
@@ -119,7 +103,7 @@ def _validate_statement_type(statement: exp.Expr) -> None:
 
     """
     if statement.key not in _ALLOWED_STATEMENT_KEYS:
-        msg = "Only SELECT and UPDATE statements are allowed."
+        msg = "Only SELECT statements are allowed."
         raise ValueError(msg)
 
 

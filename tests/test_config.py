@@ -12,6 +12,7 @@ EXPECTED_MAX_ROWS = 50
 EXPECTED_HEALTH_CHECK_INTERVAL_S = 30
 EXPECTED_ROOMS_TOP_K = 4
 EXPECTED_DATA_PATH = Path("data/pandas")
+EXPECTED_PROPOSAL_TTL_S = 1800.0
 
 SAMPLE_APP_CONFIG: dict[str, object] = {
     "orchestration": {
@@ -106,9 +107,9 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
             "retry": {
                 "max_transient_retries": 1,
                 "transient_retry_backoff_s": 0.15,
-                "retry_writes_on_transient_errors": False,
             },
         },
+        "proposals": {"ttl_s": EXPECTED_PROPOSAL_TTL_S},
     },
     "load_data": {
         "information_redis": {"data_path": str(EXPECTED_DATA_PATH)},
@@ -116,7 +117,7 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
     },
     "neon": {
         "project_id": "test-project-id",
-        "branch_name": "Working",
+        "branch_name": "Production",
         "lock_retry_attempts": 8,
         "lock_retry_delay_s": 5.0,
     },
@@ -134,8 +135,9 @@ def test_parse_app_config_from_dict() -> None:
     assert cfg.info.embeddings.batch_size == EXPECTED_BATCH_SIZE
     assert cfg.booking.db.guardrails.max_rows == EXPECTED_MAX_ROWS
     assert cfg.booking.agent.top_k == EXPECTED_ROOMS_TOP_K
+    assert cfg.booking.proposals.ttl_s == EXPECTED_PROPOSAL_TTL_S
     assert cfg.load_data.information_redis.data_path == EXPECTED_DATA_PATH
-    assert cfg.neon.branch_name == "Working"
+    assert cfg.neon.branch_name == "Production"
     assert cfg.neon.lock_retry_attempts == EXPECTED_NEON_LOCK_RETRY_ATTEMPTS
     assert cfg.neon.lock_retry_delay_s == EXPECTED_NEON_LOCK_RETRY_DELAY_S
 
@@ -151,7 +153,8 @@ def test_load_packaged_app_config() -> None:
     assert cfg.orchestration.messages.unavailable.startswith("Sorry")
     assert cfg.info.redis.health_check_interval_s == EXPECTED_HEALTH_CHECK_INTERVAL_S
     assert cfg.booking.agent.top_k == EXPECTED_ROOMS_TOP_K
+    assert cfg.booking.proposals.ttl_s == EXPECTED_PROPOSAL_TTL_S
     assert cfg.load_data.booking_pgsql.data_path == EXPECTED_DATA_PATH
-    assert cfg.neon.branch_name == "Working"
+    assert cfg.neon.branch_name == "Production"
     assert cfg.neon.lock_retry_attempts == EXPECTED_NEON_LOCK_RETRY_ATTEMPTS
     assert cfg.neon.lock_retry_delay_s == EXPECTED_NEON_LOCK_RETRY_DELAY_S

@@ -104,12 +104,12 @@ class TestUnsupportedStatements:
     )
     def test_unsupported_statement_blocked(self, statement: str) -> None:
         """Non-runtime statements are always blocked regardless of table policy."""
-        with pytest.raises(ValueError, match="Only SELECT and UPDATE"):
+        with pytest.raises(ValueError, match="Only SELECT statements"):
             validate_sql(statement, allow_only_hotel_tables=_ANY)
 
     def test_ddl_keyword_case_insensitive(self) -> None:
         """Statement-type blocking is case-insensitive."""
-        with pytest.raises(ValueError, match="Only SELECT and UPDATE"):
+        with pytest.raises(ValueError, match="Only SELECT statements"):
             validate_sql("drop table rooms", allow_only_hotel_tables=_ANY)
 
 
@@ -197,6 +197,19 @@ class TestTableAllowlist:
         with pytest.raises(ValueError, match="Table not allowed"):
             validate_sql('SELECT * FROM "users"', allow_only_hotel_tables=_ALLOW)
 
+    @pytest.mark.parametrize("table", ["customers", "bookings", "booking_rooms"])
+    def test_write_ops_tables_blocked(self, table: str) -> None:
+        """The write-only tables are deliberately off the allowlist.
+
+        `run_sql` must never reach `customers`, `bookings`, or `booking_rooms`
+        -- guest identity and reservation state come only from `write_ops`
+        via the `bh_agent_rw` role, never from free-form SQL the model
+        authors.
+        """
+        query = f"SELECT * FROM {table}"  # noqa: S608
+        with pytest.raises(ValueError, match="Table not allowed"):
+            validate_sql(query, allow_only_hotel_tables=_ALLOW)
+
 
 # ---------------------------------------------------------------------------
 # CTE (WITH clause) handling
@@ -256,41 +269,6 @@ class TestCteHandling:
 
 
 # ---------------------------------------------------------------------------
-# Write SQL detection (internal helper via black-box)
-# ---------------------------------------------------------------------------
-
-
-class TestWriteSqlDetection:
-    """Only room-state updates are allowed as write operations."""
-
-    def test_insert_blocked_by_guardrails(self) -> None:
-        """INSERT is outside the rooms runtime contract."""
-        with pytest.raises(ValueError, match="Only SELECT and UPDATE"):
-            validate_sql(
-                (
-                    "INSERT INTO room_availability (room_id, date) "
-                    "VALUES (1, '2026-06-01')"
-                ),
-                allow_only_hotel_tables=_ALLOW,
-            )
-
-    def test_update_passes_guardrails(self) -> None:
-        """UPDATE is not blocked by validate_sql."""
-        validate_sql(
-            "UPDATE room_availability SET status = 'booked' WHERE id = 42",
-            allow_only_hotel_tables=_ALLOW,
-        )
-
-    def test_delete_blocked_by_guardrails(self) -> None:
-        """DELETE is outside the rooms runtime contract."""
-        with pytest.raises(ValueError, match="Only SELECT and UPDATE"):
-            validate_sql(
-                "DELETE FROM room_availability WHERE id = 99",
-                allow_only_hotel_tables=_ALLOW,
-            )
-
-
-# ---------------------------------------------------------------------------
 # Regression coverage for current regex limitations
 # ---------------------------------------------------------------------------
 
@@ -305,16 +283,22 @@ class TestRegexRegressionCoverage:
             allow_only_hotel_tables=_ALLOW,
         )
 
-    def test_update_only_allowed_table_passes(self) -> None:
-        """ONLY is valid PostgreSQL syntax and must not trip the allowlist."""
-        validate_sql(
-            "UPDATE ONLY room_availability SET status = 'Booked' WHERE room_id = 1",
-            allow_only_hotel_tables=_ALLOW,
-        )
+    def test_update_only_syntax_still_blocked_as_a_write(self) -> None:
+        """ONLY is valid PostgreSQL syntax, but UPDATE itself is now rejected.
 
-    def test_update_from_disallowed_table_blocked(self) -> None:
-        """UPDATE ... FROM tables must also be checked against the allowlist."""
-        with pytest.raises(ValueError, match="Table not allowed"):
+        Writes moved entirely to `write_ops` in Phase 1 -- `run_sql` is
+        read-only, so this now fails the statement-type check before the
+        allowlist is ever consulted.
+        """
+        with pytest.raises(ValueError, match="Only SELECT statements"):
+            validate_sql(
+                "UPDATE ONLY room_availability SET status = 'Booked' WHERE room_id = 1",
+                allow_only_hotel_tables=_ALLOW,
+            )
+
+    def test_update_from_disallowed_table_blocked_as_a_write(self) -> None:
+        """UPDATE is rejected as a write before its FROM clause is even checked."""
+        with pytest.raises(ValueError, match="Only SELECT statements"):
             validate_sql(
                 (
                     "UPDATE room_availability AS ra "

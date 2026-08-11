@@ -24,7 +24,7 @@ ENUM_TYPES: Final[tuple[str, ...]] = (
 
 
 async def fetch_rooms_metadata(
-    pgsql_db_url: str,
+    pgsql_rw_db_url: str,
 ) -> tuple[dict[str, list[str]], list[str], list[str], list[str]]:
     """Fetch database metadata used to fill the system prompt.
 
@@ -33,7 +33,7 @@ async def fetch_rooms_metadata(
       - Distinct values from array columns in the rooms table.
 
     Args:
-        pgsql_db_url: Database URL.
+        pgsql_rw_db_url: Database URL.
 
     Returns:
         Tuple of (enum_values, basic_amenities, additional_amenities, view_types).
@@ -46,7 +46,7 @@ async def fetch_rooms_metadata(
 
     try:
         async with (
-            await psycopg.AsyncConnection.connect(pgsql_db_url) as conn,
+            await psycopg.AsyncConnection.connect(pgsql_rw_db_url) as conn,
             conn.cursor() as cur,
         ):
             await cur.execute("SET search_path TO public;")

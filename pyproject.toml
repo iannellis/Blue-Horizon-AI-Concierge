@@ -51,3 +51,8 @@ lint = [
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+markers = [
+    "db_integration: needs a real Postgres reachable via PGSQL_RW_DB_URL/PGSQL_RO_DB_URL with the bh_agent_rw/bh_agent_ro roles granted (see blue_horizon/load_data/regrant_booking_agent_role.sql); tests/api/test_app.py additionally needs REDIS_URL and OPENAI_API_KEY to start the real app. Excluded from the default run; see .github/workflows/ci.yml's db-integration-tests job.",
+]

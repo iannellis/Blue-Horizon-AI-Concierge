@@ -10,7 +10,7 @@ from __future__ import annotations
 # ruff: noqa: S101
 import asyncio
 from typing import TYPE_CHECKING, Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 from langchain_core.messages import AIMessage
 
@@ -46,8 +46,13 @@ def _make_manager(
     manager = OrchestrationManager.__new__(OrchestrationManager)
     manager._agent = agent  # type: ignore[assignment]  # noqa: SLF001
     manager._llm_semaphore = asyncio.Semaphore(1)  # noqa: SLF001
+    manager._thread_customers = {}  # noqa: SLF001
     mock_resources = MagicMock()
     mock_resources.get_config.return_value.messages.unavailable = unavailable
+    # No proposal pending by default, so stage tests don't see a spurious
+    # "proposal" event mixed into their stage/done assertions.
+    booking_resources = mock_resources.get_booking_resources.return_value
+    booking_resources.proposals.get_pending_for_thread.return_value = None
     manager._resources = mock_resources  # noqa: SLF001
     return manager
 
@@ -63,6 +68,20 @@ async def _collect(gen: AsyncGenerator[dict[str, Any]]) -> list[dict[str, Any]]:
 
     """
     return [item async for item in gen]
+
+
+async def _run_stream(manager: OrchestrationManager) -> list[dict[str, Any]]:
+    """Drive ``ainvoke_stream`` with fixed thread/customer test identity.
+
+    Args:
+        manager: Manager under test.
+
+    Returns:
+        All yielded stream events collected into a list.
+
+    """
+    gen = manager.ainvoke_stream(thread_id="t1", user_text="hi", customer_id=1)
+    return await _collect(gen)
 
 
 async def _async_events(
@@ -101,20 +120,29 @@ def _mock_agent(
 ) -> MagicMock:
     """Build a mock compiled graph for ``ainvoke_stream`` tests.
 
+    Appends a synthetic ``on_chain_end`` event for the ``finalize`` node,
+    since ``ainvoke_stream`` reads its final response from that event's own
+    output rather than a separate ``aget_state()`` re-read (a post-hoc read
+    can return a different concurrent request's reply on the same
+    ``thread_id`` -- see ``OrchestrationManager.ainvoke_stream``'s docstring).
+
     Args:
-        events: Raw LangGraph events to yield from ``astream_events``.
-        ai_response: Plain-string content for the final AI message returned
-            by ``aget_state``.
+        events: Raw LangGraph events to yield from ``astream_events``, before
+            the synthetic finalize event.
+        ai_response: Plain-string content for the final AI message carried
+            by the synthetic finalize event's output.
 
     Returns:
         MagicMock configured to simulate a ``CompiledStateGraph``.
 
     """
     mock = MagicMock()
-    mock.astream_events.return_value = _async_events(events)
-    snapshot = MagicMock()
-    snapshot.values = {"messages": [AIMessage(content=ai_response)]}
-    mock.aget_state = AsyncMock(return_value=snapshot)
+    finalize_event = {
+        "event": "on_chain_end",
+        "metadata": {"langgraph_node": "finalize"},
+        "data": {"output": {"messages": [AIMessage(content=ai_response)]}},
+    }
+    mock.astream_events.return_value = _async_events([*events, finalize_event])
     return mock
 
 
@@ -129,26 +157,20 @@ class TestAinvokeStreamNotReady:
     def test_yields_single_done_event(self) -> None:
         """Only one event is emitted: a done event."""
         manager = _make_manager(agent=None)
-        events = asyncio.run(
-            _collect(manager.ainvoke_stream(thread_id="t1", user_text="hi")),
-        )
+        events = asyncio.run(_run_stream(manager))
         assert len(events) == 1
         assert events[0]["type"] == "done"
 
     def test_done_event_contains_unavailable_message(self) -> None:
         """The done event's response carries the configured unavailable message."""
         manager = _make_manager(agent=None, unavailable="Sorry, not ready.")
-        events = asyncio.run(
-            _collect(manager.ainvoke_stream(thread_id="t1", user_text="hi")),
-        )
+        events = asyncio.run(_run_stream(manager))
         assert events[0]["response"] == "Sorry, not ready."
 
     def test_no_stage_events_emitted(self) -> None:
         """No stage events are emitted before the done event."""
         manager = _make_manager(agent=None)
-        events = asyncio.run(
-            _collect(manager.ainvoke_stream(thread_id="t1", user_text="hi")),
-        )
+        events = asyncio.run(_run_stream(manager))
         assert all(e["type"] != "stage" for e in events)
 
 
@@ -163,9 +185,7 @@ class TestAinvokeStreamStages:
     def test_known_node_emits_stage_event(self) -> None:
         """An on_chain_start for a known node emits one stage event."""
         manager = _make_manager(agent=_mock_agent([_chain_start("router")]))
-        events = asyncio.run(
-            _collect(manager.ainvoke_stream(thread_id="t1", user_text="hi")),
-        )
+        events = asyncio.run(_run_stream(manager))
         stage_events = [e for e in events if e["type"] == "stage"]
         assert len(stage_events) == 1
         assert stage_events[0]["label"] == "Routing your request\u2026"
@@ -173,9 +193,7 @@ class TestAinvokeStreamStages:
     def test_unknown_node_emits_no_stage_event(self) -> None:
         """An on_chain_start for an unrecognised node is silently ignored."""
         manager = _make_manager(agent=_mock_agent([_chain_start("finalize")]))
-        events = asyncio.run(
-            _collect(manager.ainvoke_stream(thread_id="t1", user_text="hi")),
-        )
+        events = asyncio.run(_run_stream(manager))
         stage_events = [e for e in events if e["type"] == "stage"]
         assert len(stage_events) == 0
 
@@ -188,9 +206,7 @@ class TestAinvokeStreamStages:
                 _chain_start("query_services"),
             ]),
         )
-        events = asyncio.run(
-            _collect(manager.ainvoke_stream(thread_id="t1", user_text="hi")),
-        )
+        events = asyncio.run(_run_stream(manager))
         stage_events = [e for e in events if e["type"] == "stage"]
         assert len(stage_events) == 1
         assert stage_events[0]["label"] == "Searching hotel information\u2026"
@@ -203,9 +219,7 @@ class TestAinvokeStreamStages:
                 _chain_start("query_faq"),
             ]),
         )
-        events = asyncio.run(
-            _collect(manager.ainvoke_stream(thread_id="t1", user_text="hi")),
-        )
+        events = asyncio.run(_run_stream(manager))
         stage_events = [e for e in events if e["type"] == "stage"]
         assert len(stage_events) == 1
 
@@ -218,18 +232,14 @@ class TestAinvokeStreamStages:
                 {"event": "on_chain_end", "metadata": meta},
             ]),
         )
-        events = asyncio.run(
-            _collect(manager.ainvoke_stream(thread_id="t1", user_text="hi")),
-        )
+        events = asyncio.run(_run_stream(manager))
         stage_events = [e for e in events if e["type"] == "stage"]
         assert len(stage_events) == 0
 
     def test_done_event_contains_final_ai_response(self) -> None:
         """The done event carries the last AI message from the graph state."""
         manager = _make_manager(agent=_mock_agent([], ai_response="Final answer."))
-        events = asyncio.run(
-            _collect(manager.ainvoke_stream(thread_id="t1", user_text="hi")),
-        )
+        events = asyncio.run(_run_stream(manager))
         done_events = [e for e in events if e["type"] == "done"]
         assert len(done_events) == 1
         assert done_events[0]["response"] == "Final answer."
@@ -239,9 +249,7 @@ class TestAinvokeStreamStages:
         manager = _make_manager(
             agent=_mock_agent([_chain_start("router"), _chain_start("booking")]),
         )
-        events = asyncio.run(
-            _collect(manager.ainvoke_stream(thread_id="t1", user_text="hi")),
-        )
+        events = asyncio.run(_run_stream(manager))
         assert events[-1]["type"] == "done"
 
     def test_full_info_path_stage_sequence(self) -> None:
@@ -258,9 +266,7 @@ class TestAinvokeStreamStages:
                 _chain_start("respond"),
             ]),
         )
-        events = asyncio.run(
-            _collect(manager.ainvoke_stream(thread_id="t1", user_text="hi")),
-        )
+        events = asyncio.run(_run_stream(manager))
         stage_labels = [e["label"] for e in events if e["type"] == "stage"]
         # routing, search (once), parse, rerank, respond = 5 unique stage keys
         assert len(stage_labels) == 5  # noqa: PLR2004

@@ -19,7 +19,7 @@ from tenacity import (
     wait_exponential,
 )
 
-from blue_horizon.agents.exceptions import OperationalError
+from blue_horizon.agents.exceptions import OperationalError, ThreadCustomerMismatchError
 from blue_horizon.agents.orchestration.factory import OrchestrationAgentFactory
 from blue_horizon.agents.orchestration.formatting import format_chat_response
 from blue_horizon.agents.orchestration.resources import OrchestrationResources
@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
     from tenacity import RetryCallState
 
+    from blue_horizon.agents.booking.resources import BookingSqlResources
     from blue_horizon.agents.orchestration.models import ConversationState
 
 # Maps LangGraph node names to (stage_key, human-readable label) pairs.
@@ -73,6 +74,7 @@ class OrchestrationManager:
         "_lock",
         "_resources",
         "_stop_event",
+        "_thread_customers",
     )
 
     _resources: OrchestrationResources
@@ -82,19 +84,34 @@ class OrchestrationManager:
     _llm_semaphore: asyncio.Semaphore
     _lock: asyncio.Lock
     _stop_event: asyncio.Event
+    _thread_customers: dict[str, int]
 
-    def __init__(self, *, pgsql_db_url: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        pgsql_rw_db_url: str | None = None,
+        pgsql_ro_db_url: str | None = None,
+    ) -> None:
         """Initialize the orchestration manager.
 
         Args:
-            pgsql_db_url: Optional database URL override forwarded to the rooms
-                SQL agent.  When set, the rooms agent uses this URL instead of
-                the ``PGSQL_DB_URL`` application setting.  Use this in test
-                harnesses that operate against a separate evaluation database so
-                that the agent's writes are visible to the reconciliation pool.
+            pgsql_rw_db_url: Optional read-write database URL override forwarded
+                to the booking SQL agent (`bh_agent_rw`).  When set, the
+                booking agent uses this URL instead of the ``PGSQL_RW_DB_URL``
+                application setting.  Use this in test harnesses that operate
+                against a separate evaluation database so that the agent's
+                writes are visible to the reconciliation pool.
+            pgsql_ro_db_url: Optional read-only database URL override
+                forwarded to the booking SQL agent (`bh_agent_ro`), used
+                exclusively by `run_sql`.  When overriding `pgsql_rw_db_url` for
+                a test harness, this must be overridden alongside it and
+                point at the same database.
 
         """
-        self._resources = OrchestrationResources(pgsql_db_url=pgsql_db_url)
+        self._resources = OrchestrationResources(
+            pgsql_rw_db_url=pgsql_rw_db_url,
+            pgsql_ro_db_url=pgsql_ro_db_url,
+        )
         self._factory = OrchestrationAgentFactory(resources=self._resources)
 
         llm_concurrency = self._resources.get_config().orchestration.llm_concurrency
@@ -103,6 +120,7 @@ class OrchestrationManager:
         self._init_task = None
         self._lock = asyncio.Lock()
         self._stop_event = asyncio.Event()
+        self._thread_customers = {}
 
     @property
     def is_ready(self) -> bool:
@@ -142,11 +160,71 @@ class OrchestrationManager:
         except Exception:  # noqa: BLE001
             logger.warning("Failed to close orchestration resources", exc_info=True)
 
-    async def ainvoke(
+    def bind_thread_customer(self, *, thread_id: str, customer_id: int) -> None:
+        """Bind a thread to whichever guest first uses it; reject mismatches.
+
+        Args:
+            thread_id: Conversation identifier.
+            customer_id: Guest identity presented for this request.
+
+        Raises:
+            ThreadCustomerMismatchError: If `thread_id` is already bound to a
+                different `customer_id`.
+
+        """
+        bound = self._thread_customers.get(thread_id)
+        if bound is None:
+            self._thread_customers[thread_id] = customer_id
+        elif bound != customer_id:
+            msg = f"thread_id {thread_id!r} is already bound to a different guest."
+            raise ThreadCustomerMismatchError(msg)
+
+    def get_booking_resources(self) -> BookingSqlResources:
+        """Expose booking resources for the confirm/dismiss/bookings endpoints.
+
+        Returns:
+            BookingSqlResources: Shared proposal store and write pool.
+
+        """
+        return self._resources.get_booking_resources()
+
+    async def append_assistant_message(self, *, thread_id: str, text: str) -> None:
+        """Append an app-authored assistant message to a thread's history.
+
+        Used by the confirm/dismiss endpoints so the agent's next turn knows
+        what happened -- the model is never the one reporting it.
+
+        Args:
+            thread_id: Conversation thread to update.
+            text: App-authored message text (e.g., a confirmation receipt).
+
+        """
+        if self._agent is None:
+            return
+        config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+        await self._agent.aupdate_state(
+            config,
+            {"messages": [AIMessage(content=[{"type": "text", "text": text}])]},
+        )
+
+    def clear_conversation_state(self) -> None:
+        """Clear all in-process conversation state after a database reset.
+
+        Clears the thread/customer registry in addition to delegating to
+        `OrchestrationResources.clear_conversation_state()` (proposals and
+        checkpointer). See that method's docstring for why this is not the
+        same thing as the failed-init retry loop's `reset_runtime_state()`.
+
+        """
+        self._thread_customers.clear()
+        self._resources.clear_conversation_state()
+
+    async def ainvoke(  # noqa: PLR0913
         self,
         *,
         thread_id: str,
         user_text: str,
+        customer_id: int,
         callbacks: list[Any] | None = None,
         tags: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
@@ -159,10 +237,16 @@ class OrchestrationManager:
             - Otherwise, sends only the new user message. The MemorySaver
               checkpointer loads prior history for the given thread_id and
               persists the updated history after the run.
+            - Any proposal still pending for this thread is invalidated before
+              the turn runs: a dialog must never be confirmable once the
+              conversation has moved past it.
 
         Args:
             thread_id: Conversation identifier. Same id => shared history.
             user_text: Latest user message.
+            customer_id: Server-resolved guest identity, injected into tool
+                calls via `config["configurable"]["customer_id"]` and never
+                exposed to the model directly.
             callbacks: LangChain/LangGraph callbacks (e.g., LangSmith tracing hooks)
                 to attach to the run.
             tags: Optional LangSmith tags associated with the run.
@@ -172,14 +256,24 @@ class OrchestrationManager:
         Returns:
             Final state patch from the orchestration agent.
 
+        Raises:
+            ThreadCustomerMismatchError: If `thread_id` is already bound to a
+                different `customer_id`.
+
         """
+        self.bind_thread_customer(thread_id=thread_id, customer_id=customer_id)
+
         if self._agent is None:
             msg = self.get_unavailable_message()
             return {"messages": [AIMessage(content=[{"type": "text", "text": msg}])]}
 
+        self.get_booking_resources().proposals.invalidate_thread(thread_id)
+
         state: ConversationState = {"messages": [HumanMessage(content=user_text)]}
 
-        config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+        config: RunnableConfig = {
+            "configurable": {"thread_id": thread_id, "customer_id": customer_id},
+        }
         if callbacks is not None:
             config["callbacks"] = callbacks
         if tags is not None:
@@ -201,14 +295,18 @@ class OrchestrationManager:
         *,
         thread_id: str,
         user_text: str,
+        customer_id: int,
     ) -> AsyncGenerator[dict[str, Any]]:
-        """Stream stage events followed by the final assistant response.
+        """Stream stage events, an optional proposal, then the final response.
 
-        Yields stage-progress events as the graph executes each node, then a
-        single ``done`` event once the graph has finished.
+        Yields stage-progress events as the graph executes each node, an
+        optional ``proposal`` event if the turn created one, then a single
+        ``done`` event once the graph has finished.
 
         Stage events have the form ``{"type": "stage", "label": str}``.
-        The done event has the form ``{"type": "done", "response": str}``.
+        The proposal event has the form ``{"type": "proposal", "proposal_id":
+        str, "action": str, "summary": dict}``. The done event has the form
+        ``{"type": "done", "response": str}``.
 
         Multiple graph nodes that share the same conceptual stage (e.g.
         ``query_faq``, ``query_amenities``, ``query_services``) are
@@ -217,41 +315,67 @@ class OrchestrationManager:
         Args:
             thread_id: Conversation identifier. Same id => shared history.
             user_text: Latest user message.
+            customer_id: Server-resolved guest identity, injected into tool
+                calls and never exposed to the model directly.
 
         Yields:
-            Stage dicts ``{"type": "stage", "label": str}`` as each graph
-            node starts, followed by a done dict
-            ``{"type": "done", "response": str}`` when the graph completes.
+            Stage, proposal, and done event dicts, in that order.
+
+        Raises:
+            ThreadCustomerMismatchError: If `thread_id` is already bound to a
+                different `customer_id`.
 
         """
+        self.bind_thread_customer(thread_id=thread_id, customer_id=customer_id)
+
         if self._agent is None:
             yield {"type": "done", "response": self.get_unavailable_message()}
             return
 
+        booking_resources = self.get_booking_resources()
+        booking_resources.proposals.invalidate_thread(thread_id)
+
         state: ConversationState = {"messages": [HumanMessage(content=user_text)]}
-        config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+        config: RunnableConfig = {
+            "configurable": {"thread_id": thread_id, "customer_id": customer_id},
+        }
 
         emitted_stages: set[str] = set()
+        finalize_output: dict[str, Any] | None = None
         async with self._llm_semaphore:
             async for event in self._agent.astream_events(
                 state,
                 config=config,
                 version="v2",
             ):
-                if event.get("event") != "on_chain_start":
-                    continue
                 node_name: str = event.get("metadata", {}).get("langgraph_node", "")
-                if not node_name or node_name not in _NODE_TO_STAGE:
-                    continue
-                stage_key, label = _NODE_TO_STAGE[node_name]
-                if stage_key not in emitted_stages:
-                    emitted_stages.add(stage_key)
-                    yield {"type": "stage", "label": label}
+                event_type = event.get("event")
 
-        final_state = await self._agent.aget_state(config)
-        response_dict = format_chat_response(
-            cast("dict[str, Any]", final_state.values),
-        )
+                if event_type == "on_chain_start" and node_name in _NODE_TO_STAGE:
+                    stage_key, label = _NODE_TO_STAGE[node_name]
+                    if stage_key not in emitted_stages:
+                        emitted_stages.add(stage_key)
+                        yield {"type": "stage", "label": label}
+
+                elif event_type == "on_chain_end" and node_name == "finalize":
+                    # Captured directly from this run's own event stream
+                    # rather than a post-hoc aget_state() re-read, which
+                    # would return whatever the checkpoint currently holds
+                    # and could hand two concurrent requests on one
+                    # thread_id each other's reply.
+                    finalize_output = cast("dict[str, Any]", event["data"]["output"])
+
+        response_dict = format_chat_response(finalize_output or {})
+
+        proposal = booking_resources.proposals.get_pending_for_thread(thread_id)
+        if proposal is not None:
+            yield {
+                "type": "proposal",
+                "proposal_id": proposal.proposal_id,
+                "action": proposal.action,
+                "summary": proposal.summary,
+            }
+
         ai_messages = [m for m in response_dict["messages"] if m["type"] == "ai"]
         response_text = (
             ai_messages[-1]["content"] if ai_messages else "No response received."

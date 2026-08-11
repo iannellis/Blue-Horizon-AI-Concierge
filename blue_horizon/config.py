@@ -229,7 +229,6 @@ class DbRetryConfig(BaseModel):
     Attributes:
         max_transient_retries: Retry count after the initial attempt.
         transient_retry_backoff_s: Base backoff (seconds) per retry.
-        retry_writes_on_transient_errors: Whether writes may be retried.
 
     """
 
@@ -237,7 +236,21 @@ class DbRetryConfig(BaseModel):
 
     max_transient_retries: int
     transient_retry_backoff_s: float
-    retry_writes_on_transient_errors: bool
+
+
+class BookingProposalsConfig(BaseModel):
+    """Configuration for the human-in-the-loop proposal store.
+
+    Attributes:
+        ttl_s: Seconds after which an unconfirmed proposal is purged from the
+            in-process store. A proposal reserves no inventory, so this
+            bounds the store's size rather than releasing held rooms.
+
+    """
+
+    model_config = {"frozen": True}
+
+    ttl_s: float
 
 
 class BookingDbConfig(BaseModel):
@@ -271,6 +284,7 @@ class BookingSqlConfig(BaseModel):
         agent: Prompt metadata.
         prompts: Prompt template paths.
         db: Database behavior configuration.
+        proposals: Human-in-the-loop proposal store configuration.
 
     """
 
@@ -280,6 +294,7 @@ class BookingSqlConfig(BaseModel):
     agent: BookingAgentConfig
     prompts: BookingPromptsConfig
     db: BookingDbConfig
+    proposals: BookingProposalsConfig
 
 
 class LoadDataInfoConfig(BaseModel):
@@ -460,7 +475,13 @@ class AppConfig(BaseSettings):
         pgsql_root_db_url: PostgreSQL connection URL from environment for root
             DB.  Optional; ``None`` when unset (e.g. environments that never
             run the root-DB data loaders).
-        pgsql_db_url: PostgreSQL connection URL from environment for branch DB.
+        pgsql_rw_db_url: PostgreSQL connection URL from environment
+            (``PGSQL_RW_DB_URL``) for branch DB, authenticated as the
+            read-write booking agent role (``bh_agent_rw``). Used by
+            write_ops, list_bookings, and the customers/bookings endpoints.
+        pgsql_ro_db_url: PostgreSQL connection URL from environment,
+            authenticated as the read-only booking agent role (``bh_agent_ro``).
+            Used exclusively by the `run_sql` tool the model can reach.
         neon_api_key: Neon management API key.  When ``None``, the reset
             endpoint is disabled.
         neon: Neon branch configuration (project ID and branch name).
@@ -481,7 +502,8 @@ class AppConfig(BaseSettings):
     pgsql_root_db_url: str | None = Field(
         default=None, validation_alias="PGSQL_ROOT_DB_URL",
     )
-    pgsql_db_url: str = Field(validation_alias="PGSQL_DB_URL")
+    pgsql_rw_db_url: str = Field(validation_alias="PGSQL_RW_DB_URL")
+    pgsql_ro_db_url: str = Field(validation_alias="PGSQL_RO_DB_URL")
     neon_api_key: str | None = Field(default=None, validation_alias="NEON_API_KEY")
     neon: NeonConfig
 

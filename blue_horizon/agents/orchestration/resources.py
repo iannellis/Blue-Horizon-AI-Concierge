@@ -8,7 +8,11 @@ from typing import TYPE_CHECKING, cast
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
 
-from blue_horizon.agents.booking import BookingAgentFactory, BookingSqlResources
+from blue_horizon.agents.booking import (
+    BookingAgentFactory,
+    BookingSqlResources,
+    ProposalStore,
+)
 from blue_horizon.agents.exceptions import OperationalError
 from blue_horizon.agents.information import InfoAgentFactory, InfoRagResources
 from blue_horizon.agents.orchestration.models import RouteDecision
@@ -80,7 +84,12 @@ class OrchestrationResources:
     _router: Runnable[list[BaseMessage], RouteDecision]
     _checkpointer: MemorySaver
 
-    def __init__(self, *, pgsql_db_url: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        pgsql_rw_db_url: str | None = None,
+        pgsql_ro_db_url: str | None = None,
+    ) -> None:
         """Initialize orchestration resources.
 
         This constructor performs only lightweight work: it reads the orchestration
@@ -90,12 +99,19 @@ class OrchestrationResources:
         Heavy work (connectivity checks, agent compilation) occurs in startup_check().
 
         Args:
-            pgsql_db_url: Optional database URL override for the booking SQL agent.
-                When provided, takes precedence over the ``PGSQL_DB_URL`` value
-                from the application configuration.  Pass this when the caller
-                (e.g., the stress-test harness) operates against a separate
-                evaluation database and needs the agent to write to that same
-                database so that reconciliation queries see the changes.
+            pgsql_rw_db_url: Optional read-write database URL override for the
+                booking SQL agent (`bh_agent_rw`).  When provided, takes
+                precedence over the ``PGSQL_RW_DB_URL`` value from the
+                application configuration.  Pass this when the caller (e.g.,
+                the eval/stress harnesses) operates against a separate
+                database and needs the agent to write to that same database
+                so that reconciliation queries see the changes.
+            pgsql_ro_db_url: Optional read-only database URL override for the
+                booking SQL agent (`bh_agent_ro`), used exclusively by
+                `run_sql`.  When provided, takes precedence over the
+                ``PGSQL_RO_DB_URL`` application configuration value.  Must be
+                overridden together with `pgsql_rw_db_url`: the two must point
+                at the same database, just different roles.
 
         Raises:
             RuntimeError: If configuration or prompt resolution fails.
@@ -122,10 +138,10 @@ class OrchestrationResources:
         )
         self._info_agent = None
 
-        booking_db_url = pgsql_db_url or app_config.pgsql_db_url
         self._booking_config = app_config.booking
         self._booking_resources = BookingSqlResources(
-            pgsql_db_url=booking_db_url,
+            pgsql_rw_db_url=pgsql_rw_db_url or app_config.pgsql_rw_db_url,
+            pgsql_ro_db_url=pgsql_ro_db_url or app_config.pgsql_ro_db_url,
             config=self._booking_config,
         )
         self._booking_agent = None
@@ -196,6 +212,37 @@ class OrchestrationResources:
         self._system_prompt = None
         self._info_agent = None
         self._booking_agent = None
+
+    def clear_conversation_state(self) -> None:
+        """Clear all in-process conversation state after a database reset.
+
+        A ``POST /v1/reset`` restores the Neon branch, which invalidates every
+        `booking_id` and confirmation number the process is still holding.
+        This must be called alongside that restore -- it is *not* the same
+        thing as `reset_runtime_state()`, which only exists for the manager's
+        failed-initialization retry loop and never touches conversation data.
+
+        Clears:
+            - The `ProposalStore`, so no pending proposal can commit against
+              rooms that no longer exist.
+            - The `MemorySaver` checkpointer, so no thread can keep referring
+              to bookings -- or app-authored confirmation numbers -- that the
+              reset just wiped out.
+
+        Note:
+            The checkpointer instance is cleared in place (its internal
+            dicts, not the object itself) because `OrchestrationAgentFactory
+            .build()` bakes the `MemorySaver` instance into the compiled
+            graph at compile time -- replacing `self._checkpointer` here
+            would leave the already-compiled graph holding the stale one.
+
+        """
+        self._booking_resources.proposals = ProposalStore(
+            ttl_s=self._booking_config.proposals.ttl_s,
+        )
+        self._checkpointer.storage.clear()
+        self._checkpointer.writes.clear()
+        self._checkpointer.blobs.clear()
 
     def get_config(self) -> OrchestrationConfig:
         """Return the loaded orchestration configuration.

@@ -80,6 +80,17 @@ ROOM_AVAIL_COLUMNS: Sequence[str] = [
     "max_occupancy",
 ]
 
+CUSTOMERS_COLUMNS: Sequence[str] = [
+    "customer_id",
+    "first_name",
+    "last_name",
+]
+
+# Only the first N customers are loaded, matching the dropdown identity picker
+# in the UI. There is no email/notification functionality in this project, so
+# the remaining source columns (email, phone, address, ...) are never loaded.
+_CUSTOMER_COUNT: int = 25
+
 
 def get_pgsql_conn_string() -> str:
     """Load the PGSQL connection string from the environment.
@@ -179,6 +190,28 @@ def prepare_room_availability_dataframe(
     df = df.loc[:, ROOM_AVAIL_COLUMNS]
 
     return df, availability_statuses
+
+
+def prepare_customers_dataframe(data_path: Path) -> pd.DataFrame:
+    """Load and normalize the first `_CUSTOMER_COUNT` customers for the dropdown picker.
+
+    Mirrors the exact procedure prototyped in ``notebooks/neonsql.ipynb``: keep
+    only `first_name`/`last_name` from the first `_CUSTOMER_COUNT` rows, then
+    call ``reset_index()`` to materialize the pickle's `customer_id` index into
+    a regular column.
+
+    Args:
+        data_path: Directory containing customers.pkl.
+
+    Returns:
+        pd.DataFrame: Columns matching `CUSTOMERS_COLUMNS`.
+
+    """
+    customers_path = data_path / "customers.pkl"
+    ensure_pickle_path(customers_path)
+    df = pd.read_pickle(customers_path)  # noqa: S301
+    df = df[:_CUSTOMER_COUNT][["first_name", "last_name"]]
+    return df.reset_index()
 
 
 def setup_rooms_schema(
@@ -344,6 +377,22 @@ def insert_room_availability_data(
     )
 
 
+def insert_customers_data(conn: psycopg.Connection, df_customers: pd.DataFrame) -> None:
+    """Insert the normalized customers data into the database.
+
+    Args:
+        conn: Active database connection.
+        df_customers: DataFrame keyed to `CUSTOMERS_COLUMNS`.
+
+    """
+    copy_dataframe_into_table(
+        conn,
+        table_name="customers",
+        columns=CUSTOMERS_COLUMNS,
+        df=df_customers,
+    )
+
+
 def setup_customers_schema(conn: psycopg.Connection) -> None:
     """Reset and recreate the `customers` table.
 
@@ -392,6 +441,7 @@ def setup_bookings_schema(conn: psycopg.Connection) -> None:
                 status        booking_status NOT NULL DEFAULT 'confirmed',
                 booked_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
                 cancelled_at  TIMESTAMPTZ,
+                confirmation_number VARCHAR(16) UNIQUE,
                 CONSTRAINT cancel_coherent CHECK ((status = 'cancelled') = (cancelled_at IS NOT NULL))
             );
             """,  # noqa: E501
@@ -427,9 +477,17 @@ def reload_sql_tables() -> None:
     """Prepare data and rebuild the room, availability, and booking tables.
 
     The function reads pickled source data, reconstructs the required enums,
-    and inserts records into both `rooms` and `room_availability`. It also
-    (re)creates the `customers`, `bookings`, and `booking_rooms` tables, which
-    have no pickled source data to load.
+    and inserts records into `rooms`, `room_availability`, and `customers`
+    (the first `_CUSTOMER_COUNT` customers only, for the UI's dropdown identity
+    picker). It also (re)creates the `bookings` and `booking_rooms` tables,
+    which start empty: this project deliberately loads no pre-existing
+    bookings, since cancelling one would return a room to the pool with no
+    rate attached (see notebooks/neonsql.ipynb).
+
+    This function drops and recreates every table it touches, so it must be
+    run against a branch's parent, never a branch that gets reset in place —
+    otherwise the next reset restores an empty `customers` table and every
+    booking fails on a foreign-key violation.
     """
     try:
         conn_string = get_pgsql_conn_string()
@@ -441,6 +499,7 @@ def reload_sql_tables() -> None:
                 get_data_path(),
             )
         )
+        df_customers = prepare_customers_dataframe(get_data_path())
 
         room_type_def = build_enum_definition(room_type_values)
         bed_type_def = build_enum_definition(bed_type_values)
@@ -456,6 +515,8 @@ def reload_sql_tables() -> None:
             insert_room_availability_data(conn, df_availability)
 
             setup_customers_schema(conn)
+            insert_customers_data(conn, df_customers)
+
             setup_bookings_schema(conn)
             setup_booking_rooms_schema(conn)
     except Exception:  # pragma: no cover - retries logged

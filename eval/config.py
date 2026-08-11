@@ -372,9 +372,17 @@ class EvalConfig(BaseSettings):
         orchestration: Orchestration readiness timing.
         judge: Judge model configuration.
         ragas: Ragas scoring configuration.
-        pgsql_eval_db_url: PostgreSQL database URL override for eval runs.
-            When set, takes precedence over ``PGSQL_DB_URL`` for the rooms
-            agent and evaluator pool connections.
+        pgsql_rw_eval_db_url: Read-write PostgreSQL database URL override for
+            eval runs (`bh_agent_rw`). When set, takes precedence over
+            ``PGSQL_RW_DB_URL`` for the booking agent's write pool,
+            propose/write tools, and evaluator pool connections.
+        pgsql_ro_eval_db_url: Read-only PostgreSQL database URL override for
+            eval runs (`bh_agent_ro`), used exclusively by `run_sql`. When
+            set, takes precedence over ``PGSQL_RO_DB_URL``. Must be set
+            alongside `pgsql_rw_eval_db_url` and point at the same database --
+            leaving it unset while overriding the read-write URL runs the
+            model's searches against the write role, defeating the point of
+            the split.
         neon_api_key: API key for authenticating with the Neon management API,
             required when resetting a Neon branch before an eval run.
 
@@ -394,9 +402,13 @@ class EvalConfig(BaseSettings):
     orchestration: OrchestrationConfig
     judge: JudgeConfig
     ragas: RagasConfig
-    pgsql_eval_db_url: str | None = Field(
+    pgsql_rw_eval_db_url: str | None = Field(
         default=None,
-        validation_alias="PGSQL_EVAL_DB_URL",
+        validation_alias="PGSQL_RW_EVAL_DB_URL",
+    )
+    pgsql_ro_eval_db_url: str | None = Field(
+        default=None,
+        validation_alias="PGSQL_RO_EVAL_DB_URL",
     )
     neon_api_key: str | None = Field(
         default=None,
@@ -414,9 +426,17 @@ class StressEvalConfig(BaseSettings):
         neon: Neon branch reset configuration for stress runs.
         orchestration: Orchestration readiness timing.
         stress: Stress-test workload, target, and database parameters.
-        pgsql_eval_db_url: PostgreSQL database URL override for stress runs.
-            When set, takes precedence over ``PGSQL_DB_URL`` for the rooms
-            agent and pool connections.
+        pgsql_rw_eval_db_url: Read-write PostgreSQL database URL override for
+            stress runs (`bh_agent_rw`). When set, takes precedence over
+            ``PGSQL_RW_DB_URL`` for the booking agent's write pool,
+            propose/write tools, and pool connections.
+        pgsql_ro_eval_db_url: Read-only PostgreSQL database URL override for
+            stress runs (`bh_agent_ro`), used exclusively by `run_sql`. When
+            set, takes precedence over ``PGSQL_RO_DB_URL``. Must be set
+            alongside `pgsql_rw_eval_db_url` and point at the same database --
+            leaving it unset while overriding the read-write URL runs the
+            model's searches against the write role, defeating the point of
+            the split.
         neon_api_key: API key for authenticating with the Neon management API,
             required when resetting a Neon branch before a stress run.
 
@@ -432,9 +452,13 @@ class StressEvalConfig(BaseSettings):
     neon: NeonConfig
     orchestration: OrchestrationConfig
     stress: StressConfig
-    pgsql_eval_db_url: str | None = Field(
+    pgsql_rw_eval_db_url: str | None = Field(
         default=None,
-        validation_alias="PGSQL_EVAL_DB_URL",
+        validation_alias="PGSQL_RW_EVAL_DB_URL",
+    )
+    pgsql_ro_eval_db_url: str | None = Field(
+        default=None,
+        validation_alias="PGSQL_RO_EVAL_DB_URL",
     )
     neon_api_key: str | None = Field(
         default=None,

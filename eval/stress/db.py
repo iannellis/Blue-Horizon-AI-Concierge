@@ -193,6 +193,16 @@ async def _check_invariants(
 ) -> dict[str, object]:
     """Check deterministic database invariants after the stress run.
 
+    ``double_booking_violations`` keeps its historical key name for
+    artifact/report continuity, but its query changed completely: the old
+    ``room_availability`` grouped-by-``(room_number, date)`` check was a
+    tautology (that table carries a ``UNIQUE (room_id, date)`` constraint, so
+    the query could never return a row) and always reported zero regardless
+    of what the workload did -- see the identical fix and rationale in
+    ``eval.evaluators._booking._check_booking_db_invariants``. It now checks
+    for real overlapping ``booking_rooms`` ranges on the same room, which the
+    schema can actually represent post-Phase-1.
+
     Args:
         pool: The open database connection pool pointing at the Neon branch.
         cfg: The stress run configuration supplying retry settings.
@@ -201,7 +211,7 @@ async def _check_invariants(
         A dictionary describing invariant counts and pass/fail status.
 
     """
-    double_booked_rows: list[Any] = []
+    overlap_rows: list[Any] = []
     null_status_count = 0
     async for attempt in AsyncRetrying(
         retry=retry_if_exception(_is_transient_db_error),
@@ -216,14 +226,17 @@ async def _check_invariants(
                 async with conn.cursor() as cur:
                     await cur.execute(
                         """
-                        SELECT room_number, date, COUNT(*) AS c
-                        FROM room_availability
-                        WHERE status = 'Booked'
-                        GROUP BY room_number, date
-                        HAVING COUNT(*) > 1
+                        SELECT a.booking_room_id AS a_id, b.booking_room_id AS b_id,
+                               a.room_id
+                        FROM booking_rooms a
+                        JOIN booking_rooms b
+                          ON a.room_id = b.room_id
+                         AND a.booking_room_id < b.booking_room_id
+                         AND a.check_in < b.check_out
+                         AND b.check_in < a.check_out
                         """,
                     )
-                    double_booked_rows = await cur.fetchall()
+                    overlap_rows = await cur.fetchall()
 
                     await cur.execute(
                         "SELECT COUNT(*) AS c"
@@ -236,9 +249,9 @@ async def _check_invariants(
                     null_status_count = cast("int", row[0])
 
     return {
-        "double_booking_violations": len(double_booked_rows),
+        "double_booking_violations": len(overlap_rows),
         "null_status_count": int(null_status_count),
-        "passed": len(double_booked_rows) == 0 and int(null_status_count) == 0,
+        "passed": len(overlap_rows) == 0 and int(null_status_count) == 0,
     }
 
 

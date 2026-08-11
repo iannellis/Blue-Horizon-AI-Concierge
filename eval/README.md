@@ -41,16 +41,16 @@ eval/
 │   └── models.py              # Stress run data models
 │
 ├── datasets/
-│   ├── hotel_agent_eval_20.jsonl    # 20-case smoke dataset
-│   ├── hotel_agent_eval_200.jsonl   # 200-case full dataset
-│   └── hotel_agent_eval_200_manifest.json
+│   ├── hotel_agent_eval_23.jsonl    # 23-case smoke dataset
+│   ├── hotel_agent_eval_206.jsonl   # 206-case full dataset
+│   └── hotel_agent_eval_206_manifest.json
 │
 ├── baselines/
-│   ├── hotel_agent_eval_20_baseline.json   # CI smoke eval thresholds
-│   └── hotel_agent_eval_200_baseline.json  # Full eval thresholds
+│   ├── hotel_agent_eval_23_baseline.json   # CI smoke eval thresholds
+│   └── hotel_agent_eval_206_baseline.json  # Full eval thresholds
 │
-├── eval_config_20.toml        # Config for the 20-case smoke eval
-├── eval_config_200.toml       # Config for the 200-case full eval
+├── eval_config_23.toml        # Config for the 23-case smoke eval
+├── eval_config_206.toml       # Config for the 206-case full eval
 ├── stress_config.toml         # Config for the stress test
 └── requirements.txt           # Pinned dependencies for CI
 ```
@@ -68,7 +68,8 @@ eval/
 | `LANGCHAIN_PROJECT` | Yes | LangSmith project name for traces |
 | `GEMINI_API_KEY` | Yes | Gemini API key (agent, judge, Ragas) |
 | `OPENAI_API_KEY` | Yes | OpenAI API key (info agent, embeddings) |
-| `PGSQL_EVAL_DB_URL` | Yes | PostgreSQL connection string for eval DB |
+| `PGSQL_RW_EVAL_DB_URL` | Yes | Read-write (`bh_agent_rw`) PostgreSQL connection string for eval DB |
+| `PGSQL_RO_EVAL_DB_URL` | Yes | Read-only (`bh_agent_ro`) PostgreSQL connection string for eval DB, used exclusively by `run_sql` |
 | `NEON_API_KEY` | Yes | Neon management API key (branch reset) |
 | `REDIS_URL` | Yes | Redis connection URL (agent cache) |
 
@@ -82,20 +83,20 @@ pip install -r eval/requirements.txt
 
 ## Running evaluations
 
-### Smoke eval (20 cases)
+### Smoke eval (23 cases)
 
 Used as a CI gate on every push to `main`:
 
 ```bash
-python -m eval.run_experiment --config eval/eval_config_20.toml
+python -m eval.run_experiment --config eval/eval_config_23.toml
 ```
 
-### Full eval (200 cases)
+### Full eval (206 cases)
 
 Run manually for comprehensive quality checks:
 
 ```bash
-python -m eval.run_experiment --config eval/eval_config_200.toml
+python -m eval.run_experiment --config eval/eval_config_206.toml
 ```
 
 Both commands write results to `eval/outputs/<experiment_name>/`:
@@ -217,7 +218,7 @@ Each line in a JSONL dataset file is a single JSON object:
 | Field | Required | Used by | Description |
 |---|---|---|---|
 | `case_id` | Yes | harness | Unique string identifier |
-| `tags` | No | harness | Labels used for filtering (`booking`, `info`, `refuse`, `mixed`, `injection`) |
+| `tags` | No | harness | Labels used for filtering (`booking`, `info`, `refuse`, `mixed`, `injection`); `no_auto_confirm` additionally opts the whole case out of post-turn auto-confirmation, leaving every `propose_*` call pending so the case can model abandonment or supersession instead of a completed write |
 | `turns[].user` | Yes | harness | User message text sent to the agent |
 | `turns[].expected_route` | Yes | `eval_routing_accuracy` | Expected route: `booking`, `info`, or `refuse` |
 | `turns[].expect_injection` | No | `eval_injection_tripwires` | `true` if this turn is a prompt-injection attempt |
@@ -229,8 +230,8 @@ Each line in a JSONL dataset file is a single JSON object:
 
 ```bash
 python -m eval.create_langsmith_dataset \
-  --dataset-name "BlueHorizonEval_20" \
-  --cases-path eval/datasets/hotel_agent_eval_20.jsonl
+  --dataset-name "BlueHorizonEval_23" \
+  --cases-path eval/datasets/hotel_agent_eval_23.jsonl
 ```
 
 ---
@@ -241,12 +242,12 @@ python -m eval.create_langsmith_dataset \
 python -m eval.ci_check eval/outputs/<experiment_name>/results.jsonl
 ```
 
-Uses `eval/baselines/hotel_agent_eval_20_baseline.json` by default. To use the
-200-case baseline:
+Uses `eval/baselines/hotel_agent_eval_23_baseline.json` by default. To use the
+206-case baseline:
 
 ```bash
 python -m eval.ci_check eval/outputs/<experiment_name>/results.jsonl \
-  --baseline eval/baselines/hotel_agent_eval_200_baseline.json
+  --baseline eval/baselines/hotel_agent_eval_206_baseline.json
 ```
 
 Output is a table comparing each metric against its baseline and minimum
@@ -354,8 +355,8 @@ Artifacts are written to `eval/outputs/stress_<timestamp>/` and logs to
 
 | Workflow | Trigger | Config | Baseline |
 |---|---|---|---|
-| `ci.yml` (smoke eval) | Push to `main` | `eval_config_20.toml` | `hotel_agent_eval_20_baseline.json` |
-| `eval_200.yml` (full eval) | Manual | `eval_config_200.toml` | `hotel_agent_eval_200_baseline.json` |
+| `ci.yml` (smoke eval) | Push to `main` | `eval_config_23.toml` | `hotel_agent_eval_23_baseline.json` |
+| `eval_206.yml` (full eval) | Manual | `eval_config_206.toml` | `hotel_agent_eval_206_baseline.json` |
 | `stress.yml` | Manual | `stress_config.toml` | — |
 
 All workflows upload `eval/logs/` and `eval/outputs/` as downloadable

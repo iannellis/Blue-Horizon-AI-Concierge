@@ -33,7 +33,11 @@ class StressRunConfig:
         book_weight: Relative weight for BOOK operations in the op-type mix.
         modify_weight: Relative weight for MODIFY operations in the op-type mix.
         cancel_weight: Relative weight for CANCEL operations in the op-type mix.
-        db_url: The Postgres connection URL.
+        db_url: The read-write Postgres connection URL (`bh_agent_rw`), used
+            for the booking agent's write pool and the reconciliation/
+            invariant-check pool.
+        ro_db_url: The read-only Postgres connection URL (`bh_agent_ro`),
+            used exclusively by the booking agent's `run_sql` tool.
 
     """
 
@@ -56,6 +60,7 @@ class StressRunConfig:
     modify_weight: float
     cancel_weight: float
     db_url: str
+    ro_db_url: str
 
 
 @dataclass

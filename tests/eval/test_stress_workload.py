@@ -5,90 +5,102 @@
 from eval.stress.workload import _classify_outcome
 
 
-def _sql_call(
-    row: dict[str, object],
-    *,
-    status: str = "ok",
-    error: str | None = None,
-) -> dict[str, object]:
-    """Build a minimal ``run_sql`` tool-summary entry.
+def _propose_entry(tool: str, *, status: str = "proposed") -> dict[str, object]:
+    """Build a minimal `propose_*` tool-summary entry.
 
     Args:
-        row: First result row to attach to the entry.
-        status: Tool status string.
-        error: Optional error payload.
+        tool: One of `propose_booking`, `propose_cancellation`,
+            `propose_modification`.
+        status: Tool status string (`"proposed"` or `"error"`).
 
     Returns:
-        ``run_sql`` summary dictionary.
+        `propose_*` summary dictionary.
+
+    """
+    entry: dict[str, object] = {"tool": tool, "status": status}
+    if status == "error":
+        entry["error"] = "Room is not available for every night requested."
+    else:
+        entry["proposal_id"] = "abc123"
+    return entry
+
+
+def _confirm_entry(*, status: str = "ok") -> dict[str, object]:
+    """Build a minimal `confirm_booking` tool-summary entry.
+
+    Args:
+        status: Tool status string (`"ok"` or `"error"`).
+
+    Returns:
+        `confirm_booking` summary dictionary.
 
     """
     entry: dict[str, object] = {
-        "tool": "run_sql",
+        "tool": "confirm_booking",
         "status": status,
-        "rows": [row],
+        "action": "book",
     }
-    if error is not None:
-        entry["error"] = error
+    if status == "error":
+        entry["error"] = "That request has expired, shall I check those dates again?"
+    else:
+        entry["already_confirmed"] = False
+        entry["result"] = {"booking_id": 1, "confirmation_number": "BH000001"}
     return entry
 
 
 class TestClassifyOutcome:
-    """_classify_outcome() prefers SQL outcomes over assistant phrasing."""
+    """_classify_outcome() prefers propose/confirm outcomes over assistant phrasing."""
 
-    def test_sql_book_success_beats_conflict_sounding_text(self) -> None:
-        """Structured SQL success wins over misleading assistant wording."""
+    def test_confirmed_proposal_beats_conflict_sounding_text(self) -> None:
+        """A successful propose+confirm pair wins over misleading assistant wording."""
         outcome = _classify_outcome(
             op_type="BOOK",
             assistant_text="That room is unavailable.",
             err_text=None,
-            sql_calls=[
-                _sql_call({"nights_requested": 2, "nights_booked": 2}),
+            tool_summary=[
+                _propose_entry("propose_booking"),
+                _confirm_entry(),
             ],
         )
 
         assert outcome == "success"
 
-    def test_sql_book_conflict_is_detected_from_row_counts(self) -> None:
-        """A partial or zero-night booking is classified as a conflict."""
+    def test_propose_error_is_a_conflict(self) -> None:
+        """A propose_* refusal (nights unavailable) is classified as a conflict."""
         outcome = _classify_outcome(
             op_type="BOOK",
             assistant_text="Booked successfully.",
             err_text=None,
-            sql_calls=[
-                _sql_call({"nights_requested": 2, "nights_booked": 0}),
+            tool_summary=[
+                _propose_entry("propose_booking", status="error"),
             ],
         )
 
         assert outcome == "conflict"
 
-    def test_sql_modify_success_uses_release_and_acquire_counts(self) -> None:
-        """Modify success is derived from matching release and acquire counts."""
+    def test_confirm_error_is_a_conflict(self) -> None:
+        """A confirm_booking failure (lost a race) is classified as a conflict."""
         outcome = _classify_outcome(
             op_type="MODIFY",
             assistant_text="I could not modify it.",
             err_text=None,
-            sql_calls=[
-                _sql_call(
-                    {
-                        "release_needed": 2,
-                        "acquire_needed": 2,
-                        "nights_released": 2,
-                        "nights_acquired": 2,
-                    },
-                ),
+            tool_summary=[
+                _propose_entry("propose_modification"),
+                _confirm_entry(status="error"),
             ],
         )
 
-        assert outcome == "success"
+        assert outcome == "conflict"
 
-    def test_sql_cancel_success_uses_canceled_night_count(self) -> None:
-        """Cancel success is derived from matching requested and canceled nights."""
+    def test_confirmed_cancel_is_a_success(self) -> None:
+        """A confirmed cancellation is classified as a success."""
         outcome = _classify_outcome(
             op_type="CANCEL",
             assistant_text="I could not cancel it.",
             err_text=None,
-            sql_calls=[
-                _sql_call({"nights_requested": 2, "nights_canceled": 2}),
+            tool_summary=[
+                _propose_entry("propose_cancellation"),
+                _confirm_entry(),
             ],
         )
 
@@ -100,18 +112,18 @@ class TestClassifyOutcome:
             op_type="BOOK",
             assistant_text="Booked successfully.",
             err_text="RuntimeError: boom",
-            sql_calls=[],
+            tool_summary=[],
         )
 
         assert outcome == "error"
 
-    def test_text_fallback_is_used_when_sql_data_is_unavailable(self) -> None:
-        """Text heuristics remain the fallback when no SQL result can be parsed."""
+    def test_text_fallback_is_used_when_no_proposal_was_made(self) -> None:
+        """Text heuristics remain the fallback when no propose_* call happened."""
         outcome = _classify_outcome(
             op_type="BOOK",
             assistant_text="That room isn't available for those nights.",
             err_text=None,
-            sql_calls=[],
+            tool_summary=[],
         )
 
         assert outcome == "conflict"

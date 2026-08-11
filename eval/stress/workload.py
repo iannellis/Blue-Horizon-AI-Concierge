@@ -15,13 +15,26 @@ from datetime import UTC, datetime
 from typing import cast
 from uuid import uuid4
 
-from eval._utils import coerce_int as _coerce_int
 from eval._utils import truncate as _truncate
 from eval.langsmith_target import EvalCaptureCallback, OrchestrationManager
+from eval.langsmith_target._confirm import auto_confirm_pending_proposal
 from eval.langsmith_target._text_utils import _extract_assistant_text_from_result
 from eval.stress.models import OperationBuildResult, StressRunConfig, UserState
 
 logger = logging.getLogger(__name__)
+
+# Only the first 25 customers are seeded (see booking_pgsql.py::_CUSTOMER_COUNT).
+# Simulated users beyond this count wrap around and share a guest identity
+# with an earlier user -- acceptable here, since contention across users is
+# the point of a stress run and the UI's own dropdown offers the same 25.
+_SEEDED_CUSTOMER_COUNT = 25
+
+# Tool names that create a proposal -- mirrors eval.evaluators._booking and
+# proposals.ProposalAction, though the stress harness only cares whether one
+# was made, not which of BOOK/CANCEL/MODIFY it was.
+_PROPOSE_TOOL_NAMES = frozenset(
+    {"propose_booking", "propose_cancellation", "propose_modification"},
+)
 
 
 async def _run_workload(
@@ -61,6 +74,7 @@ async def _run_workload(
 
         """
         thread_id = uuid4().hex
+        customer_id = (user_idx % _SEEDED_CUSTOMER_COUNT) + 1
         state = UserState()
         local_ops: list[dict[str, object]] = []
 
@@ -86,6 +100,7 @@ async def _run_workload(
                     orchestration=orchestration,
                     callback=callback,
                     thread_id=thread_id,
+                    customer_id=customer_id,
                     prompt=build.prompt,
                     tags=tags,
                     metadata=metadata,
@@ -98,7 +113,7 @@ async def _run_workload(
                     op_type=build.op_type,
                     assistant_text=assistant_text,
                     err_text=err_text,
-                    sql_calls=sql_calls,
+                    tool_summary=callback.tool_summary,
                 )
                 _update_booking_state(state, build, outcome=outcome)
                 op_entry = _build_op_entry(
@@ -357,16 +372,27 @@ async def _invoke_orchestration(  # noqa: PLR0913
     orchestration: OrchestrationManager,
     callback: EvalCaptureCallback,
     thread_id: str,
+    customer_id: int,
     prompt: str,
     tags: list[str],
     metadata: dict[str, object],
 ) -> tuple[str, str | None]:
-    """Invoke the orchestrator and classify the assistant response.
+    """Invoke the orchestrator, auto-confirm any proposal, and collect the response.
+
+    The auto-confirm step -- the harness's stand-in for a human clicking
+    Confirm, since a stress run drives no browser -- runs inside the same
+    try/except as the turn itself, so an unexpected failure there (as
+    opposed to the ordinary `BookingWriteError` refusals
+    `auto_confirm_pending_proposal` already turns into a captured
+    `confirm_booking` entry) still surfaces as an ``"error"`` outcome rather
+    than escaping to the caller.
 
     Args:
         orchestration: The ready orchestrator.
         callback: The eval capture callback to attach for this invocation.
         thread_id: The thread identifier for the user.
+        customer_id: The seeded guest identity this simulated user is
+            impersonating for the whole run.
         prompt: The user prompt.
         tags: LangSmith tags to attach to the trace.
         metadata: LangSmith metadata for the trace.
@@ -379,11 +405,18 @@ async def _invoke_orchestration(  # noqa: PLR0913
         result = await orchestration.ainvoke(
             thread_id=thread_id,
             user_text=prompt,
+            customer_id=customer_id,
             callbacks=[callback],
             tags=tags,
             metadata=metadata,
         )
         assistant_text = _extract_assistant_text_from_result(result)
+        await auto_confirm_pending_proposal(
+            orchestration,
+            thread_id=thread_id,
+            customer_id=customer_id,
+            callback=callback,
+        )
     except Exception as exc:  # noqa: BLE001
         err_text = f"{type(exc).__name__}: {exc}"
         return "", err_text
@@ -419,192 +452,96 @@ def _classify_outcome(
     op_type: str,
     assistant_text: str,
     err_text: str | None,
-    sql_calls: list[dict[str, object]],
+    tool_summary: list[dict[str, object]],
 ) -> str:
     """Classify a stress-test operation outcome.
 
-    Structured ``run_sql`` outcomes are preferred because they are more stable
-    than natural-language response text.  Assistant text is only used as a
-    fallback when no usable SQL outcome is available.
+    The propose+confirm pair captured for the turn is preferred because it
+    is more stable than natural-language response text. Assistant text is
+    only used as a fallback when the turn made no ``propose_*`` call at all
+    (for example, the agent refused or asked a clarifying question instead).
 
     Args:
         op_type: Effective operation type (``BOOK``, ``MODIFY``, or ``CANCEL``).
         assistant_text: Assistant response text.
         err_text: Python-level error text from orchestration invocation, if any.
-        sql_calls: Captured ``run_sql`` tool summaries for the operation.
+        tool_summary: Captured tool summary entries for the turn, including
+            any ``propose_*`` and ``confirm_booking`` entries.
 
     Returns:
         One of ``"success"``, ``"conflict"``, or ``"error"``.
 
     """
+    _ = op_type
     if err_text:
         return "error"
 
-    sql_outcome = _classify_sql_outcome(op_type=op_type, sql_calls=sql_calls)
-    if sql_outcome is not None:
-        return sql_outcome
+    propose_confirm_outcome = _classify_propose_confirm_outcome(tool_summary)
+    if propose_confirm_outcome is not None:
+        return propose_confirm_outcome
 
     return _classify_text_outcome(assistant_text)
 
 
-def _classify_sql_outcome(
-    *,
-    op_type: str,
-    sql_calls: list[dict[str, object]],
+def _classify_propose_confirm_outcome(
+    tool_summary: list[dict[str, object]],
 ) -> str | None:
-    """Classify an outcome from captured ``run_sql`` summaries.
+    """Classify an outcome from the turn's propose_* and confirm_booking entries.
+
+    `commit_booking`/`cancel_booking`/`modify_booking` are each atomic, so
+    unlike the old SQL-CTE era there is no partial-success shape left to
+    read out of a result row: a proposal that failed to price, or a confirm
+    that lost a race to another thread, are both bucketed as ``"conflict"``
+    -- the expected outcome under contention -- while a successful confirm
+    is ``"success"``.
 
     Args:
-        op_type: Effective operation type for the prompt.
-        sql_calls: Captured ``run_sql`` entries for the operation.
+        tool_summary: Captured tool summary entries for the turn.
 
     Returns:
-        Structured outcome label when a usable SQL result is available;
-        otherwise ``None`` so the caller can fall back to text heuristics.
+        Structured outcome label, or ``None`` when the turn made no
+        ``propose_*`` call so the caller can fall back to text heuristics.
 
     """
-    if not sql_calls:
+    propose_entry, confirm_entry = _last_propose_and_confirm(tool_summary)
+    if propose_entry is None:
         return None
+    if propose_entry.get("status") == "error":
+        return "conflict"
+    if confirm_entry is None:
+        return None
+    if confirm_entry.get("status") == "error":
+        return "conflict"
+    return "success"
 
-    for sql_call in reversed(sql_calls):
-        if _sql_call_has_error(sql_call):
-            return "error"
 
-        row = _extract_first_sql_row(sql_call)
-        if row is None:
+def _last_propose_and_confirm(
+    tool_summary: list[dict[str, object]],
+) -> tuple[dict[str, object] | None, dict[str, object] | None]:
+    """Find the last propose_* and confirm_booking entries in a tool summary.
+
+    A turn has at most one pending proposal (the store supersedes any prior
+    one), so the *last* entry of each kind is the pair that belongs together.
+
+    Args:
+        tool_summary: Captured tool summary entries for the turn.
+
+    Returns:
+        Tuple of ``(propose_entry, confirm_entry)``, either or both ``None``
+        when not present.
+
+    """
+    propose_entry: dict[str, object] | None = None
+    confirm_entry: dict[str, object] | None = None
+    for entry in tool_summary:
+        if not isinstance(entry, dict):
             continue
-
-        if op_type == "BOOK":
-            return _classify_book_outcome(row)
-        if op_type == "MODIFY":
-            return _classify_modify_outcome(row)
-        if op_type == "CANCEL":
-            return _classify_cancel_outcome(row)
-
-    return None
-
-
-def _sql_call_has_error(sql_call: dict[str, object]) -> bool:
-    """Check whether a ``run_sql`` summary indicates an error.
-
-    Args:
-        sql_call: ``run_sql`` tool summary entry.
-
-    Returns:
-        ``True`` when the summary indicates an error.
-
-    """
-    status = sql_call.get("status")
-    if isinstance(status, str) and status.lower() == "error":
-        return True
-
-    return bool(sql_call.get("error"))
-
-
-def _extract_first_sql_row(sql_call: dict[str, object]) -> dict[str, object] | None:
-    """Extract the first row from a ``run_sql`` summary.
-
-    Args:
-        sql_call: ``run_sql`` tool summary entry.
-
-    Returns:
-        First row mapping when available; otherwise ``None``.
-
-    """
-    rows = sql_call.get("rows")
-    if not isinstance(rows, list):
-        return None
-
-    for row in rows:
-        if isinstance(row, dict):
-            return row
-
-    return None
-
-
-def _classify_book_outcome(row: dict[str, object]) -> str | None:
-    """Classify a BOOK outcome from a SQL result row.
-
-    Args:
-        row: SQL result row.
-
-    Returns:
-        Structured outcome label, or ``None`` if the row does not match the
-        expected BOOK result shape.
-
-    """
-    nights_requested = _coerce_int(row.get("nights_requested"))
-    nights_booked = _coerce_int(row.get("nights_booked"))
-
-    if nights_requested is None or nights_booked is None:
-        return None
-
-    if nights_requested > 0 and nights_booked == nights_requested:
-        return "success"
-
-    return "conflict"
-
-
-def _classify_modify_outcome(row: dict[str, object]) -> str | None:
-    """Classify a MODIFY outcome from a SQL result row.
-
-    Args:
-        row: SQL result row.
-
-    Returns:
-        Structured outcome label, or ``None`` if the row does not match the
-        expected MODIFY result shape.
-
-    """
-    release_requested = _coerce_int(
-        row.get("release_needed") or row.get("release_needed_total"),
-    )
-    acquire_requested = _coerce_int(
-        row.get("acquire_needed") or row.get("acquire_needed_total"),
-    )
-    nights_released = _coerce_int(row.get("nights_released"))
-    nights_acquired = _coerce_int(row.get("nights_acquired"))
-
-    if (
-        release_requested is None
-        or acquire_requested is None
-        or nights_released is None
-        or nights_acquired is None
-    ):
-        return None
-
-    if (
-        release_requested > 0
-        and acquire_requested > 0
-        and nights_released == release_requested
-        and nights_acquired == acquire_requested
-    ):
-        return "success"
-
-    return "conflict"
-
-
-def _classify_cancel_outcome(row: dict[str, object]) -> str | None:
-    """Classify a CANCEL outcome from a SQL result row.
-
-    Args:
-        row: SQL result row.
-
-    Returns:
-        Structured outcome label, or ``None`` if the row does not match the
-        expected CANCEL result shape.
-
-    """
-    nights_requested = _coerce_int(row.get("nights_requested"))
-    nights_canceled = _coerce_int(row.get("nights_canceled"))
-
-    if nights_requested is None or nights_canceled is None:
-        return None
-
-    if nights_requested > 0 and nights_canceled == nights_requested:
-        return "success"
-
-    return "conflict"
+        tool = entry.get("tool")
+        if tool in _PROPOSE_TOOL_NAMES:
+            propose_entry = entry
+        elif tool == "confirm_booking":
+            confirm_entry = entry
+    return propose_entry, confirm_entry
 
 
 def _classify_text_outcome(text: str) -> str:

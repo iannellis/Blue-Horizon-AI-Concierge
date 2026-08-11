@@ -243,9 +243,9 @@ def _has_booking_cases(examples: Iterable[Example]) -> bool:
 async def _prepare_eval_database(cfg: EvalConfig) -> None:
     """Redirect the DB URL to the eval database and reset the Neon branch.
 
-    Applies any ``PGSQL_EVAL_DB_URL`` override so the booking agent connects to
-    the eval database, then calls the Neon management API to restore the
-    configured branch to its parent baseline.
+    Applies any ``PGSQL_RW_EVAL_DB_URL`` override so the booking agent
+    connects to the eval database, then calls the Neon management API to
+    restore the configured branch to its parent baseline.
 
     Args:
         cfg: The loaded evaluation configuration.
@@ -265,26 +265,45 @@ async def _prepare_eval_database(cfg: EvalConfig) -> None:
 
 
 def _override_eval_db_url(cfg: EvalConfig) -> None:
-    """Override ``PGSQL_DB_URL`` with ``PGSQL_EVAL_DB_URL`` when the latter is set.
+    """Override ``PGSQL_RW_DB_URL``/``PGSQL_RO_DB_URL`` with the eval overrides.
 
-    If ``PGSQL_EVAL_DB_URL`` is present in *cfg*, this function writes its
-    value to ``PGSQL_DB_URL`` and clears the ``load_app_config`` LRU cache so
-    the next ``load_app_config()`` call picks up the overridden URL.  This
-    ensures the booking agent inside ``OrchestrationManager`` connects to the
-    correct Neon branch database rather than the default application database.
+    If ``PGSQL_RW_EVAL_DB_URL`` is present in *cfg*, this function writes its
+    value to ``PGSQL_RW_DB_URL``; if ``PGSQL_RO_EVAL_DB_URL`` is present, its
+    value is written to ``PGSQL_RO_DB_URL``. When either override is applied,
+    the ``load_app_config`` LRU cache is cleared so the next
+    ``load_app_config()`` call picks up the overridden URLs. This ensures the
+    booking agent inside ``OrchestrationManager`` connects to the correct
+    Neon branch database (write pool and read-only pool alike) rather than
+    the default application database.
 
-    If ``PGSQL_EVAL_DB_URL`` is not set, this function is a no-op.
+    Setting only the read-write override and leaving the read-only override
+    unset means ``run_sql`` keeps using ``PGSQL_RO_DB_URL`` as configured
+    outside the eval run, which may point at a different database than the
+    one being reset -- so the two are logged together to make a partial
+    override obvious.
+
+    If neither ``PGSQL_RW_EVAL_DB_URL`` nor ``PGSQL_RO_EVAL_DB_URL`` is set,
+    this function is a no-op.
 
     Args:
         cfg: The loaded evaluation configuration.
 
     """
-    eval_db_url = cfg.pgsql_eval_db_url
-    if not eval_db_url:
+    eval_db_url = cfg.pgsql_rw_eval_db_url
+    eval_ro_db_url = cfg.pgsql_ro_eval_db_url
+    if not eval_db_url and not eval_ro_db_url:
         return
-    os.environ["PGSQL_DB_URL"] = eval_db_url
+    if eval_db_url:
+        os.environ["PGSQL_RW_DB_URL"] = eval_db_url
+    if eval_ro_db_url:
+        os.environ["PGSQL_RO_DB_URL"] = eval_ro_db_url
     load_app_config.cache_clear()
-    logger.info("PGSQL_EVAL_DB_URL override applied: PGSQL_DB_URL updated.")
+    logger.info(
+        "Eval DB URL override applied: PGSQL_RW_DB_URL updated=%s, "
+        "PGSQL_RO_DB_URL updated=%s.",
+        bool(eval_db_url),
+        bool(eval_ro_db_url),
+    )
 
 
 def _write_summary(path: Path, summary: Mapping[str, object]) -> None:

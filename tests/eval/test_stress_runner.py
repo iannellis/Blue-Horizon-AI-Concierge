@@ -53,6 +53,7 @@ def _make_cfg(tmp_path: Path) -> SimpleNamespace:
         output_dir=tmp_path,
         log_dir=tmp_path,
         db_url="postgres://demo",
+        ro_db_url="postgres://demo-ro",
         pool_max=2,
     )
 
@@ -76,7 +77,7 @@ def test_run_stress_writes_failure_artifacts_and_closes_resources(
     def _fake_configure_logging(*_args: object, **_kwargs: object) -> None:
         """Replace runner logging setup during the test."""
 
-    def _fake_override_db_url(_db_url: str) -> None:
+    def _fake_override_db_url(_db_url: str, _ro_db_url: str) -> None:
         """Replace environment mutation during the test."""
 
     monkeypatch.setattr(runner, "_load_config", lambda: cfg)
@@ -95,19 +96,21 @@ def test_run_stress_writes_failure_artifacts_and_closes_resources(
     async def _fake_start_orchestration(
         *,
         db_url: str,
+        ro_db_url: str,
         ready_timeout_s: float,
     ) -> _FakeOrchestration:
         """Return a fake orchestration manager.
 
         Args:
-            db_url: Database URL forwarded by the runner.
+            db_url: Read-write database URL forwarded by the runner.
+            ro_db_url: Read-only database URL forwarded by the runner.
             ready_timeout_s: Ready timeout forwarded by the runner.
 
         Returns:
             Fake orchestration manager.
 
         """
-        _ = db_url, ready_timeout_s
+        _ = db_url, ro_db_url, ready_timeout_s
         return fake_orchestration
 
     async def _fake_open_schema_pool(

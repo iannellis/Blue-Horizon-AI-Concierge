@@ -33,6 +33,56 @@ from eval.langsmith_target._text_utils import (
 
 _ROUTE_KEY = "route"  # key from orchestration.py
 
+# Maps a propose_* tool name to the proposal action it creates -- mirrors
+# eval.evaluators._booking._PROPOSE_ACTIONS and proposals.ProposalAction.
+_PROPOSE_TOOL_NAMES: frozenset[str] = frozenset(
+    {"propose_booking", "propose_cancellation", "propose_modification"},
+)
+
+
+def _parse_tool_message_content(output: Any) -> Any:  # noqa: ANN401
+    """Unwrap a `ToolMessage` and parse its string content into Python data.
+
+    Shared by the `run_sql` and `propose_*` capture paths, both of which
+    receive either a raw dict (direct tool return) or a `ToolMessage` whose
+    `content` is a JSON or Python-repr string (needing `Decimal(...)` /
+    `datetime.date(...)` preprocessing before `ast.literal_eval`).
+
+    Args:
+        output: Raw tool output payload.
+
+    Returns:
+        Parsed Python data (typically a dict), or the original value if it
+        was not a `ToolMessage`-wrapped string.
+
+    """
+    actual_output = output
+    if isinstance(output, ToolMessage):
+        actual_output = output.content
+        if isinstance(actual_output, str):
+            try:
+                actual_output = json.loads(actual_output)
+            except json.JSONDecodeError:
+                cleaned = re.sub(
+                    r"Decimal\('([^']*)'\)",
+                    r'"\1"',
+                    actual_output,
+                )
+                cleaned = re.sub(
+                    r"datetime\.date\((\d+),\s*(\d+),\s*(\d+)\)",
+                    lambda m: (
+                        f'"{m.group(1)}-'
+                        f"{int(m.group(2)):02d}-"
+                        f'{int(m.group(3)):02d}"'
+                    ),
+                    cleaned,
+                )
+                try:  # noqa: SIM105
+                    actual_output = ast.literal_eval(cleaned)
+                except (ValueError, SyntaxError):
+                    pass
+    return actual_output
+
 
 def _compact_rows(
     rows: list[dict[str, Any]],
@@ -84,6 +134,22 @@ class RunSqlOutput(BaseModel):
     rows: list[dict[str, Any]] | None = None
 
 
+class ProposeOutput(BaseModel):
+    """Typed payload returned by a `propose_*` booking tool.
+
+    Attributes:
+        status: Tool status string (`"proposed"` on success, `"error"` on
+            refusal -- for example, a requested night is no longer available).
+        proposal_id: Identifier of the created proposal, present on success.
+        error: User-facing error message, present when the tool refuses.
+
+    """
+
+    status: str | None = None
+    proposal_id: str | None = None
+    error: str | None = None
+
+
 class EvalCaptureCallback(AsyncCallbackHandler):
     """Capture routing decisions and tool artifacts for a single turn.
 
@@ -91,12 +157,18 @@ class EvalCaptureCallback(AsyncCallbackHandler):
         route_pred: Router decision captured for the turn.
         tool_summary: Compact summaries of tools executed in this turn.
         contexts_used: Context snippets captured from retrieval output.
+        confirm_receipt_text: App-authored receipt text from a post-turn
+            auto-confirm, if one committed a proposal this turn. Kept
+            separate from `assistant_text` because the model generates its
+            response before the auto-confirm runs -- see
+            `capture_confirm_result`.
 
     """
 
     route_pred: str | None
     tool_summary: list[dict[str, Any]]
     contexts_used: list[str]
+    confirm_receipt_text: str | None
     _pending_tool_entries: dict[UUID, dict[str, Any]]
     _parsed_query: dict[str, Any] | None
 
@@ -106,6 +178,7 @@ class EvalCaptureCallback(AsyncCallbackHandler):
         self.route_pred = None
         self.tool_summary = []
         self.contexts_used = []
+        self.confirm_receipt_text = None
         self._pending_tool_entries = {}
         self._parsed_query = None
 
@@ -367,40 +440,15 @@ class EvalCaptureCallback(AsyncCallbackHandler):
             tool_name = entry.get("tool")
 
         if tool_name == "run_sql":
-            # Extract content from ToolMessage if needed
-            actual_output = output
-            if isinstance(output, ToolMessage):
-                actual_output = output.content
-                # Parse string if needed (could be JSON or Python literal)
-                if isinstance(actual_output, str):
-                    try:
-                        actual_output = json.loads(actual_output)
-                    except json.JSONDecodeError:
-                        # Try Python literal_eval for dict string representations
-                        # Preprocess to handle Decimal('...') and datetime.date(...)
-                        cleaned = re.sub(
-                            r"Decimal\('([^']*)'\)",
-                            r'"\1"',
-                            actual_output,
-                        )
-                        cleaned = re.sub(
-                            r"datetime\.date\((\d+),\s*(\d+),\s*(\d+)\)",
-                            lambda m: (
-                                f'"{m.group(1)}-'
-                                f"{int(m.group(2)):02d}-"
-                                f'{int(m.group(3)):02d}"'
-                            ),
-                            cleaned,
-                        )
-                        try:  # noqa: SIM105
-                            actual_output = ast.literal_eval(cleaned)
-                        except (ValueError, SyntaxError):
-                            pass
-
-            # Only capture if we successfully parsed to a dict/mapping
+            actual_output = _parse_tool_message_content(output)
             if isinstance(actual_output, Mapping):
                 self._capture_run_sql(actual_output, entry)
             return
+        if tool_name in _PROPOSE_TOOL_NAMES:
+            actual_output = _parse_tool_message_content(output)
+            if isinstance(actual_output, Mapping):
+                self._capture_propose(tool_name, actual_output, entry)
+                return
         if entry is not None:
             entry["status"] = "ok"
             self.tool_summary.append(entry)
@@ -481,4 +529,101 @@ class EvalCaptureCallback(AsyncCallbackHandler):
                     )
                     if row_str:
                         self.contexts_used.append(f"SQL result: {row_str}")
+
+    def _capture_propose(
+        self,
+        tool_name: str,
+        output: ProposeOutput | Mapping[str, object],
+        base_entry: dict[str, Any] | None = None,
+    ) -> None:
+        """Capture a compact propose_* summary: status, proposal id, error.
+
+        Args:
+            tool_name: One of `propose_booking`, `propose_cancellation`,
+                `propose_modification`.
+            output: Parsed propose_* tool output.
+            base_entry: Optional base entry with input previews.
+
+        """
+        if isinstance(output, ProposeOutput):
+            payload = output
+        elif isinstance(output, Mapping):
+            try:
+                payload = ProposeOutput.model_validate(dict(output))
+            except ValidationError:
+                return
+        else:
+            return
+        summary = dict(base_entry or {})
+        summary["tool"] = tool_name
+        summary["status"] = payload.status or summary.get("status") or "proposed"
+        if payload.proposal_id:
+            summary["proposal_id"] = payload.proposal_id
+        if payload.error:
+            summary["error"] = payload.error
+        self.tool_summary.append(summary)
+
+    def capture_confirm_result(
+        self,
+        *,
+        action: str,
+        already_confirmed: bool,
+        result: dict[str, Any],
+        receipt_text: str,
+    ) -> None:
+        """Append a confirm-outcome tool-summary entry for a committed proposal.
+
+        `commit_booking`/`cancel_booking`/`modify_booking` run through
+        `ProposalStore.confirm()`, invoked by the harness's auto-confirm
+        helper -- never a LangChain-tracked runnable, so `on_tool_end` never
+        observes it. The auto-confirm helper calls this directly right after
+        `confirm()` returns, so booking evaluators see the same "did a write
+        actually happen" picture a human clicking Confirm would have
+        produced.
+
+        `receipt_text` is stored separately on `confirm_receipt_text` rather
+        than folded into `assistant_text`: in the real app this receipt is a
+        distinct, app-authored chat message that appears *after* the
+        assistant's own turn (see `_confirm.auto_confirm_pending_proposal`),
+        never something the model itself said or could have referenced.
+
+        Args:
+            action: Which kind of write was confirmed (`book`, `cancel`, or
+                `modify`).
+            already_confirmed: True if this replayed a cached result rather
+                than performing a new write.
+            result: JSON-safe write result, from
+                `blue_horizon.agents.booking.receipts.serialize_write_result`.
+            receipt_text: App-authored receipt text for this outcome, from
+                `blue_horizon.agents.booking.receipts.receipt_message`.
+
+        """
+        self.tool_summary.append(
+            {
+                "tool": "confirm_booking",
+                "status": "ok",
+                "action": action,
+                "already_confirmed": already_confirmed,
+                "result": result,
+            },
+        )
+        self.confirm_receipt_text = receipt_text
+
+    def capture_confirm_error(self, *, action: str, error: str) -> None:
+        """Append a confirm-failure tool-summary entry.
+
+        Args:
+            action: Which kind of write was attempted (`book`, `cancel`, or
+                `modify`).
+            error: User-facing error message from the failed confirm.
+
+        """
+        self.tool_summary.append(
+            {
+                "tool": "confirm_booking",
+                "status": "error",
+                "action": action,
+                "error": error,
+            },
+        )
 

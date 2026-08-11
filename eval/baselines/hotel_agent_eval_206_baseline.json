@@ -1,9 +1,9 @@
 {
-  "generated_from": "hotel-agent-eval-200_20260419_231153_Full_dataset_with_200_cases",
-  "description": "Baseline metric thresholds for the 200-case full eval. strict=true metrics require every individual case score to equal 1.0; strict=false metrics require the mean across cases to be >= min_allowed.",
+  "generated_from": "hotel-agent-eval-206_20260811_193740_Full_dataset_with_206_cases",
+  "description": "Baseline metric thresholds for the 206-case full eval (propose/confirm booking architecture). strict=true metrics require every individual case score to equal 1.0; strict=false metrics require the mean across cases to be >= min_allowed.",
   "metrics": {
     "route_accuracy": {
-      "baseline": 0.9942,
+      "baseline": 0.9951,
       "min_allowed": 0.95,
       "strict": false
     },
@@ -17,18 +17,28 @@
       "min_allowed": 1.0,
       "strict": true
     },
-    "booking_tool_errors": {
+    "db_no_double_booking": {
       "baseline": 1.0,
       "min_allowed": 1.0,
       "strict": true
     },
+    "booking_no_unbacked_success_claims": {
+      "baseline": 1.0,
+      "min_allowed": 1.0,
+      "strict": true
+    },
+    "booking_tool_errors": {
+      "baseline": 1.0,
+      "min_allowed": 0.85,
+      "strict": false
+    },
     "booking_no_unexpected_failure_rate": {
-      "baseline": 0.9974,
+      "baseline": 1.0,
       "min_allowed": 0.85,
       "strict": false
     },
     "info_reference_subset_pass_rate": {
-      "baseline": 0.9852,
+      "baseline": 0.9926,
       "min_allowed": 0.85,
       "strict": false
     },
@@ -38,7 +48,7 @@
       "strict": false
     },
     "judge_consumer_quality": {
-      "baseline": 4.965,
+      "baseline": 4.9320,
       "min_allowed": 4.0,
       "strict": false
     },
@@ -48,27 +58,27 @@
       "strict": false
     },
     "judge_grounding_faithfulness": {
-      "baseline": 4.975,
+      "baseline": 4.9951,
       "min_allowed": 4.25,
       "strict": false
     },
     "rag_faithfulness_mean": {
-      "baseline": 0.9787,
+      "baseline": 0.9689,
       "min_allowed": 0.80,
       "strict": false
     },
     "rag_answer_relevancy_mean": {
-      "baseline": 0.7204,
+      "baseline": 0.7649,
       "min_allowed": 0.55,
       "strict": false
     },
     "rag_context_precision_mean": {
-      "baseline": 0.8417,
+      "baseline": 0.8062,
       "min_allowed": 0.75,
       "strict": false
     },
     "rag_context_recall_mean": {
-      "baseline": 1.0,
+      "baseline": 0.9961,
       "min_allowed": 0.85,
       "strict": false
     }

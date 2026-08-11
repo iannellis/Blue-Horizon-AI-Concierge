@@ -1,15 +1,15 @@
 {
-  "dataset_file": "eval/datasets/hotel_agent_eval_200.jsonl",
-  "num_cases": 200,
+  "dataset_file": "eval/datasets/hotel_agent_eval_206.jsonl",
+  "num_cases": 206,
   "distribution": {
     "info_only": 70,
-    "rooms_only": 65,
+    "rooms_only": 71,
     "mixed": 65
   },
   "turn_counts": {
-    "total_turns": 524,
+    "total_turns": 533,
     "info_turns": 206,
-    "rooms_turns": 278,
+    "rooms_turns": 287,
     "refuse_turns": 40,
     "labeled_filter_turns": 40
   },
@@ -208,6 +208,12 @@
       "case_0025",
       "case_0045",
       "case_0156"
-    ]
+    ],
+    "case_ids_covering_proposal_lifecycle_gaps": {
+      "note": "Added post-propose/confirm rework to exercise scenarios the propose/confirm flow makes possible (see plan Phase 4 'Dataset gaps'). All carry the no_auto_confirm tag, so their propose_* call is deliberately left unconfirmed by the harness.",
+      "abandonment": ["case_0201", "case_0202"],
+      "supersession": ["case_0203", "case_0204"],
+      "unbacked_success_claim_probe": ["case_0205", "case_0206"]
+    }
   }
 }

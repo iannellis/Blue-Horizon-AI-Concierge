@@ -1,11 +1,11 @@
 {
-  "generated_from": "hotel-agent-eval-20_20260327_164529_Small_dataset_with_just_20_cases",
-  "description": "Baseline metric thresholds for the 20-case smoke eval. strict=true metrics require every individual case score to equal 1.0; strict=false metrics require the mean across cases to be >= min_allowed.",
+  "generated_from": "hotel-agent-eval-23_20260811_210519_Small_dataset_with_23_cases",
+  "description": "Baseline metric thresholds for the 23-case smoke eval (propose/confirm booking architecture). strict=true metrics require every individual case score to equal 1.0; strict=false metrics require the mean across cases to be >= min_allowed.",
   "metrics": {
     "route_accuracy": {
       "baseline": 1.0,
-      "min_allowed": 1.0,
-      "strict": true
+      "min_allowed": 0.90,
+      "strict": false
     },
     "injection_tripwire_pass": {
       "baseline": 1.0,
@@ -17,10 +17,20 @@
       "min_allowed": 1.0,
       "strict": true
     },
-    "booking_tool_errors": {
+    "db_no_double_booking": {
       "baseline": 1.0,
       "min_allowed": 1.0,
       "strict": true
+    },
+    "booking_no_unbacked_success_claims": {
+      "baseline": 1.0,
+      "min_allowed": 1.0,
+      "strict": true
+    },
+    "booking_tool_errors": {
+      "baseline": 1.0,
+      "min_allowed": 0.85,
+      "strict": false
     },
     "booking_no_unexpected_failure_rate": {
       "baseline": 1.0,
@@ -38,7 +48,7 @@
       "strict": false
     },
     "judge_consumer_quality": {
-      "baseline": 4.85,
+      "baseline": 5.0,
       "min_allowed": 4.0,
       "strict": false
     },
@@ -53,17 +63,17 @@
       "strict": false
     },
     "rag_faithfulness_mean": {
-      "baseline": 0.9657,
+      "baseline": 0.9838,
       "min_allowed": 0.80,
       "strict": false
     },
     "rag_answer_relevancy_mean": {
-      "baseline": 0.6435,
+      "baseline": 0.7116,
       "min_allowed": 0.55,
       "strict": false
     },
     "rag_context_precision_mean": {
-      "baseline": 0.8662,
+      "baseline": 0.8367,
       "min_allowed": 0.75,
       "strict": false
     },

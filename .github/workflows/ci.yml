@@ -3,20 +3,33 @@
 # On every push to main that touches relevant directories:
 #   1. Detect which path groups changed.
 #   2. If blue_horizon/, eval/, ui/, or tests/ changed: run the pytest unit
-#      test suite (no secrets required).
-#   3. If eval/ or blue_horizon/ changed: run the 20-case smoke eval and
-#      compare aggregated metric scores against the pinned baseline.
-#   4. If blue_horizon/, deploy/, assets/, ui/, Dockerfile, pyproject.toml,
-#      or poetry.lock changed, and both unit tests and the eval either passed
-#      or were skipped: push the repo to the HuggingFace Docker Space so HF
-#      rebuilds the container automatically.
+#      test suite (no secrets required, `db_integration`-marked tests
+#      excluded).
+#   3. If eval/ or blue_horizon/ changed: reset the shared Development Neon
+#      branch, then run the `db_integration`-marked tests against it (role
+#      privileges, write_ops, and API-level behavior that need a real
+#      Postgres). This runs before the eval job below, sequenced by `needs:`,
+#      so the two never mutate the same branch concurrently.
+#   4. If eval/ or blue_horizon/ changed and step 3 passed or was skipped:
+#      run the 23-case smoke eval and compare aggregated metric scores
+#      against the pinned baseline. Reuses the same Development branch and
+#      resets it again first, since eval cases assume a clean baseline.
+#   5. If blue_horizon/, deploy/, assets/, ui/, Dockerfile, pyproject.toml,
+#      or poetry.lock changed, and unit tests, the DB-integration tests, and
+#      the eval each either passed or were skipped: push the repo to the
+#      HuggingFace Docker Space so HF rebuilds the container automatically.
 #
 # Required repository/environment secrets (CI environment):
 #   LANGSMITH_API_KEY   – LangSmith API key for dataset loading and tracing.
 #   GEMINI_API_KEY      – Google Gemini API key for the agent, judge, and Ragas.
 #   OPENAI_API_KEY      – OpenAI API key for the information agent and embeddings.
 #   NEON_API_KEY        – Neon management API key for branch reset.
-#   PGSQL_EVAL_DB_URL   – Full PostgreSQL connection string for the eval database.
+#   PGSQL_RW_EVAL_DB_URL – Read-write (bh_agent_rw) PostgreSQL connection string
+#                          for the Development database. Reused by the
+#                          db-integration-tests job as PGSQL_RW_DB_URL.
+#   PGSQL_RO_EVAL_DB_URL – Read-only (bh_agent_ro) PostgreSQL connection string
+#                          for the Development database. Reused by the
+#                          db-integration-tests job as PGSQL_RO_DB_URL.
 #   REDIS_URL           – Redis connection URL for the agent's cache.
 #   HF_TOKEN            – HuggingFace write token (Settings → Access Tokens).
 #
@@ -100,13 +113,55 @@ jobs:
       - name: Run unit tests
         env:
           REDIS_URL: redis://localhost:6379
-          PGSQL_DB_URL: postgresql://user:pass@localhost/db
-        run: python -m pytest tests/ -q
+          PGSQL_RW_DB_URL: postgresql://user:pass@localhost/db
+          PGSQL_RO_DB_URL: postgresql://user:pass@localhost/db
+        run: python -m pytest tests/ -m "not db_integration" -q
 
-  eval:
-    name: Smoke eval (20 cases)
+  db-integration-tests:
+    name: DB-backed tests (Development branch)
     needs: changes
     if: needs.changes.outputs.eval == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: CI
+
+    steps:
+      - uses: actions/checkout@v5
+      - run: git lfs pull --include="assets/"
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          pip install --no-cache-dir assets/ml_dtypes-0.4.1-cp313-cp313-linux_x86_64.whl
+          pip install --no-cache-dir -r eval/requirements.txt
+
+      # Runs before the `eval` job (see `needs:` there) so the two never
+      # reset or write to the shared Development branch concurrently.
+      - name: Reset Development branch
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+        run: |
+          python -m eval.booking_db_manager \
+            --project-id orange-art-94985227 --branch-name Development
+
+      - name: Run DB-backed tests
+        env:
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          PGSQL_RW_DB_URL: ${{ secrets.PGSQL_RW_EVAL_DB_URL }}
+          PGSQL_RO_DB_URL: ${{ secrets.PGSQL_RO_EVAL_DB_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: python -m pytest tests/ -m db_integration -q
+
+  eval:
+    name: Smoke eval (23 cases)
+    needs: [changes, db-integration-tests]
+    if: |
+      always() &&
+      (needs.changes.outputs.eval == 'true' || github.event_name == 'workflow_dispatch') &&
+      (needs.db-integration-tests.result == 'success' || needs.db-integration-tests.result == 'skipped')
     runs-on: ubuntu-latest
     environment: CI
 
@@ -133,13 +188,14 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          PGSQL_EVAL_DB_URL: ${{ secrets.PGSQL_EVAL_DB_URL }}
+          PGSQL_RW_EVAL_DB_URL: ${{ secrets.PGSQL_RW_EVAL_DB_URL }}
+          PGSQL_RO_EVAL_DB_URL: ${{ secrets.PGSQL_RO_EVAL_DB_URL }}
           REDIS_URL: ${{ secrets.REDIS_URL }}
-        run: python -m eval.run_experiment --config eval/eval_config_20.toml
+        run: python -m eval.run_experiment --config eval/eval_config_23.toml
 
       - name: Check results against baseline
         run: |
-          RESULTS_DIR=$(ls -dt eval/outputs/hotel-agent-eval-20_*/ 2>/dev/null | head -1)
+          RESULTS_DIR=$(ls -dt eval/outputs/hotel-agent-eval-23_*/ 2>/dev/null | head -1)
           if [ -z "$RESULTS_DIR" ]; then
             echo "ERROR: No eval output directory found." >&2
             exit 1
@@ -150,7 +206,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: eval-logs-20
+          name: eval-logs-23
           path: eval/logs/
           if-no-files-found: ignore
 
@@ -158,18 +214,19 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: eval-results-20
+          name: eval-results-23
           path: eval/outputs/
           if-no-files-found: ignore
 
   deploy:
     name: Push to HuggingFace Space
-    needs: [changes, unit-tests, eval]
+    needs: [changes, unit-tests, db-integration-tests, eval]
     if: |
       always() &&
       needs.changes.result == 'success' &&
       needs.changes.outputs.deploy == 'true' &&
       (needs.unit-tests.result == 'success' || needs.unit-tests.result == 'skipped') &&
+      (needs.db-integration-tests.result == 'success' || needs.db-integration-tests.result == 'skipped') &&
       (needs.eval.result == 'success' || needs.eval.result == 'skipped')
     runs-on: ubuntu-latest
     environment: CI

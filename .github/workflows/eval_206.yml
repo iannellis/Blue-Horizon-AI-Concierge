@@ -1,28 +1,31 @@
-# Full 200-case evaluation workflow for Blue Horizon AI Concierge.
+# Full 206-case evaluation workflow for Blue Horizon AI Concierge.
 #
 # Triggered manually via the GitHub Actions "Run workflow" button.
-# Results are uploaded to LangSmith and compared against the 200-case baseline.
+# Results are uploaded to LangSmith and compared against the 206-case baseline.
 #
 # Required repository/environment secrets (Full Eval environment):
 #   LANGSMITH_API_KEY   – LangSmith API key for dataset loading and tracing.
 #   GEMINI_API_KEY      – Google Gemini API key for the agent, judge, and Ragas.
 #   OPENAI_API_KEY      – OpenAI API key for the information agent and embeddings.
 #   NEON_API_KEY        – Neon management API key for branch reset.
-#   PGSQL_EVAL_DB_URL   – Full PostgreSQL connection string for the eval database.
+#   PGSQL_RW_EVAL_DB_URL – Read-write (bh_agent_rw) PostgreSQL connection string
+#                          for the eval database.
+#   PGSQL_RO_EVAL_DB_URL – Read-only (bh_agent_ro) PostgreSQL connection string
+#                          for the eval database.
 #   REDIS_URL           – Redis connection URL for the agent's cache.
 #
 # Required repository/environment variables (Full Eval environment):
 #   LANGSMITH_TRACING   – Set to "true" to enable LangSmith tracing.
 #   LANGCHAIN_PROJECT   – LangSmith project name for trace grouping.
 
-name: Eval (200 cases)
+name: Eval (206 cases)
 
 on:
   workflow_dispatch:
 
 jobs:
   eval:
-    name: Full eval (200 cases)
+    name: Full eval (206 cases)
     runs-on: ubuntu-latest
     environment: Full Eval
 
@@ -48,25 +51,26 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          PGSQL_EVAL_DB_URL: ${{ secrets.PGSQL_EVAL_DB_URL }}
+          PGSQL_RW_EVAL_DB_URL: ${{ secrets.PGSQL_RW_EVAL_DB_URL }}
+          PGSQL_RO_EVAL_DB_URL: ${{ secrets.PGSQL_RO_EVAL_DB_URL }}
           REDIS_URL: ${{ secrets.REDIS_URL }}
-        run: python -m eval.run_experiment --config eval/eval_config_200.toml
+        run: python -m eval.run_experiment --config eval/eval_config_206.toml
 
       - name: Check results against baseline
         run: |
-          RESULTS_DIR=$(ls -dt eval/outputs/hotel-agent-eval-200_*/ 2>/dev/null | head -1)
+          RESULTS_DIR=$(ls -dt eval/outputs/hotel-agent-eval-206_*/ 2>/dev/null | head -1)
           if [ -z "$RESULTS_DIR" ]; then
             echo "ERROR: No eval output directory found." >&2
             exit 1
           fi
           python -m eval.ci_check "${RESULTS_DIR}results.jsonl" \
-            --baseline eval/baselines/hotel_agent_eval_200_baseline.json
+            --baseline eval/baselines/hotel_agent_eval_206_baseline.json
 
       - name: Upload eval logs
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: eval-logs-200
+          name: eval-logs-206
           path: eval/logs/
           if-no-files-found: ignore
 
@@ -74,6 +78,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: eval-results-200
+          name: eval-results-206
           path: eval/outputs/
           if-no-files-found: ignore

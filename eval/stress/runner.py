@@ -43,11 +43,16 @@ def _load_config() -> StressRunConfig:
         RuntimeError: If a database URL cannot be determined.
 
     """
-    cfg = load_stress_config().stress
+    stress_config = load_stress_config()
+    cfg = stress_config.stress
 
-    db_url = load_stress_config().pgsql_eval_db_url or load_app_config().pgsql_db_url
+    db_url = stress_config.pgsql_rw_eval_db_url or load_app_config().pgsql_rw_db_url
     if not db_url:
         msg = "Database URL is required but was not found"
+        raise RuntimeError(msg)
+    ro_db_url = stress_config.pgsql_ro_eval_db_url or load_app_config().pgsql_ro_db_url
+    if not ro_db_url:
+        msg = "Read-only database URL is required but was not found"
         raise RuntimeError(msg)
 
     return StressRunConfig(
@@ -70,42 +75,51 @@ def _load_config() -> StressRunConfig:
         modify_weight=cfg.workload.modify_weight,
         cancel_weight=cfg.workload.cancel_weight,
         db_url=db_url,
+        ro_db_url=ro_db_url,
     )
 
 
-def _override_db_url(db_url: str) -> None:
-    """Write ``db_url`` to ``PGSQL_DB_URL`` and clear the ``load_app_config`` cache.
+def _override_db_url(db_url: str, ro_db_url: str) -> None:
+    """Write the resolved URLs into the environment and clear the config cache.
 
     ``OrchestrationResources.__init__`` calls ``load_app_config()`` unconditionally,
-    which requires ``PGSQL_DB_URL`` to be present in the environment.  In CI the
-    stress test only receives ``PGSQL_EVAL_DB_URL``; this function bridges the gap
-    by copying ``cfg.db_url`` (already resolved from ``PGSQL_EVAL_DB_URL``) into
-    ``PGSQL_DB_URL`` before the orchestrator is created.
+    which requires ``PGSQL_RW_DB_URL`` and ``PGSQL_RO_DB_URL`` to be present in the
+    environment.  In CI the stress test only receives ``PGSQL_RW_EVAL_DB_URL`` /
+    ``PGSQL_RO_EVAL_DB_URL``; this function bridges the gap by copying the
+    already-resolved URLs into ``PGSQL_RW_DB_URL`` / ``PGSQL_RO_DB_URL`` before the
+    orchestrator is created.
 
     Args:
-        db_url: Resolved database URL to set as ``PGSQL_DB_URL``.
+        db_url: Resolved read-write database URL to set as ``PGSQL_RW_DB_URL``.
+        ro_db_url: Resolved read-only database URL to set as ``PGSQL_RO_DB_URL``.
 
     """
-    os.environ["PGSQL_DB_URL"] = db_url
+    os.environ["PGSQL_RW_DB_URL"] = db_url
+    os.environ["PGSQL_RO_DB_URL"] = ro_db_url
     load_app_config.cache_clear()
-    logger.info("PGSQL_EVAL_DB_URL override applied: PGSQL_DB_URL updated.")
+    logger.info(
+        "Eval DB URL override applied: PGSQL_RW_DB_URL and PGSQL_RO_DB_URL updated.",
+    )
 
 
 async def _start_orchestration(
     *,
     db_url: str,
+    ro_db_url: str,
     ready_timeout_s: float,
 ) -> OrchestrationManager:
     """Start the orchestrator and wait for readiness with a configured timeout.
 
-    The ``db_url`` is forwarded to :class:`OrchestrationManager` so that the
-    booking SQL agent writes to the same database that the reconciliation pool
-    reads from.  When ``PGSQL_EVAL_DB_URL`` is set, ``db_url`` is that eval
-    URL; without it, ``db_url`` is ``PGSQL_DB_URL``.  Either way, agent
-    writes and reconciliation queries share one database.
+    ``db_url`` and ``ro_db_url`` are forwarded to :class:`OrchestrationManager`
+    so that the booking SQL agent's write pool and reconciliation pool share
+    one read-write database, while `run_sql` reads through the read-only role
+    on the same database. When ``PGSQL_RW_EVAL_DB_URL`` / ``PGSQL_RO_EVAL_DB_URL``
+    are set, these are those eval URLs; without them, they fall back to
+    ``PGSQL_RW_DB_URL`` / ``PGSQL_RO_DB_URL``.
 
     Args:
-        db_url: Postgres connection URL used by the booking SQL agent.
+        db_url: Read-write Postgres connection URL used by the booking agent.
+        ro_db_url: Read-only Postgres connection URL used by `run_sql`.
         ready_timeout_s: Maximum number of seconds to wait for readiness.
 
     Returns:
@@ -115,7 +129,9 @@ async def _start_orchestration(
         TimeoutError: If readiness is not reached within the configured timeout.
 
     """
-    orchestration = OrchestrationManager(pgsql_db_url=db_url)
+    orchestration = OrchestrationManager(
+        pgsql_rw_db_url=db_url, pgsql_ro_db_url=ro_db_url,
+    )
     await orchestration.start()
     try:
         await wait_for_orchestration_ready(
@@ -148,7 +164,7 @@ async def run_stress() -> None:
     ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     run_id = f"stress_{ts}"
     _configure_logging(f"stress_{ts}", cfg.log_dir)
-    _override_db_url(cfg.db_url)
+    _override_db_url(cfg.db_url, cfg.ro_db_url)
     stress_cfg = load_stress_config()
     neon_cfg = stress_cfg.neon
     neon_api_key = stress_cfg.neon_api_key
@@ -165,6 +181,7 @@ async def run_stress() -> None:
         async with AsyncExitStack() as stack:
             orchestration = await _start_orchestration(
                 db_url=cfg.db_url,
+                ro_db_url=cfg.ro_db_url,
                 ready_timeout_s=stress_cfg.orchestration.ready_timeout_s,
             )
             stack.push_async_callback(orchestration.stop)

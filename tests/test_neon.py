@@ -13,15 +13,24 @@ import httpx
 import pytest
 
 from blue_horizon.config import NeonConfig
-from blue_horizon.neon import _find_branch, _restore_branch, reset_branch
+from blue_horizon.neon import (
+    _find_branch,
+    _restore_branch,
+    _wait_for_operation,
+    _wait_for_operations,
+    reset_branch,
+)
 
 _PROJECT_ID = "test-project"
 _BRANCH_ID = "br-abc123"
 _PARENT_ID = "br-parent"
 _BRANCH_NAME = "Working"
+_OPERATION_ID = "op-123"
 _LOCK_RETRY_ATTEMPTS_TWO = 2
 _LOCK_RETRY_ATTEMPTS_THREE = 3
 _LOCK_RETRY_DELAY = 1.0
+_OPERATION_POLL_INTERVAL = 0.0
+_OPERATION_POLL_TIMEOUT = 30.0
 
 
 # ---------------------------------------------------------------------------
@@ -94,22 +103,30 @@ class TestFindBranch:
 class TestRestoreBranch:
     """_restore_branch calls the Neon restore endpoint with lock-retry logic."""
 
-    def _make_client(self, status_codes: list[int]) -> MagicMock:
+    def _make_client(
+        self, status_codes: list[int], *, operations: list[dict] | None = None,
+    ) -> MagicMock:
         """Build a mock AsyncClient whose POST returns responses in sequence.
 
         Args:
             status_codes: HTTP status codes to return on successive POST calls.
                 A 423 response does not raise; a non-2xx non-423 response
                 raises httpx.HTTPStatusError via raise_for_status.
+            operations: The ``operations`` list every successful response's
+                body reports. Defaults to a single already-finished operation
+                so tests that don't care about polling don't hang.
 
         Returns:
             MagicMock configured to act as an authenticated AsyncClient.
 
         """
+        if operations is None:
+            operations = [{"id": _OPERATION_ID}]
         responses = []
         for code in status_codes:
             mock_response = MagicMock()
             mock_response.status_code = code
+            mock_response.json.return_value = {"operations": operations}
             if code >= 400:  # noqa: PLR2004
                 mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
                     f"HTTP {code}",
@@ -121,6 +138,10 @@ class TestRestoreBranch:
             responses.append(mock_response)
         client = MagicMock()
         client.post = AsyncMock(side_effect=responses)
+        finished_response = MagicMock()
+        finished_response.raise_for_status.return_value = None
+        finished_response.json.return_value = {"operation": {"status": "finished"}}
+        client.get = AsyncMock(return_value=finished_response)
         return client
 
     def test_succeeds_on_first_attempt(self) -> None:
@@ -134,6 +155,8 @@ class TestRestoreBranch:
                 _PARENT_ID,
                 lock_retry_attempts=3,
                 lock_retry_delay_s=0.0,
+                operation_poll_interval_s=_OPERATION_POLL_INTERVAL,
+                operation_poll_timeout_s=_OPERATION_POLL_TIMEOUT,
             ),
         )
         assert client.post.call_count == 1
@@ -150,6 +173,8 @@ class TestRestoreBranch:
                     _PARENT_ID,
                     lock_retry_attempts=3,
                     lock_retry_delay_s=0.0,
+                    operation_poll_interval_s=_OPERATION_POLL_INTERVAL,
+                    operation_poll_timeout_s=_OPERATION_POLL_TIMEOUT,
                 ),
             )
         assert client.post.call_count == _LOCK_RETRY_ATTEMPTS_TWO
@@ -169,6 +194,8 @@ class TestRestoreBranch:
                     _PARENT_ID,
                     lock_retry_attempts=_LOCK_RETRY_ATTEMPTS_TWO,
                     lock_retry_delay_s=0.0,
+                    operation_poll_interval_s=_OPERATION_POLL_INTERVAL,
+                    operation_poll_timeout_s=_OPERATION_POLL_TIMEOUT,
                 ),
             )
         assert client.post.call_count == _LOCK_RETRY_ATTEMPTS_TWO
@@ -186,9 +213,125 @@ class TestRestoreBranch:
                     _PARENT_ID,
                     lock_retry_attempts=3,
                     lock_retry_delay_s=5.0,
+                    operation_poll_interval_s=_OPERATION_POLL_INTERVAL,
+                    operation_poll_timeout_s=_OPERATION_POLL_TIMEOUT,
                 ),
             )
         sleep_mock.assert_called_once_with(5.0)
+
+    def test_waits_for_returned_operations_before_returning(self) -> None:
+        """The restore doesn't return until the reported operation finishes."""
+        client = self._make_client([200], operations=[{"id": _OPERATION_ID}])
+        asyncio.run(
+            _restore_branch(
+                client,
+                _PROJECT_ID,
+                _BRANCH_ID,
+                _PARENT_ID,
+                lock_retry_attempts=3,
+                lock_retry_delay_s=0.0,
+                operation_poll_interval_s=_OPERATION_POLL_INTERVAL,
+                operation_poll_timeout_s=_OPERATION_POLL_TIMEOUT,
+            ),
+        )
+        client.get.assert_called_once_with(
+            f"https://console.neon.tech/api/v2/projects/{_PROJECT_ID}"
+            f"/operations/{_OPERATION_ID}",
+        )
+
+
+# ---------------------------------------------------------------------------
+# _wait_for_operation / _wait_for_operations
+# ---------------------------------------------------------------------------
+
+
+class TestWaitForOperation:
+    """_wait_for_operation polls a single operation until it is terminal."""
+
+    def _make_client(self, statuses: list[str]) -> MagicMock:
+        """Build a mock AsyncClient whose GET reports statuses in sequence.
+
+        Args:
+            statuses: Operation statuses to return on successive GET calls.
+
+        Returns:
+            MagicMock configured to act as an authenticated AsyncClient.
+
+        """
+        responses = []
+        for status in statuses:
+            mock_response = MagicMock()
+            mock_response.raise_for_status.return_value = None
+            mock_response.json.return_value = {"operation": {"status": status}}
+            responses.append(mock_response)
+        client = MagicMock()
+        client.get = AsyncMock(side_effect=responses)
+        return client
+
+    def test_returns_once_finished(self) -> None:
+        """Polling stops as soon as the operation reports 'finished'."""
+        client = self._make_client(["running", "finished"])
+        with patch("blue_horizon.neon.asyncio.sleep", new_callable=AsyncMock):
+            asyncio.run(
+                _wait_for_operation(
+                    client,
+                    _PROJECT_ID,
+                    _OPERATION_ID,
+                    poll_interval_s=0.0,
+                    timeout_s=_OPERATION_POLL_TIMEOUT,
+                ),
+            )
+        assert client.get.call_count == _LOCK_RETRY_ATTEMPTS_TWO
+
+    def test_raises_on_failed_status(self) -> None:
+        """A 'failed' status raises RuntimeError instead of continuing to poll."""
+        client = self._make_client(["failed"])
+        with pytest.raises(RuntimeError, match="failed"):
+            asyncio.run(
+                _wait_for_operation(
+                    client,
+                    _PROJECT_ID,
+                    _OPERATION_ID,
+                    poll_interval_s=0.0,
+                    timeout_s=_OPERATION_POLL_TIMEOUT,
+                ),
+            )
+
+    def test_raises_on_timeout(self) -> None:
+        """RuntimeError is raised once the deadline passes without finishing."""
+        client = self._make_client(["running", "running", "running"])
+        with pytest.raises(RuntimeError, match="Timed out"):
+            asyncio.run(
+                _wait_for_operation(
+                    client,
+                    _PROJECT_ID,
+                    _OPERATION_ID,
+                    poll_interval_s=0.0,
+                    timeout_s=0.0,
+                ),
+            )
+
+
+class TestWaitForOperations:
+    """_wait_for_operations waits on every operation, skipping id-less ones."""
+
+    def test_waits_for_each_operation_in_order(self) -> None:
+        """Every operation with an id is passed to _wait_for_operation."""
+        wait_mock = AsyncMock()
+        client = MagicMock()
+        with patch("blue_horizon.neon._wait_for_operation", wait_mock):
+            asyncio.run(
+                _wait_for_operations(
+                    client,
+                    _PROJECT_ID,
+                    [{"id": "op-1"}, {}, {"id": "op-2"}],
+                    poll_interval_s=0.0,
+                    timeout_s=_OPERATION_POLL_TIMEOUT,
+                ),
+            )
+        assert wait_mock.call_count == _LOCK_RETRY_ATTEMPTS_TWO
+        polled_ids = [call.args[2] for call in wait_mock.call_args_list]
+        assert polled_ids == ["op-1", "op-2"]
 
 
 # ---------------------------------------------------------------------------
@@ -217,6 +360,8 @@ class TestResetBranch:
                 branch_name=_BRANCH_NAME,
                 lock_retry_attempts=_LOCK_RETRY_ATTEMPTS_THREE,
                 lock_retry_delay_s=_LOCK_RETRY_DELAY,
+                operation_poll_interval_s=_OPERATION_POLL_INTERVAL,
+                operation_poll_timeout_s=_OPERATION_POLL_TIMEOUT,
             )
             asyncio.run(reset_branch(neon_cfg, api_key="api-key"))
         find_mock.assert_called_once()
@@ -226,3 +371,5 @@ class TestResetBranch:
         kwargs = restore_mock.call_args.kwargs
         assert kwargs["lock_retry_attempts"] == _LOCK_RETRY_ATTEMPTS_THREE
         assert kwargs["lock_retry_delay_s"] == _LOCK_RETRY_DELAY
+        assert kwargs["operation_poll_interval_s"] == _OPERATION_POLL_INTERVAL
+        assert kwargs["operation_poll_timeout_s"] == _OPERATION_POLL_TIMEOUT

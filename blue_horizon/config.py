@@ -442,6 +442,13 @@ class NeonConfig(BaseModel):
         lock_retry_attempts: Retry attempts when the branch is locked (HTTP 423).
             Clamped to a minimum of 1.
         lock_retry_delay_s: Seconds to wait between lock retry attempts.
+        operation_poll_interval_s: Seconds to wait between polls of a restore
+            operation's status. The restore API call returns as soon as Neon
+            accepts the request, not once the branch is actually restored, so
+            callers must poll until the operation reports "finished" before
+            treating the branch as ready.
+        operation_poll_timeout_s: Maximum seconds to wait for a restore
+            operation to reach a terminal status before giving up.
 
     """
 
@@ -451,6 +458,8 @@ class NeonConfig(BaseModel):
     branch_name: str
     lock_retry_attempts: Annotated[int, Field(ge=1)] = 8
     lock_retry_delay_s: Annotated[float, Field(ge=0.0)] = 5.0
+    operation_poll_interval_s: Annotated[float, Field(ge=0.0)] = 2.0
+    operation_poll_timeout_s: Annotated[float, Field(gt=0.0)] = 120.0
 
     @field_validator("lock_retry_attempts", mode="before")
     @classmethod

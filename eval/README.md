@@ -155,8 +155,8 @@ For every turn in a case, `run_example` does the following:
    | Field | Captured by | Source |
    |---|---|---|
    | `route_pred` | `on_chain_end` | Orchestrator node output containing `"route"` key |
-   | `tool_summary` | `on_tool_start` / `on_tool_end` | One entry per tool call: `run_sql`, `parser`, `query_faq`, `query_amenities`, `query_services`, `reranker` |
-   | `contexts_used` | `on_chain_end` (reranker node) + `on_tool_end` (run_sql) | Reranker `top_results` text + SQL row strings — used by RAG and judge evaluators |
+   | `tool_summary` | `on_tool_start` / `on_tool_end` | One entry per tool call: `run_sql`, `parser`, `query_faq`, `query_amenities`, `query_services`, `merge` |
+   | `contexts_used` | `on_chain_end` (merge node) + `on_tool_end` (run_sql) | Merge node `top_results` text + SQL row strings — used by RAG and judge evaluators |
 
 4. **Measures wall-clock latency** with `asyncio.get_running_loop().time()` around
    the `ainvoke` call and records `latency_ms` alongside the other turn fields.

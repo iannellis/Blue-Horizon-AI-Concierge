@@ -233,7 +233,7 @@ class EvalCaptureCallback(AsyncCallbackHandler):
         elif "amenities_results" in outputs or "services_results" in outputs:
             self._capture_catalog_node(outputs)
         elif "top_results" in outputs:
-            self._capture_rerank_node(outputs)
+            self._capture_merge_node(outputs)
 
     def _capture_parse_node(self, outputs: dict[str, Any]) -> None:
         """Store the parsed query and append a parser tool-summary entry.
@@ -309,17 +309,17 @@ class EvalCaptureCallback(AsyncCallbackHandler):
             self.tool_summary.append(entry)
             return
 
-    def _capture_rerank_node(self, outputs: dict[str, Any]) -> None:
-        """Append a reranker tool-summary entry and populate contexts_used.
+    def _capture_merge_node(self, outputs: dict[str, Any]) -> None:
+        """Append a merge tool-summary entry and populate contexts_used.
 
         Args:
-            outputs: Rerank-node output containing ``"top_results"``.
+            outputs: Merge-node output containing ``"top_results"``.
 
         """
         results = outputs["top_results"]
         self.tool_summary.append(
             {
-                "tool": "reranker",
+                "tool": "merge",
                 "status": "ok",
                 "count": len(results) if isinstance(results, list) else 0,
             },

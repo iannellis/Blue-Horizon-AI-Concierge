@@ -286,8 +286,8 @@ class InfoAgentFactory:
             "services_results",
         )
 
-        def rerank_node(state: InfoState) -> dict[str, Any]:
-            """Sort all retrieved results by score descending.
+        def merge_results_node(state: InfoState) -> dict[str, Any]:
+            """Merge results from all sources and sort by score descending.
 
             All deduplicated results from FAQ, amenities, and services are passed
             to the LLM in score order. The LLM is instructed via the system prompt
@@ -312,7 +312,7 @@ class InfoAgentFactory:
             """Generate the final response using retrieved context.
 
             Args:
-                state: Current state with reranked results.
+                state: Current state with merged results.
 
             Returns:
                 State patch with the LLM response appended to messages.
@@ -340,17 +340,17 @@ class InfoAgentFactory:
         graph.add_node("query_faq", query_faq_node)
         graph.add_node("query_amenities", query_amenities_node)
         graph.add_node("query_services", query_services_node)
-        graph.add_node("rerank", rerank_node)
+        graph.add_node("merge", merge_results_node)
         graph.add_node("respond", respond_node)
 
         graph.add_edge(START, "parse")
         graph.add_edge("parse", "query_faq")
         graph.add_edge("parse", "query_amenities")
         graph.add_edge("parse", "query_services")
-        graph.add_edge("query_faq", "rerank")
-        graph.add_edge("query_amenities", "rerank")
-        graph.add_edge("query_services", "rerank")
-        graph.add_edge("rerank", "respond")
+        graph.add_edge("query_faq", "merge")
+        graph.add_edge("query_amenities", "merge")
+        graph.add_edge("query_services", "merge")
+        graph.add_edge("merge", "respond")
         graph.add_edge("respond", END)
 
         return graph.compile()

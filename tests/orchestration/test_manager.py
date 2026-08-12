@@ -262,13 +262,13 @@ class TestAinvokeStreamStages:
                 _chain_start("query_faq"),
                 _chain_start("query_amenities"),
                 _chain_start("query_services"),
-                _chain_start("rerank"),
+                _chain_start("merge"),
                 _chain_start("respond"),
             ]),
         )
         events = asyncio.run(_run_stream(manager))
         stage_labels = [e["label"] for e in events if e["type"] == "stage"]
-        # routing, search (once), parse, rerank, respond = 5 unique stage keys
+        # routing, search (once), parse, merge, respond = 5 unique stage keys
         assert len(stage_labels) == 5  # noqa: PLR2004
         assert stage_labels[0] == "Routing your request\u2026"
         assert stage_labels[-1] == "Generating response\u2026"

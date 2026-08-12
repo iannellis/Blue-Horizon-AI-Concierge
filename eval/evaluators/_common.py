@@ -25,7 +25,7 @@ _INFO_REQUIRED_TOOLS = (
     "query_faq",
     "query_amenities",
     "query_services",
-    "reranker",
+    "merge",
 )
 
 # Tool names used by rooms agent SQL generation

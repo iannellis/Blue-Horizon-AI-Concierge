@@ -45,7 +45,7 @@ _NODE_TO_STAGE: dict[str, tuple[str, str]] = {
     "query_faq": ("search", "Searching hotel information\u2026"),
     "query_amenities": ("search", "Searching hotel information\u2026"),
     "query_services": ("search", "Searching hotel information\u2026"),
-    "rerank": ("rerank", "Ranking results\u2026"),
+    "merge": ("merge", "Ranking results\u2026"),
     "respond": ("respond", "Generating response\u2026"),
 }
 

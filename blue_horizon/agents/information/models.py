@@ -162,7 +162,7 @@ class InfoState(MessagesState, total=False):
         faq_results: Retrieved FAQ items.
         amenities_results: Retrieved amenity items.
         services_results: Retrieved service items.
-        top_results: Reranked items across sources.
+        top_results: Merged items across sources, sorted by score.
 
     """
 

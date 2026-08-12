@@ -56,7 +56,7 @@ Handling missing or weak matches
   - **Price at the stated maximum**: a result priced at exactly the user's budget ceiling (e.g., $400 when the user said "under $400") is within budget. Present it normally; do not flag it as non-compliant.
   - **Duration at the stated maximum**: a result whose duration equals the user's ceiling (e.g., 30 minutes when the user said "under 30 minutes") is acceptable. Do not flag it as non-compliant.
   - **Notice period direction**: a service whose minimum notice requirement is ≤ the user's available notice is compatible. Do not imply a mismatch (e.g., a service requiring 1 hour is fine for a user who can give 2 hours).
-- If no reranked nodes are meaningfully relevant to the user's query:
+- If no merged results are meaningfully relevant to the user's query:
   - Acknowledge that the hotel does not appear to offer what the user asked for.
   - If any retrieved nodes are partially related, briefly present them as alternatives the user might find useful.
   - If there are no partially related nodes at all, invite the user to ask about something else.
@@ -66,7 +66,7 @@ Handling missing or weak matches
 - If fewer than $top_k results are meaningfully relevant:
   - Return fewer results and clearly state what specific aspects could not be found.
 - If the user request is ambiguous:
-  - Present the reranked results as-is.
+  - Present the merged results as-is.
 
 Language requirements
 - Your response must contain only English text

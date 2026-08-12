@@ -12,7 +12,7 @@ startup_duration_timeout: 1h
 
 An AI-powered hotel concierge that handles natural language queries about hotel information and room bookings.
 
-The **agent backend** is built with [LangGraph](https://github.com/langchain-ai/langgraph) and served via [FastAPI](https://fastapi.dev). A router LLM classifies each incoming message and dispatches it to one of two specialised sub-agents: a RAG-based information agent (Redis vector store + reranking) or a natural-language-to-SQL rooms/bookings agent (PostgreSQL). The booking agent only ever searches and *proposes* — every booking, cancellation, and modification is committed by server-side code once a guest confirms, never by the model. Conversation history is maintained across turns via LangGraph's `MemorySaver` checkpointer, keyed by `thread_id`, so multiple concurrent sessions are fully isolated from one another. The backend streams stage-progress and proposal events to the client via SSE so the UI can show live status and a confirmation dialog while the agent works.
+The **agent backend** is built with [LangGraph](https://github.com/langchain-ai/langgraph) and served via [FastAPI](https://fastapi.dev). A router LLM classifies each incoming message and dispatches it to one of two specialised sub-agents: a RAG-based information agent (Redis vector store + result merging) or a natural-language-to-SQL rooms/bookings agent (PostgreSQL). The booking agent only ever searches and *proposes* — every booking, cancellation, and modification is committed by server-side code once a guest confirms, never by the model. Conversation history is maintained across turns via LangGraph's `MemorySaver` checkpointer, keyed by `thread_id`, so multiple concurrent sessions are fully isolated from one another. The backend streams stage-progress and proposal events to the client via SSE so the UI can show live status and a confirmation dialog while the agent works.
 
 The **chat UI** is built with [Streamlit](https://streamlit.io). It connects to the FastAPI backend and displays a stage-aware progress indicator inside the assistant bubble as each request is processed, then renders the final response.
 
@@ -51,7 +51,7 @@ The information agent follows a RAG pipeline:
 
 1. A **parse** node extracts one or more sub-queries from the user message, along with any constraints (price bounds, duration bounds, booking requirements, and notice time).
 2. Three **retrieval** nodes run in parallel against separate Redis vector indices (FAQ, amenities, services).
-3. A **rerank** node merges and deduplicates retrieved context.
+3. A **merge** node merges and deduplicates retrieved context.
 4. A **respond** node generates the final answer.
 
 Embeddings are produced with OpenAI and stored in Redis via LlamaIndex.
@@ -306,7 +306,7 @@ These metrics are assessed at each individual exchange and then averaged across 
 | Info | 5,471 | 9,829 | 11,861 |
 | Booking | 5,895 | 8,731 | 10,912 |
 
-Refuse requests resolve fastest (router only). Info requests go through the full RAG pipeline (parse → parallel retrieval → rerank → respond). Booking requests run NL-to-SQL search plus, on a propose call, an in-process pricing pass against `room_availability` — the write itself only happens later, on confirm, and is not included in this per-turn latency.
+Refuse requests resolve fastest (router only). Info requests go through the full RAG pipeline (parse → parallel retrieval → merge → respond). Booking requests run NL-to-SQL search plus, on a propose call, an in-process pricing pass against `room_availability` — the write itself only happens later, on confirm, and is not included in this per-turn latency.
 
 ---
 

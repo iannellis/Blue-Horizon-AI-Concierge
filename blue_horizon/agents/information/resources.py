@@ -233,7 +233,7 @@ class InfoRagResources:
 
         """
         try:
-            await self.redis_async.close()
+            await self.redis_async.aclose()
         finally:
             await self.redis_async.connection_pool.disconnect()  # type: ignore[misc]
 

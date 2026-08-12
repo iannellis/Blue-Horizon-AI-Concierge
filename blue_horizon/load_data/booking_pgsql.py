@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -15,7 +16,6 @@ from blue_horizon.load_data import _repo_root
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
-    from pathlib import Path
 
 
 def get_data_path() -> Path:
@@ -473,6 +473,35 @@ def setup_booking_rooms_schema(conn: psycopg.Connection) -> None:
         )
 
 
+def regrant_booking_agent_role(conn: psycopg.Connection) -> None:
+    """Reapply the `bh_agent_ro`/`bh_agent_rw` grants dropped by table rebuilds.
+
+    Every `setup_*_schema` function above does `DROP TABLE ... CASCADE` before
+    recreating its table, which drops any grants that were on it. Without this
+    step, a reload silently leaves both booking-agent roles with zero
+    privileges on every table until someone notices and reruns the SQL file by
+    hand — which is exactly what caused a real `InsufficientPrivilege` failure
+    across the whole `db_integration` test suite after a reload with no
+    follow-up regrant.
+
+    The exact grants applied are defined once, in
+    `regrant_booking_agent_role.sql` next to this module (see that file's
+    header for the full per-role rationale); this just executes it so the
+    grants can never drift out of sync with a reload again.
+
+    Args:
+        conn: Active database connection, authenticated as a role with
+            GRANT/REVOKE privileges on the affected tables (i.e. the same
+            root connection `reload_sql_tables` already uses).
+
+    Raises:
+        FileNotFoundError: If `regrant_booking_agent_role.sql` is missing.
+
+    """
+    sql_path = Path(__file__).with_name("regrant_booking_agent_role.sql")
+    conn.execute(sql_path.read_text(encoding="utf-8"))
+
+
 def reload_sql_tables() -> None:
     """Prepare data and rebuild the room, availability, and booking tables.
 
@@ -482,7 +511,9 @@ def reload_sql_tables() -> None:
     picker). It also (re)creates the `bookings` and `booking_rooms` tables,
     which start empty: this project deliberately loads no pre-existing
     bookings, since cancelling one would return a room to the pool with no
-    rate attached (see notebooks/neonsql.ipynb).
+    rate attached (see notebooks/neonsql.ipynb). Finally, it reapplies the
+    `bh_agent_ro`/`bh_agent_rw` grants that the table rebuilds dropped, via
+    `regrant_booking_agent_role`.
 
     This function drops and recreates every table it touches, so it must be
     run against a branch's parent, never a branch that gets reset in place —
@@ -519,6 +550,8 @@ def reload_sql_tables() -> None:
 
             setup_bookings_schema(conn)
             setup_booking_rooms_schema(conn)
+
+            regrant_booking_agent_role(conn)
     except Exception:  # pragma: no cover - retries logged
         logger.exception("Failed to rebuild booking tables")
         raise

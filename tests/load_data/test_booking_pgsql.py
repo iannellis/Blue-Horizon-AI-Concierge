@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Self
 
 import pandas as pd
@@ -14,10 +15,10 @@ from blue_horizon.load_data.booking_pgsql import (
     copy_dataframe_into_table,
     prepare_room_availability_dataframe,
     prepare_rooms_dataframe,
+    regrant_booking_agent_role,
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
     from types import TracebackType
 
 
@@ -174,3 +175,41 @@ class TestCopyDataFrameIntoTable:
         assert conn.cursor_obj.copy_context.rows == [
             (101, 101, "2026-06-01", "Available", 325.0, 4),
         ]
+
+
+class _FakeExecuteConnection:
+    """Connection wrapper recording the SQL text passed to ``execute``."""
+
+    def __init__(self) -> None:
+        """Initialize the connection with no recorded SQL yet."""
+        self.executed_sql: str | None = None
+
+    def execute(self, sql: str) -> None:
+        """Record the SQL text this connection was asked to execute.
+
+        Args:
+            sql: The SQL text passed to ``execute``.
+
+        """
+        self.executed_sql = sql
+
+
+class TestRegrantBookingAgentRole:
+    """regrant_booking_agent_role executes the checked-in grants SQL file."""
+
+    def test_executes_the_sql_file_contents(self) -> None:
+        """The connection receives the full text of the .sql file, verbatim."""
+        conn = _FakeExecuteConnection()
+
+        regrant_booking_agent_role(conn)
+
+        sql_path = (
+            Path(__file__).parents[2]
+            / "blue_horizon"
+            / "load_data"
+            / "regrant_booking_agent_role.sql"
+        )
+        assert conn.executed_sql == sql_path.read_text(encoding="utf-8")
+        assert conn.executed_sql is not None
+        assert "bh_agent_ro" in conn.executed_sql
+        assert "bh_agent_rw" in conn.executed_sql

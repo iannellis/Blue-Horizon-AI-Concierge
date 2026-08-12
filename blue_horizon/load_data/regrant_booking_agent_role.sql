@@ -28,6 +28,12 @@
 --          sequences and on the `booking_status` enum
 --
 -- Usage:
+-- - `blue_horizon/load_data/booking_pgsql.py`'s `reload_sql_tables()` now runs
+--   this automatically, as its last step, against the same connection it
+--   used to reload the data -- so a normal data reload can no longer leave
+--   the booking-agent roles without grants. Run it by hand only for an
+--   out-of-band fix (e.g. a branch that somehow lost its grants without a
+--   reload) or while debugging.
 -- - Run this on the branch whose permissions you want to fix, typically
 --   immediately after reloading data (a branch's *parent*, per the plan's
 --   branch-discipline notes — the loader drops and recreates tables, so

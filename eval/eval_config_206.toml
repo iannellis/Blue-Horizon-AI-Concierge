@@ -62,7 +62,7 @@ ready_timeout_s = 90.0
 
 [judge]
 # Judge model name used for rubric grading (Gemini model unless code edited).
-model = "gemini-2.5-flash"
+model = "gemini-3.5-flash-lite"
 # Maximum cards the information agent presents per response (matches info.retrieval.top_k).
 # The judge uses this to avoid penalising the agent for omitting additional valid options.
 info_cards_max = 4
@@ -81,7 +81,7 @@ response_chars = 2000
 # Maximum characters for reference answers.
 reference_chars = 2000
 # Gemini model used for Ragas LLM scoring.
-llm_model = "gemini-2.5-flash"
+llm_model = "gemini-3.5-flash-lite"
 # Maximum output tokens for the Ragas LLM.
 llm_max_tokens = 2048
 # Gemini model used for Ragas embeddings.

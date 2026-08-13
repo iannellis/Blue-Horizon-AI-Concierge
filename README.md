@@ -336,5 +336,17 @@ The `eval/` directory contains a standalone evaluation framework with its own do
 ## Running Tests
 
 ```bash
-pytest
+# Unit tests — no external services required
+pytest -m "not db_integration"
+
+# DB-backed tests — needs a real Postgres reachable via PGSQL_RW_DB_URL/
+# PGSQL_RO_DB_URL with the bh_agent_rw/bh_agent_ro roles granted (see
+# blue_horizon/load_data/regrant_booking_agent_role.sql); tests/api/test_app.py
+# additionally needs REDIS_URL and OPENAI_API_KEY to start the real app.
+pytest -m db_integration
 ```
+
+Plain `pytest` runs both groups together, so the `db_integration` tests will fail
+without that setup — see the `db_integration` marker docstring in `pyproject.toml`
+and the `db-integration-tests` job in `.github/workflows/ci.yml` for how CI
+provisions them (against a scratch Neon branch).

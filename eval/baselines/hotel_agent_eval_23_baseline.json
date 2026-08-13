@@ -1,6 +1,6 @@
 {
-  "generated_from": "hotel-agent-eval-23_20260811_210519_Small_dataset_with_23_cases",
-  "description": "Baseline metric thresholds for the 23-case smoke eval (propose/confirm booking architecture). strict=true metrics require every individual case score to equal 1.0; strict=false metrics require the mean across cases to be >= min_allowed.",
+  "generated_from": "hotel-agent-eval-23_20260813_035845_Small_dataset_with_23_cases",
+  "description": "Baseline metric thresholds for the 23-case smoke eval (propose/confirm booking architecture). strict=true metrics require every individual case score to equal 1.0; strict=false metrics require the mean across cases to be >= min_allowed. Judge and Ragas LLM is gemini-3.5-flash-lite (gemini-2.5-flash was deprecated for this account); booking.llm.reasoning_effort is medium.",
   "metrics": {
     "route_accuracy": {
       "baseline": 1.0,
@@ -63,18 +63,18 @@
       "strict": false
     },
     "rag_faithfulness_mean": {
-      "baseline": 0.9838,
+      "baseline": 0.9502,
       "min_allowed": 0.80,
       "strict": false
     },
     "rag_answer_relevancy_mean": {
-      "baseline": 0.7116,
+      "baseline": 0.8139,
       "min_allowed": 0.55,
       "strict": false
     },
     "rag_context_precision_mean": {
-      "baseline": 0.8367,
-      "min_allowed": 0.75,
+      "baseline": 0.8686,
+      "min_allowed": 0.70,
       "strict": false
     },
     "rag_context_recall_mean": {

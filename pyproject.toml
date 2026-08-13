@@ -8,9 +8,9 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
-    "llama-index (>=0.14.6,<0.15.0)",
-    "llama-index-vector-stores-redis (>=0.6.1,<0.7.0)",
-    "redisvl (>=0.4.1,<0.5.0)",
+    "llama-index (>=0.14.6,<1.0.0)",
+    "llama-index-vector-stores-redis (>=0.6.1,<1.0.0)",
+    "redisvl (>=0.4.1,<1.0.0)",
     "python-dotenv (>=1.2.1,<2.0.0)",
     "psycopg[binary, pool] (>=3.2.12,<4.0.0)",
     "langchain (>=1.1.0,<2.0.0)",
@@ -20,7 +20,7 @@ dependencies = [
     "fastapi[standard] (>=0.129.0)",
     "tenacity (>=8.2.0,<10.0.0)",
     "sqlglot (>=30.0.3,<31.0.0)",
-    "pandera (>=0.30.1,<0.31.0)",
+    "pandera (>=0.30.1,<1.0.0)",
 ]
 
 [dependency-groups]
@@ -33,19 +33,31 @@ eval = [
     "langchain-google-genai (>=4.2.0,<5.0.0)",
     "pytest (>=8.0.0,<9.0.0)",
     "ragas (==0.4.3)",  # fixed so tests don't change due to version changes
+    # google-genai 1.72.0 added gemini-embedding-2-specific handling to
+    # Models.embed_content() that runs a bare list[str] through the
+    # generate_content content-normalizer, collapsing it into one multi-part
+    # Content before the batch-embed path sees it -- so embed_content(
+    # contents=[N strings]) silently returns 1 embedding instead of N for
+    # this model family specifically (text-embedding-004 and
+    # gemini-embedding-001 are unaffected). ragas==0.4.3's AnswerRelevancy
+    # reshapes the result without validating the count, so it silently
+    # corrupts the embedding matrix instead of raising -- zeroing that
+    # metric. Pin below the 1.72.0 break until ragas is re-verified against
+    # a newer release.
+    "google-genai (>=1.65.0,<1.72.0)",
 ]
 notebook = [
     "ipykernel (>=7.1.0,<8.0.0)",
     "ipywidgets (>=8.1.8,<9.0.0)",
-    "openai (>=2.7.2,<3.0.0)",
-    "langchain-community (>=0.4.1,<0.5.0)",
-    "pydantic-ai-slim[openai, google, duckduckgo, logfire] (>=1.20.0,<2.0.0)",
-    "llama-index-embeddings-huggingface (>=0.6.1,<0.7.0)",
-    "llama-index-llms-openai (>=0.6.6,<0.7.0)",
-    "llama-index-embeddings-google-genai (>=0.3.1,<0.4.0)",
+    "openai (>=2.7.2,<4.0.0)",
+    "langchain-community (>=0.4.1,<0.4.2)",  # 0.4.2 drops chat_models.vertexai, which ragas==0.4.3 still imports
+    "pydantic-ai-slim[openai, google, duckduckgo, logfire] (>=1.20.0,<3.0.0)",
+    "llama-index-embeddings-huggingface (>=0.6.1,<1.0.0)",
+    "llama-index-llms-openai (>=0.6.6,<1.0.0)",
+    "llama-index-embeddings-google-genai (>=0.3.1,<1.0.0)",
 ]
 lint = [
-    "ruff (>=0.14.5,<0.15.0)",
+    "ruff (>=0.14.5,<1.0.0)",
 ]
 
 [build-system]
@@ -56,3 +68,6 @@ build-backend = "poetry.core.masonry.api"
 markers = [
     "db_integration: needs a real Postgres reachable via PGSQL_RW_DB_URL/PGSQL_RO_DB_URL with the bh_agent_rw/bh_agent_ro roles granted (see blue_horizon/load_data/regrant_booking_agent_role.sql); tests/api/test_app.py additionally needs REDIS_URL and OPENAI_API_KEY to start the real app. Excluded from the default run; see .github/workflows/ci.yml's db-integration-tests job.",
 ]
+
+[tool.uv]
+package = false

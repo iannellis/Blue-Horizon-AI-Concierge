@@ -66,8 +66,8 @@ eval/
 | `LANGSMITH_API_KEY` | Yes | LangSmith API key |
 | `LANGSMITH_TRACING` | Yes | Set to `true` to enable tracing |
 | `LANGCHAIN_PROJECT` | Yes | LangSmith project name for traces |
-| `GEMINI_API_KEY` | Yes | Gemini API key (agent, judge, Ragas) |
-| `OPENAI_API_KEY` | Yes | OpenAI API key (info agent, embeddings) |
+| `GEMINI_API_KEY` | Yes | Gemini API key (judge, Ragas) |
+| `OPENAI_API_KEY` | Yes | OpenAI API key (agents, embeddings) |
 | `PGSQL_RW_EVAL_DB_URL` | Yes | Read-write (`bh_agent_rw`) PostgreSQL connection string for eval DB |
 | `PGSQL_RO_EVAL_DB_URL` | Yes | Read-only (`bh_agent_ro`) PostgreSQL connection string for eval DB, used exclusively by `run_sql` |
 | `NEON_API_KEY` | Yes | Neon management API key (branch reset) |

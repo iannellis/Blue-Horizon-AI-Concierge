@@ -147,6 +147,36 @@ def _sanitize_notes(notes: str) -> str:
     return token[:40]
 
 
+def _resolve_run_notes(
+    configured_notes: str | None,
+    case_ids: list[str] | None,
+) -> str | None:
+    """Replace the configured run notes with a subset label when case-filtered.
+
+    The configured ``run_notes`` (e.g. "Full dataset with 206 cases") describes
+    the full dataset and becomes misleading in the experiment name and output
+    directory once ``--case-id`` restricts the run to a handful of examples.
+    When a case-id filter is active, this builds a notes string derived from the
+    requested case IDs instead, so downstream naming makes the subset explicit
+    rather than claiming to be the full run.
+
+    Args:
+        configured_notes: The ``run_notes`` value from the TOML config.
+        case_ids: Requested case_id filter, or ``None`` to run the full dataset.
+
+    Returns:
+        ``configured_notes`` unchanged when no case-id filter is active,
+        otherwise a "subset_..." label built from ``case_ids``.
+
+    """
+    if case_ids is None:
+        return configured_notes
+    if len(case_ids) == 1:
+        return f"subset_{case_ids[0]}"
+    shown = "_".join(case_ids[:2])
+    return f"subset_{len(case_ids)}cases_{shown}"
+
+
 def _build_output_paths(base_dir: Path, experiment_name: str) -> RunArtifacts:
     """Create an experiment output directory and artifact paths.
 
@@ -208,6 +238,37 @@ def _load_dataset_examples(
         if limit is not None and len(loaded) >= limit:
             break
     return loaded
+
+
+def _filter_examples_by_case_id(
+    examples: list[Example],
+    case_ids: list[str] | None,
+) -> list[Example]:
+    """Restrict examples to the requested ``case_id`` values, if any.
+
+    Args:
+        examples: Loaded LangSmith examples.
+        case_ids: Case IDs to keep, or ``None`` to keep every example.
+
+    Returns:
+        The filtered list of examples, in their original relative order.
+
+    Raises:
+        ValueError: If any requested ``case_id`` matches no loaded example.
+
+    """
+    if case_ids is None:
+        return examples
+    wanted = set(case_ids)
+    matched = [
+        ex for ex in examples if (ex.inputs or {}).get("case_id") in wanted
+    ]
+    found = {(ex.inputs or {}).get("case_id") for ex in matched}
+    missing = wanted - found
+    if missing:
+        msg = f"No dataset example(s) found for case_id(s): {sorted(missing)}"
+        raise ValueError(msg)
+    return matched
 
 
 _BOOKING_TAGS: frozenset[str] = frozenset({"booking", "mixed"})
@@ -353,6 +414,17 @@ def _parse_args() -> argparse.Namespace:
             "Defaults to eval/eval_config.toml when omitted."
         ),
     )
+    parser.add_argument(
+        "--case-id",
+        metavar="CASE_ID",
+        action="append",
+        default=None,
+        help=(
+            "Restrict the run to one dataset case_id (e.g. case_0117). "
+            "May be passed multiple times to run several specific cases. "
+            "Defaults to the full configured dataset when omitted."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -477,7 +549,7 @@ async def main() -> None:
     dataset_name = cfg.experiment.dataset_name
     experiment_name = _build_experiment_name(
         cfg.experiment.experiment_prefix,
-        cfg.experiment.run_notes,
+        _resolve_run_notes(cfg.experiment.run_notes, args.case_id),
         started_at,
     )
     artifacts = _build_output_paths(cfg.experiment.output_dir, experiment_name)
@@ -502,6 +574,7 @@ async def main() -> None:
     )
 
     examples = _load_dataset_examples(dataset_name, cfg.experiment.limit)
+    examples = _filter_examples_by_case_id(examples, args.case_id)
     if _has_booking_cases(examples):
         await _prepare_eval_database(cfg)
 

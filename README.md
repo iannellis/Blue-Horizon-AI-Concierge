@@ -266,15 +266,15 @@ Optional Google OAuth can be enabled by setting `GOOGLE_CLIENT_ID`, `GOOGLE_CLIE
 
 ## Evaluation Metrics
 
-Metrics collected from a structured evaluation run over the 206-case dataset at [`eval/datasets/hotel_agent_eval_206.jsonl`](eval/datasets/hotel_agent_eval_206.jsonl).
+Metrics collected from a structured evaluation run over the 206-case dataset at [`eval/datasets/hotel_agent_eval_206.jsonl`](eval/datasets/hotel_agent_eval_206.jsonl). Every metric that requires a model judge or scorer — all three conversation-level scores plus the four RAG metrics below — is graded by Gemini `gemini-3.5-flash-lite`, configured in [`eval/eval_config_206.toml`](eval/eval_config_206.toml) as both `[judge].model` and `[ragas].llm_model`. **RAG answer relevancy** additionally embeds the question with the Gemini `gemini-embedding-2` model (`[ragas].embedding_model`) to compare it against the query Ragas regenerates from the answer — the only metric in this run that consumes an embedding model rather than pure LLM judging. The remaining per-turn metrics (route accuracy, booking outcomes, info filters/reference checks) are deterministic, code-based checks with no model in the loop.
 
 ### Conversation-level scores
 
-These metrics are assessed once per multi-turn conversation by an LLM judge.
+These metrics are assessed once per multi-turn conversation by an LLM judge (`gemini-3.5-flash-lite`).
 
 | Metric | Score |
 |--------|-------|
-| Consumer quality (1–5) | 4.93 |
+| Consumer quality (1–5) | 4.97 |
 | Grounding (1–5) | 5.00 |
 | Injection resistance (1–5) | 5.00 |
 
@@ -282,29 +282,29 @@ These metrics are assessed once per multi-turn conversation by an LLM judge.
 
 ### Per-turn scores
 
-These metrics are assessed at each individual exchange and then averaged across all turns in the dataset.
+These metrics are assessed at each individual exchange and then averaged across all turns in the dataset. The four RAG metrics are scored by Ragas using `gemini-3.5-flash-lite` as the judge LLM; RAG answer relevancy also uses the `gemini-embedding-2` embedding model. Everything else in this table is a deterministic code check, not a model judgment.
 
-| Metric | Score |
-|--------|-------|
-| Route accuracy | 99.5% |
-| Booking — no unexpected failure rate | 100% |
-| Booking — tool call success rate | 100% |
-| RAG faithfulness | 96.9% |
-| RAG context recall | 99.6% |
-| RAG context precision | 80.6% |
-| RAG answer relevancy | 76.5% |
-| Info filters pass rate | 100% |
-| Info reference subset pass rate | 99.3% |
+| Metric | Score | Scored by |
+|--------|-------|-----------|
+| Route accuracy | 100% | code |
+| Booking — no unexpected failure rate | 100% | code |
+| Booking — tool call success rate | 100% | code |
+| RAG faithfulness | 93.8% | `gemini-3.5-flash-lite` |
+| RAG context recall | 99.5% | `gemini-3.5-flash-lite` |
+| RAG context precision | 75.0% | `gemini-3.5-flash-lite` |
+| RAG answer relevancy | 84.1% | `gemini-3.5-flash-lite` + `gemini-embedding-2` |
+| Info filters pass rate | 99.2% | code |
+| Info reference subset pass rate | 100% | code |
 
-**Route accuracy** measures how often the router correctly dispatches to the information or rooms agent (or refuses); the 0.5% gap is two single-turn misroutes out of 206 multi-turn cases (one under-refusal, one over-refusal), each caught safely by the destination agent's own scope-limiting rather than causing any unsafe behavior. **Booking — no unexpected failure rate** measures whether a booking/cancellation/modification's success-or-failure outcome matched the case's expectation (e.g. a request for an already-taken night is *expected* to fail; that's not counted against the agent). **Booking — tool call success rate** is stricter: it flags any `propose_*`/`run_sql` call that errored on a turn that was expected to succeed. This ran at 96.2% prior to a fix in [`booking.txt`](blue_horizon/system_prompts/booking.txt) requiring every column in a `rooms`/`room_availability` join to be table-qualified (both tables define `max_occupancy`, so an unqualified reference was ambiguous and errored); a rerun after the fix showed zero tool-call errors. **RAG faithfulness** measures whether generated answers stay within the retrieved context; **RAG context recall** measures whether all relevant context was retrieved. **Info filters pass rate** measures whether the information agent correctly honours user-specified constraints (price, duration, booking requirements, etc.) when selecting and presenting results. **Info reference subset pass rate** measures whether the expected source documents (FAQ entries, amenity cards, service cards) appear in the set of documents retrieved for a given query.
+**Route accuracy** measures how often the router correctly dispatches to the information or rooms agent (or refuses); this run had zero misroutes across all 206 multi-turn cases. **Booking — no unexpected failure rate** measures whether a booking/cancellation/modification's success-or-failure outcome matched the case's expectation (e.g. a request for an already-taken night is *expected* to fail; that's not counted against the agent). **Booking — tool call success rate** is stricter: it flags any `propose_*`/`run_sql` call that errored on a turn that was expected to succeed. This ran at 96.2% prior to a fix in [`booking.txt`](blue_horizon/system_prompts/booking.txt) requiring every column in a `rooms`/`room_availability` join to be table-qualified (both tables define `max_occupancy`, so an unqualified reference was ambiguous and errored); this run shows zero tool-call errors. **RAG faithfulness** measures whether generated answers stay within the retrieved context; **RAG context recall** measures whether all relevant context was retrieved. **Info filters pass rate** measures whether the information agent correctly honours user-specified constraints (price, duration, booking requirements, etc.) when selecting and presenting results. **Info reference subset pass rate** measures whether the expected source documents (FAQ entries, amenity cards, service cards) appear in the set of documents retrieved for a given query.
 
 ### Latency (end-to-end, ms)
 
 | Route | p50 | p95 | p99 |
 |-------|-----|-----|-----|
-| Refuse | 1,150 | 1,923 | 2,420 |
-| Info | 5,471 | 9,829 | 11,861 |
-| Booking | 5,895 | 8,731 | 10,912 |
+| Refuse | 1,053 | 1,497 | 2,937 |
+| Info | 4,668 | 7,375 | 9,300 |
+| Booking | 4,851 | 8,204 | 10,140 |
 
 Refuse requests resolve fastest (router only). Info requests go through the full RAG pipeline (parse → parallel retrieval → merge → respond). Booking requests run NL-to-SQL search plus, on a propose call, an in-process pricing pass against `room_availability` — the write itself only happens later, on confirm, and is not included in this per-turn latency.
 
@@ -317,13 +317,13 @@ A concurrent stress test simulated 50 simultaneous sessions with 5 booking opera
 | Result | Value |
 |--------|-------|
 | Operations completed (of 250) | 250 (0 errored) |
-| Successful bookings/modifies/cancels | 96 (38.4%) |
-| Correctly-refused conflicts | 154 (61.6%) |
+| Successful bookings/modifies/cancels | 98 (39.2%) |
+| Correctly-refused conflicts | 152 (60.8%) |
 | Double-booking violations | 0 |
 | Reservations with null status | 0 |
-| Expected bookings confirmed in DB | 30 / 30 |
+| Expected bookings confirmed in DB | 26 / 26 |
 
-The high conflict rate is expected and by design — 80% of operations target the same 10 hot slots, so most of them are supposed to lose the race. What matters is that they lose it *cleanly*: a **double-booking violation** is two `booking_rooms` rows for the same room with overlapping date ranges — i.e., `commit_booking`/`modify_booking` failed to enforce mutual exclusion under load. (Earlier versions of this check grouped `room_availability` by `(room_id, date)`, which that table's own `UNIQUE` constraint makes impossible to ever violate — a tautology that always passed regardless of what the agent did. The current check is against `booking_rooms`, the table that can actually represent two guests holding the same night, and was confirmed to go red against a hand-inserted overlapping pair before being trusted.) A **null-status reservation** is a `room_availability` row without a valid status field, indicating a partially-written or corrupted booking. Separately, the harness reconciles every thread's expected final booking against the database — all 30 threads that ended with a successful book/modify had that exact room and date range sitting `Booked` in the database, confirming the agent never reported a success that didn't actually commit.
+The high conflict rate is expected and by design — 80% of operations target the same 10 hot slots, so most of them are supposed to lose the race. What matters is that they lose it *cleanly*: a **double-booking violation** is two `booking_rooms` rows for the same room with overlapping date ranges — i.e., `commit_booking`/`modify_booking` failed to enforce mutual exclusion under load. (Earlier versions of this check grouped `room_availability` by `(room_id, date)`, which that table's own `UNIQUE` constraint makes impossible to ever violate — a tautology that always passed regardless of what the agent did. The current check is against `booking_rooms`, the table that can actually represent two guests holding the same night, and was confirmed to go red against a hand-inserted overlapping pair before being trusted.) A **null-status reservation** is a `room_availability` row without a valid status field, indicating a partially-written or corrupted booking. Separately, the harness reconciles every thread's expected final booking against the database — all 26 threads that ended with a successful book/modify had that exact room and date range sitting `Booked` in the database, confirming the agent never reported a success that didn't actually commit.
 
 ---
 

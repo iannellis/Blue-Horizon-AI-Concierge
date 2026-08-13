@@ -107,7 +107,7 @@ parser_prompt_filename = "information_parser.txt"
 # Chat model name.
 model = "gpt-5.6-luna"
 # OpenAI reasoning effort hint (if supported by your model).
-reasoning_effort = "low"
+reasoning_effort = "medium"
 # Network timeout for LLM requests (seconds).
 timeout_s = 20.0
 # Max retries for LLM requests.

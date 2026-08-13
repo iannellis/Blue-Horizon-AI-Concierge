@@ -171,6 +171,10 @@ branch_name = "Production"
 lock_retry_attempts = 8
 # Seconds to wait between lock retry attempts.
 lock_retry_delay_s = 5.0
+# Seconds to wait between polls of a restore operation's status.
+operation_poll_interval_s = 2.0
+# Maximum seconds to wait for a restore operation to finish before giving up.
+operation_poll_timeout_s = 120.0
 
 # Local data ingestion settings for one-off loaders.
 [load_data.information_redis]

@@ -24,11 +24,8 @@ eval/
 pyproject.toml
 poetry.lock
 
-# Data: exclude everything under data/, then re-include only the two pkl files
-# needed at runtime for the rooms SQL reload feature.
+# Data: exclude everything under data. Resets are done via Neon branches.
 data/
-!data/pandas/rooms.pkl
-!data/pandas/room_availability.pkl
 
 # Docs and local notes
 CLAUDE.md

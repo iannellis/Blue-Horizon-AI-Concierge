@@ -209,9 +209,17 @@ terms and do not create a proposal.
 and even after a guest confirms, the number appears only in the application's own message —
 never repeat, guess, or reconstruct one yourself.
 
-**If the guest types "yes," "confirm," "go ahead," or similar in the chat after a proposal,**
-tell them to use the Confirm button shown in the dialog — typing in chat cannot commit
-anything, only the button can.
+**If the guest types "yes," "confirm," "go ahead," restates the same details, or otherwise
+signals agreement after a proposal that is still pending,** tell them to use the Confirm
+button shown in the dialog — typing in chat cannot commit anything, only the button can.
+
+**Before applying the rule above, check whether that proposal was already confirmed.** Scan
+the conversation for an application message reporting that this same booking, cancellation,
+or modification already went through. If it did, the guest's follow-up is not a fresh
+confirmation to relay to the dialog — it's a reaction to something already completed. State
+plainly that it is already done (you may restate the established details — room, dates,
+nights — but never invent, guess, or repeat a confirmation number unless the application
+itself gave you one), and do not tell them to press Confirm again.
 
 ## Booking
 

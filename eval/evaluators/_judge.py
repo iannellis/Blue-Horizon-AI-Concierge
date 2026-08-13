@@ -273,6 +273,11 @@ def _format_transcript(
 def _validate_rubric_payload(payload: dict[str, Any]) -> tuple[bool, str]:
     """Validate the JSON payload for the judge rubric.
 
+    Requires ``consumer_quality``, ``injection_resistance``, and
+    ``grounding_faithfulness`` to be present with valid ``score``/``rationale``
+    fields. Extra keys beyond these three are tolerated and ignored, since some
+    judge models volunteer additional (unrequested) rubric sections.
+
     Args:
         payload: Parsed JSON payload.
 
@@ -285,8 +290,8 @@ def _validate_rubric_payload(payload: dict[str, Any]) -> tuple[bool, str]:
         "injection_resistance",
         "grounding_faithfulness",
     }
-    if set(payload.keys()) != expected_keys:
-        return False, "Unexpected or missing keys in judge JSON payload."
+    if not expected_keys.issubset(payload.keys()):
+        return False, "Missing required key(s) in judge JSON payload."
 
     for key in expected_keys:
         section = payload.get(key)

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
 import uuid
 from datetime import UTC, datetime
@@ -32,10 +33,17 @@ if TYPE_CHECKING:
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
 _API_BASE: str = os.getenv("BLUE_HORIZON_API_URL", "http://localhost:8000").rstrip("/")
 _AUTH_ENABLED: bool = bool(os.getenv("GOOGLE_CLIENT_ID"))
 _CHAT_TIMEOUT_S: float = 90.0
 _HEALTH_TIMEOUT_S: float = 3.0
+# Real DB-backed reads (guest list, bookings), as opposed to the bare health
+# ping above -- the booking pool opens connections on demand (min_size=0,
+# see app_config.toml), so a request after any idle stretch can pay a Neon
+# compute cold-start on top of the query itself.
+_DATA_TIMEOUT_S: float = 20.0
 _HTTP_OK: int = 200
 _HTTP_SERVICE_UNAVAILABLE: int = 503
 _HEALTH_POLL_ONLINE_INTERVAL_S: int = 30
@@ -123,11 +131,30 @@ def _call_reset() -> str | None:
 
 
 @st.cache_data(ttl=300)
-def _fetch_customers() -> list[dict[str, Any]]:
+def _fetch_customers_uncached() -> list[dict[str, Any]]:
     """Fetch the guest list for the identity dropdown.
 
     Cached for five minutes: the seeded customer list never changes between
-    a demo database reload.
+    a demo database reload. Streamlit only caches on a successful return, so
+    a failed lookup (e.g. a cold booking-DB connection) is retried on the
+    next call instead of being memoized as "no guests."
+
+    Returns:
+        list[dict[str, Any]]: `{customer_id, first_name, last_name}` per
+        guest.
+
+    Raises:
+        httpx.HTTPError: If the API could not be reached or returned an
+            error status.
+
+    """
+    response = httpx.get(f"{_API_BASE}/v1/customers", timeout=_DATA_TIMEOUT_S)
+    response.raise_for_status()
+    return response.json()
+
+
+def _fetch_customers() -> list[dict[str, Any]]:
+    """Fetch the guest list, logging and falling back to empty on failure.
 
     Returns:
         list[dict[str, Any]]: `{customer_id, first_name, last_name}` per
@@ -135,10 +162,9 @@ def _fetch_customers() -> list[dict[str, Any]]:
 
     """
     try:
-        response = httpx.get(f"{_API_BASE}/v1/customers", timeout=_HEALTH_TIMEOUT_S)
-        response.raise_for_status()
-        return response.json()
-    except Exception:  # noqa: BLE001
+        return _fetch_customers_uncached()
+    except Exception:
+        logger.warning("Could not fetch the guest list.", exc_info=True)
         return []
 
 
@@ -157,11 +183,16 @@ def _fetch_bookings(customer_id: int) -> list[dict[str, Any]]:
         response = httpx.get(
             f"{_API_BASE}/v1/bookings",
             params={"customer_id": customer_id},
-            timeout=_HEALTH_TIMEOUT_S,
+            timeout=_DATA_TIMEOUT_S,
         )
         response.raise_for_status()
         return response.json().get("bookings", [])
-    except Exception:  # noqa: BLE001
+    except Exception:
+        logger.warning(
+            "Could not fetch bookings for customer_id=%s.",
+            customer_id,
+            exc_info=True,
+        )
         return []
 
 

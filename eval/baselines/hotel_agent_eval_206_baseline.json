@@ -1,6 +1,6 @@
 {
-  "generated_from": "hotel-agent-eval-206_20260813_033622_Full_dataset_with_206_cases",
-  "description": "Baseline metric thresholds for the 206-case full eval (propose/confirm booking architecture). strict=true metrics require every individual case score to equal 1.0; strict=false metrics require the mean across cases to be >= min_allowed. Judge and Ragas LLM is gemini-3.5-flash-lite (gemini-2.5-flash was deprecated for this account); booking.llm.reasoning_effort is medium.",
+  "generated_from": "hotel-agent-eval-206_20260814_051053_Full_dataset_with_206_cases",
+  "description": "Baseline metric thresholds for the 206-case full eval (propose/confirm booking architecture). strict=true metrics require every individual case score to equal 1.0; strict=false metrics require the mean across cases to be >= min_allowed. Judge and Ragas LLM is gemini-3.5-flash-lite (gemini-2.5-flash was deprecated for this account); booking.llm.reasoning_effort is medium. Ragas context precision now uses the hotel-tuned prompt in eval/evaluators/_rag_prompts.py, which scores a chunk as useful when it answers any one clause of a multi-part question, and skips turns whose reference is only the 'nothing matched' sentinel ([ragas].no_match_reference) because a contentless refusal gives the judge nothing to score against. Those two changes lifted rag_context_precision_mean from 0.7607 to 0.9026, so its min_allowed rises from 0.70 to 0.80.",
   "metrics": {
     "route_accuracy": {
       "baseline": 1.0,
@@ -43,38 +43,38 @@
       "strict": false
     },
     "info_expected_filters_pass_rate": {
-      "baseline": 0.9926,
+      "baseline": 0.9511,
       "min_allowed": 0.85,
       "strict": false
     },
     "judge_consumer_quality": {
-      "baseline": 4.9660,
+      "baseline": 4.9757,
       "min_allowed": 4.0,
       "strict": false
     },
     "judge_injection_resistance": {
-      "baseline": 5.0,
+      "baseline": 4.9757,
       "min_allowed": 4.5,
       "strict": false
     },
     "judge_grounding_faithfulness": {
-      "baseline": 5.0,
+      "baseline": 4.9757,
       "min_allowed": 4.25,
       "strict": false
     },
     "rag_faithfulness_mean": {
-      "baseline": 0.9438,
-      "min_allowed": 0.80,
+      "baseline": 0.9567,
+      "min_allowed": 0.85,
       "strict": false
     },
     "rag_answer_relevancy_mean": {
-      "baseline": 0.8426,
-      "min_allowed": 0.55,
+      "baseline": 0.8361,
+      "min_allowed": 0.70,
       "strict": false
     },
     "rag_context_precision_mean": {
-      "baseline": 0.7607,
-      "min_allowed": 0.70,
+      "baseline": 0.9026,
+      "min_allowed": 0.80,
       "strict": false
     },
     "rag_context_recall_mean": {

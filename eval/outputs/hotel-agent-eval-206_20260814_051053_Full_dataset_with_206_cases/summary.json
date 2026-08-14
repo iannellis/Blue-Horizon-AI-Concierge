@@ -1,0 +1,50 @@
+{
+  "experiment_name": "hotel-agent-eval-206_20260814_051053_Full_dataset_with_206_cases",
+  "dataset_name": "BlueHorizonEval_206",
+  "max_concurrency": 10,
+  "started_at": "2026-08-14T05:10:53.905117+00:00",
+  "finished_at": "2026-08-14T05:19:54.460759+00:00",
+  "upload_results": true,
+  "num_examples": 206,
+  "num_failed_runs": 0,
+  "case_based_summary": {
+    "route_accuracy": 1.0,
+    "booking_no_unexpected_failure_rate": 1.0,
+    "consumer_quality": 4.975728155339806,
+    "grounding": 4.975728155339806,
+    "injection_resistance": 4.975728155339806,
+    "rag_faithfulness_mean": 0.9567055743883095,
+    "rag_answer_relevancy_mean": 0.8360894050411541,
+    "rag_context_precision_mean": 0.9025925978702023,
+    "rag_context_recall_mean": 0.994140625,
+    "info_reference_subset_pass_rate": 1.0,
+    "info_expected_filters_pass_rate": 0.9511111111111111
+  },
+  "turn_based_summary": {
+    "route_accuracy": 1.0,
+    "info_reference_subset_pass_rate": 1.0,
+    "booking_no_unexpected_failure_rate": 1.0,
+    "info_expected_filters_pass_rate": 0.9633333333333334,
+    "rag_faithfulness_mean": 0.9543500194135921,
+    "rag_answer_relevancy_mean": 0.8321540747705288,
+    "rag_context_precision_mean": 0.9116512908448161,
+    "rag_context_recall_mean": 0.9951219512195122
+  },
+  "latency_quantiles_ms": {
+    "booking": {
+      "p50_ms": 4830.3,
+      "p95_ms": 6926.2,
+      "p99_ms": 8680.4
+    },
+    "info": {
+      "p50_ms": 4565.0,
+      "p95_ms": 7573.5,
+      "p99_ms": 9922.4
+    },
+    "refuse": {
+      "p50_ms": 1054.8,
+      "p95_ms": 1335.9,
+      "p99_ms": 1819.4
+    }
+  }
+}

@@ -28,6 +28,7 @@ from ragas.metrics.collections import (
 
 from eval._utils import json_value, truncate
 from eval.evaluators._common import _rag_extract_reference, _rag_extract_turn_inputs
+from eval.evaluators._rag_prompts import HotelContextPrecisionPrompt
 
 if TYPE_CHECKING:
     from langsmith.schemas import Example, Run
@@ -207,6 +208,7 @@ async def eval_rag_metrics_info_turns(
             contexts=contexts,
             reference=reference,
             metrics=metrics,
+            no_match_reference=ragas_cfg.no_match_reference,
         )
         per_turn.append(
             {
@@ -305,10 +307,15 @@ async def _get_ragas_metrics(
         _ensure_google_api_key_for_ragas()
         ragas_llm = _build_ragas_llm(ragas_cfg)
         ragas_embeddings = _ensure_base_embedding(_build_ragas_embeddings(ragas_cfg))
+        context_precision = ContextPrecision(llm=ragas_llm)
+        if ragas_cfg.custom_precision_prompt:
+            # Ragas reads the prompt off the instance at scoring time, so
+            # swapping it post-construction is enough to replace it.
+            context_precision.prompt = HotelContextPrecisionPrompt()
         _RAGAS_METRICS = (
             Faithfulness(llm=ragas_llm),
             AnswerRelevancy(llm=ragas_llm, embeddings=ragas_embeddings),
-            ContextPrecision(llm=ragas_llm),
+            context_precision,
             ContextRecall(llm=ragas_llm),
         )
         return _RAGAS_METRICS
@@ -444,15 +451,25 @@ def _rag_prepare_contexts(
     return trimmed
 
 
-async def _rag_score_turn(
+async def _rag_score_turn(  # noqa: PLR0913
     *,
     question: str,
     answer: str,
     contexts: list[str],
     reference: str | None,
     metrics: tuple[Faithfulness, AnswerRelevancy, ContextPrecision, ContextRecall],
+    no_match_reference: str = "",
 ) -> dict[str, float | None]:
     """Score a single turn using Ragas metrics.
+
+    Context precision is skipped (returned as ``None``, and therefore excluded
+    from the run mean) for turns whose reference is nothing but the "nothing
+    matched" sentinel. Ragas scores context precision by asking the judge
+    whether each chunk was useful in arriving at the *reference* answer, and a
+    bare refusal string carries no content for a chunk to support, so the
+    resulting verdicts reflect judge temperament rather than retrieval quality.
+    References that merely *contain* the sentinel alongside real content (a
+    multi-part question where only one clause had no match) are still scored.
 
     Args:
         question: User query string.
@@ -461,6 +478,8 @@ async def _rag_score_turn(
         reference: Reference answer string when available.
         metrics: Tuple of Ragas metrics in the order
             (faithfulness, answer_relevancy, context_precision, context_recall).
+        no_match_reference: Sentinel reference text marking a "nothing matched"
+            expectation. Empty disables the context-precision skip.
 
     Returns:
         Dict with metric scores for the turn.
@@ -489,13 +508,14 @@ async def _rag_score_turn(
     context_precision_score: float | None = None
     context_recall_score: float | None = None
     if reference:
-        context_precision_score = _metric_result_to_float(
-            await context_precision.ascore(
-                user_input=question,
-                reference=reference,
-                retrieved_contexts=contexts,
-            ),
-        )
+        if not _rag_reference_is_no_match(reference, no_match_reference):
+            context_precision_score = _metric_result_to_float(
+                await context_precision.ascore(
+                    user_input=question,
+                    reference=reference,
+                    retrieved_contexts=contexts,
+                ),
+            )
         context_recall_score = _metric_result_to_float(
             await context_recall.ascore(
                 user_input=question,
@@ -509,6 +529,33 @@ async def _rag_score_turn(
         "context_precision": context_precision_score,
         "context_recall": context_recall_score,
     }
+
+
+def _rag_reference_is_no_match(reference: str, no_match_reference: str) -> bool:
+    """Report whether a reference is nothing but the "nothing matched" sentinel.
+
+    The reference may bundle several expected answers separated by ``|``. Only
+    references whose every segment is the sentinel count as no-match; a
+    reference pairing the sentinel with a real answer describes a multi-part
+    question where one clause was answerable, and stays eligible for scoring.
+
+    Args:
+        reference: Reference answer string for the turn.
+        no_match_reference: Sentinel reference text. Empty returns False.
+
+    Returns:
+        True when every segment of the reference equals the sentinel.
+
+    """
+    if not no_match_reference:
+        return False
+    sentinel = no_match_reference.strip().casefold().rstrip(".")
+    segments = [
+        segment.strip().casefold().rstrip(".")
+        for segment in reference.split("|")
+        if segment.strip()
+    ]
+    return bool(segments) and all(segment == sentinel for segment in segments)
 
 
 def _metric_result_to_float(value: object) -> float:

@@ -90,4 +90,13 @@ llm_model = "gemini-3.5-flash-lite"
 llm_max_tokens = 2048
 # Gemini model used for Ragas embeddings.
 embedding_model = "gemini-embedding-2"
+# Replace the stock Ragas context-precision prompt with the hotel-tuned variant
+# that counts a chunk as useful when it answers any one clause of a multi-part
+# question (see eval/evaluators/_rag_prompts.py).
+custom_precision_prompt = true
+# Reference text marking a turn whose expected answer is "nothing matched".
+# Context precision is skipped for turns whose reference is only this sentinel:
+# a bare refusal has no content for a retrieved chunk to support, so the judge's
+# verdicts there measure nothing. Set to "" to score those turns anyway.
+no_match_reference = "I could not find exactly what you requested"
 

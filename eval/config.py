@@ -191,6 +191,13 @@ class RagasConfig(BaseModel):
         llm_model: Model name for the Ragas LLM backend.
         llm_max_tokens: Maximum output tokens for the Ragas LLM.
         embedding_model: Model name for the Ragas embeddings backend.
+        custom_precision_prompt: Whether to replace the stock Ragas
+            context-precision prompt with the hotel-tuned variant that scores
+            multi-part questions clause by clause.
+        no_match_reference: Reference answer text marking a turn whose expected
+            answer is "nothing matched". Context precision is skipped for turns
+            whose reference consists solely of this sentinel. Empty disables
+            the skip.
 
     """
 
@@ -205,6 +212,8 @@ class RagasConfig(BaseModel):
     llm_model: str
     llm_max_tokens: Annotated[int, Field(ge=1)]
     embedding_model: str
+    custom_precision_prompt: bool = False
+    no_match_reference: str = ""
 
     @field_validator(
         "turns_max",

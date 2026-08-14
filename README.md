@@ -266,7 +266,9 @@ Optional Google OAuth can be enabled by setting `GOOGLE_CLIENT_ID`, `GOOGLE_CLIE
 
 ## Evaluation Metrics
 
-Metrics collected from a structured evaluation run over the 206-case dataset at [`eval/datasets/hotel_agent_eval_206.jsonl`](eval/datasets/hotel_agent_eval_206.jsonl). Every metric that requires a model judge or scorer — all three conversation-level scores plus the four RAG metrics below — is graded by Gemini `gemini-3.5-flash-lite`, configured in [`eval/eval_config_206.toml`](eval/eval_config_206.toml) as both `[judge].model` and `[ragas].llm_model`. **RAG answer relevancy** additionally embeds the question with the Gemini `gemini-embedding-2` model (`[ragas].embedding_model`) to compare it against the query Ragas regenerates from the answer — the only metric in this run that consumes an embedding model rather than pure LLM judging. The remaining per-turn metrics (route accuracy, booking outcomes, info filters/reference checks) are deterministic, code-based checks with no model in the loop.
+Metrics collected from a structured evaluation run over the 206-case dataset at [`eval/datasets/hotel_agent_eval_206.jsonl`](eval/datasets/hotel_agent_eval_206.jsonl). Every metric that requires a model judge or scorer — all three conversation-level scores plus the four RAG metrics below — is graded by Gemini `gemini-3.5-flash-lite`, configured in [`eval/eval_config_206.toml`](eval/eval_config_206.toml) as both `[judge].model` and `[ragas].llm_model`. **RAG answer relevancy** additionally embeds the question with the Gemini `gemini-embedding-2` model (`[ragas].embedding_model`) to compare it against the query Ragas regenerates from the answer — the only metric in this run that consumes an embedding model rather than pure LLM judging. The remaining per-turn metrics (route accuracy, booking outcomes, info filters/reference checks) are deterministic, code-based checks with no model in the loop. **RAG context precision** uses a hotel-tuned Ragas prompt ([`eval/evaluators/_rag_prompts.py`](eval/evaluators/_rag_prompts.py)) that credits a retrieved chunk as useful when it answers any one clause of a multi-part question rather than requiring it to cover the whole question, and skips turns whose reference is only the "nothing matched" sentinel (`[ragas].no_match_reference`) — a contentless refusal gives the judge nothing to score a chunk's usefulness against.
+
+These numbers are a point-in-time snapshot, not a fixed target: they shift whenever the underlying models, prompts, or agent code change, and are expected to be updated regularly as the project evolves. The pinned regression thresholds in [`eval/baselines/`](eval/baselines/) — not this table — are the source of truth CI actually checks against.
 
 ### Conversation-level scores
 
@@ -274,9 +276,9 @@ These metrics are assessed once per multi-turn conversation by an LLM judge (`ge
 
 | Metric | Score |
 |--------|-------|
-| Consumer quality (1–5) | 4.97 |
-| Grounding (1–5) | 5.00 |
-| Injection resistance (1–5) | 5.00 |
+| Consumer quality (1–5) | 4.98 |
+| Grounding (1–5) | 4.98 |
+| Injection resistance (1–5) | 4.98 |
 
 **Consumer quality** and **Grounding** assess response helpfulness and factual fidelity to retrieved context. **Injection resistance** scores how reliably the system refuses prompt-injection attempts.
 
@@ -289,22 +291,22 @@ These metrics are assessed at each individual exchange and then averaged across 
 | Route accuracy | 100% | code |
 | Booking — no unexpected failure rate | 100% | code |
 | Booking — tool call success rate | 100% | code |
-| RAG faithfulness | 93.8% | `gemini-3.5-flash-lite` |
+| RAG faithfulness | 95.4% | `gemini-3.5-flash-lite` |
 | RAG context recall | 99.5% | `gemini-3.5-flash-lite` |
-| RAG context precision | 75.0% | `gemini-3.5-flash-lite` |
-| RAG answer relevancy | 84.1% | `gemini-3.5-flash-lite` + `gemini-embedding-2` |
-| Info filters pass rate | 99.2% | code |
+| RAG context precision | 91.2% | `gemini-3.5-flash-lite` |
+| RAG answer relevancy | 83.2% | `gemini-3.5-flash-lite` + `gemini-embedding-2` |
+| Info filters pass rate | 96.3% | code |
 | Info reference subset pass rate | 100% | code |
 
-**Route accuracy** measures how often the router correctly dispatches to the information or rooms agent (or refuses); this run had zero misroutes across all 206 multi-turn cases. **Booking — no unexpected failure rate** measures whether a booking/cancellation/modification's success-or-failure outcome matched the case's expectation (e.g. a request for an already-taken night is *expected* to fail; that's not counted against the agent). **Booking — tool call success rate** is stricter: it flags any `propose_*`/`run_sql` call that errored on a turn that was expected to succeed. This ran at 96.2% prior to a fix in [`booking.txt`](blue_horizon/system_prompts/booking.txt) requiring every column in a `rooms`/`room_availability` join to be table-qualified (both tables define `max_occupancy`, so an unqualified reference was ambiguous and errored); this run shows zero tool-call errors. **RAG faithfulness** measures whether generated answers stay within the retrieved context; **RAG context recall** measures whether all relevant context was retrieved. **Info filters pass rate** measures whether the information agent correctly honours user-specified constraints (price, duration, booking requirements, etc.) when selecting and presenting results. **Info reference subset pass rate** measures whether the expected source documents (FAQ entries, amenity cards, service cards) appear in the set of documents retrieved for a given query.
+**Route accuracy** measures how often the router correctly dispatches to the information or rooms agent (or refuses); this run had zero misroutes across all 206 multi-turn cases. **Booking — no unexpected failure rate** measures whether a booking/cancellation/modification's success-or-failure outcome matched the case's expectation (e.g. a request for an already-taken night is *expected* to fail; that's not counted against the agent). **Booking — tool call success rate** is stricter: it flags any `propose_*`/`run_sql` call that errored on a turn that was expected to succeed. This ran at 96.2% prior to a fix in [`booking.txt`](blue_horizon/system_prompts/booking.txt) requiring every column in a `rooms`/`room_availability` join to be table-qualified (both tables define `max_occupancy`, so an unqualified reference was ambiguous and errored); this run shows zero tool-call errors. **RAG faithfulness** measures whether generated answers stay within the retrieved context; **RAG context recall** measures whether all relevant context was retrieved. **RAG context precision**'s jump from prior runs reflects the prompt and no-match-skip changes described above, not a retrieval change. **Info filters pass rate** measures whether the information agent correctly honours user-specified constraints (price, duration, booking requirements, etc.) when selecting and presenting results. **Info reference subset pass rate** measures whether the expected source documents (FAQ entries, amenity cards, service cards) appear in the set of documents retrieved for a given query.
 
 ### Latency (end-to-end, ms)
 
 | Route | p50 | p95 | p99 |
 |-------|-----|-----|-----|
-| Refuse | 1,053 | 1,497 | 2,937 |
-| Info | 4,668 | 7,375 | 9,300 |
-| Booking | 4,851 | 8,204 | 10,140 |
+| Refuse | 1,055 | 1,336 | 1,819 |
+| Info | 4,565 | 7,574 | 9,922 |
+| Booking | 4,830 | 6,926 | 8,680 |
 
 Refuse requests resolve fastest (router only). Info requests go through the full RAG pipeline (parse → parallel retrieval → merge → respond). Booking requests run NL-to-SQL search plus, on a propose call, an in-process pricing pass against `room_availability` — the write itself only happens later, on confirm, and is not included in this per-turn latency.
 

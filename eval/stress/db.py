@@ -21,11 +21,13 @@ from tenacity import (
 )
 
 from eval.booking_db_manager import reset_neon_branch
+from eval.db_invariants import find_overlapping_booking_rooms
 
 if TYPE_CHECKING:
     from psycopg_pool import AsyncConnectionPool
 
     from eval.config import NeonConfig
+    from eval.db_invariants import BookingRoomOverlap
     from eval.stress.models import StressRunConfig
 
 logger = logging.getLogger(__name__)
@@ -198,10 +200,11 @@ async def _check_invariants(
     ``room_availability`` grouped-by-``(room_number, date)`` check was a
     tautology (that table carries a ``UNIQUE (room_id, date)`` constraint, so
     the query could never return a row) and always reported zero regardless
-    of what the workload did -- see the identical fix and rationale in
-    ``eval.evaluators._booking._check_booking_db_invariants``. It now checks
-    for real overlapping ``booking_rooms`` ranges on the same room, which the
-    schema can actually represent post-Phase-1.
+    of what the workload did. It now checks for real overlapping
+    ``booking_rooms`` ranges on the same room via
+    ``eval.db_invariants.find_overlapping_booking_rooms`` -- the same helper
+    ``eval.evaluators._booking._check_booking_db_invariants`` calls, so both
+    checks can never drift out of sync with each other.
 
     Args:
         pool: The open database connection pool pointing at the Neon branch.
@@ -211,7 +214,7 @@ async def _check_invariants(
         A dictionary describing invariant counts and pass/fail status.
 
     """
-    overlap_rows: list[Any] = []
+    overlap_rows: list[BookingRoomOverlap] = []
     null_status_count = 0
     async for attempt in AsyncRetrying(
         retry=retry_if_exception(_is_transient_db_error),
@@ -224,19 +227,7 @@ async def _check_invariants(
             async with pool.connection() as conn:
                 await _set_search_path(conn, "public")
                 async with conn.cursor() as cur:
-                    await cur.execute(
-                        """
-                        SELECT a.booking_room_id AS a_id, b.booking_room_id AS b_id,
-                               a.room_id
-                        FROM booking_rooms a
-                        JOIN booking_rooms b
-                          ON a.room_id = b.room_id
-                         AND a.booking_room_id < b.booking_room_id
-                         AND a.check_in < b.check_out
-                         AND b.check_in < a.check_out
-                        """,
-                    )
-                    overlap_rows = await cur.fetchall()
+                    overlap_rows = await find_overlapping_booking_rooms(cur)
 
                     await cur.execute(
                         "SELECT COUNT(*) AS c"

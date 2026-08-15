@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 from psycopg_pool import AsyncConnectionPool
 
 from eval._utils import json_value, truncate
+from eval.db_invariants import find_overlapping_booking_rooms
 from eval.evaluators._common import (
     _call_judge_llm,
     _get_example_turns,
@@ -733,7 +734,10 @@ async def _check_booking_db_invariants(cfg: EvalConfig) -> list[dict[str, Any]]:
     tautology (that table carries a ``UNIQUE (room_id, date)`` constraint, so
     the query could never return a row) and always scored 1.0 regardless of
     what the agent did. It now checks for real overlapping `booking_rooms`
-    ranges on the same room, which the schema can actually represent.
+    ranges on the same room via
+    ``eval.db_invariants.find_overlapping_booking_rooms`` -- the same helper
+    ``eval.stress.db._check_invariants`` calls, so both checks can never
+    drift out of sync with each other.
 
     The overlap check is safe to run globally (unscoped to one example or
     customer) even though eval examples run concurrently: `commit_booking`
@@ -755,18 +759,7 @@ async def _check_booking_db_invariants(cfg: EvalConfig) -> list[dict[str, Any]]:
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute("SET search_path TO public;")
 
-        await cur.execute(
-            """
-            SELECT a.booking_room_id AS a_id, b.booking_room_id AS b_id, a.room_id
-            FROM booking_rooms a
-            JOIN booking_rooms b
-              ON a.room_id = b.room_id
-             AND a.booking_room_id < b.booking_room_id
-             AND a.check_in < b.check_out
-             AND b.check_in < a.check_out;
-            """,
-        )
-        overlap_rows = await cur.fetchall()
+        overlap_rows = await find_overlapping_booking_rooms(cur)
 
         await cur.execute(
             "SELECT COUNT(*) FROM room_availability WHERE status IS NULL;",

@@ -1,23 +1,33 @@
-"""Tests for `eval.db_invariants.find_overlapping_booking_rooms` against a real DB.
+"""Tests for the `booking_rooms_no_overlap` exclusion constraint against a real DB.
 
-Exercises the shared overlap-detection query that both the eval harness
-(`eval.evaluators._booking`) and the stress test (`eval.stress.db`) rely on
-to catch double-bookings, via positive and negative controls: a
-hand-inserted overlapping pair must be flagged (previously verified only
-once, ad hoc -- see the `398ee08` commit message -- this makes that
-verification a permanent regression test instead), and legitimate
-non-overlapping stays, including the back-to-back same-day-turnover
-boundary, must not be.
+`booking_rooms` carries a GiST exclusion constraint (see
+`blue_horizon.load_data.booking_pgsql.setup_booking_rooms_schema`) that makes
+two rows for the same room with overlapping `[check_in, check_out)` spans
+impossible to insert or update into existence -- a double-booking is now a
+schema-level impossibility, not merely something detected after the fact.
+This file is the permanent positive/negative-control regression test for
+that guarantee (previously verified only once, ad hoc -- see the `398ee08`
+commit message).
+
+Before the constraint existed, the positive control here hand-inserted an
+overlapping pair and asserted `eval.db_invariants.find_overlapping_booking_rooms`
+flagged it after the fact (see history at
+https://github.com/iannellis/Blue-Horizon-AI-Concierge/blob/e67fb9b33279219a0d4b6b8fc8a85bbb92733dfa/tests/booking/test_db_invariants.py,
+exactly the follow-up that file's own docstring predicted would be needed).
+That is no longer possible to set up -- the second insert now fails outright
+-- so the positive control instead asserts the insert itself raises
+`psycopg.errors.ExclusionViolation`. `find_overlapping_booking_rooms`'s
+true-positive path is consequently no longer independently exercisable via
+integration test; its negative-control path (queried immediately after a
+legitimate adjacent insert, to guard against a false positive) still is, and
+still runs below.
 
 Rows are inserted directly into `bookings`/`booking_rooms` via raw SQL,
 bypassing `blue_horizon.agents.booking.write_ops` entirely:
-`write_ops.commit_booking` already refuses to create an overlap (see
-`TestCommitBooking` in `test_write_ops.py`), so exercising the query itself
-requires getting an overlapping pair into the table some other way. There is
-deliberately no schema-level constraint preventing this today -- if one is
-ever added (e.g. a GiST exclusion constraint on `booking_rooms`), the
-positive control below stops being possible to set up and both this file and
-`find_overlapping_booking_rooms` should be revisited together.
+`write_ops.commit_booking` already refuses to create an overlap before ever
+reaching the constraint (see `TestCommitBooking` in `test_write_ops.py`), so
+exercising the constraint itself requires getting an overlapping insert
+attempted some other way.
 
 Marked `db_integration` and excluded from the default `pytest` run -- see
 `.github/workflows/ci.yml`'s `db-integration-tests` job, which resets the
@@ -35,6 +45,7 @@ from contextlib import asynccontextmanager
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
+import psycopg
 import pytest
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
@@ -140,25 +151,35 @@ async def _first_room_id(pool: AsyncConnectionPool[Any]) -> int:
 
 
 @asynccontextmanager
-async def _hand_inserted_booking_rooms(
+async def _hand_inserted_booking_room(
     pool: AsyncConnectionPool[Any],
     *,
     customer_id: int,
     room_id: int,
-    spans: list[tuple[dt.date, dt.date]],
-) -> AsyncIterator[list[int]]:
-    """Insert `booking_rooms` rows directly, bypassing `write_ops` entirely.
+    check_in: dt.date,
+    check_out: dt.date,
+) -> AsyncIterator[int]:
+    """Insert one `booking_rooms` row directly, bypassing `write_ops` entirely.
+
+    If the insert violates `booking_rooms_no_overlap`, the exception
+    propagates out of this context manager before it ever yields -- both the
+    `bookings` row and the `booking_rooms` row this function attempted are
+    rolled back together as one transaction, so callers do not need to (and
+    should not) clean up after a caught violation.
 
     Args:
         pool: Read-write booking database pool.
         customer_id: Owner of the hand-inserted `bookings` row.
-        room_id: Room every span in `spans` is booked against.
-        spans: `(check_in, check_out)` pairs to insert as separate
-            `booking_rooms` rows, all under one new `bookings` row.
+        room_id: Room booked.
+        check_in: First night of the stay (inclusive).
+        check_out: Departure date (exclusive).
 
     Yields:
-        list[int]: The `booking_room_id` of each inserted row, in the same
-        order as `spans`.
+        int: The inserted row's `booking_room_id`.
+
+    Raises:
+        psycopg.errors.ExclusionViolation: If the insert overlaps an
+            existing `booking_rooms` row on the same room.
 
     """
     async with (
@@ -172,21 +193,19 @@ async def _hand_inserted_booking_rooms(
         )
         booking_id = (await cur.fetchone())["booking_id"]
 
-        booking_room_ids: list[int] = []
-        for check_in, check_out in spans:
-            await cur.execute(
-                """
-                INSERT INTO booking_rooms
-                    (booking_id, room_id, check_in, check_out, total_amount)
-                VALUES (%s, %s, %s, %s, %s)
-                RETURNING booking_room_id
-                """,
-                (booking_id, room_id, check_in, check_out, _DUMMY_TOTAL_AMOUNT),
-            )
-            booking_room_ids.append((await cur.fetchone())["booking_room_id"])
+        await cur.execute(
+            """
+            INSERT INTO booking_rooms
+                (booking_id, room_id, check_in, check_out, total_amount)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING booking_room_id
+            """,
+            (booking_id, room_id, check_in, check_out, _DUMMY_TOTAL_AMOUNT),
+        )
+        booking_room_id = (await cur.fetchone())["booking_room_id"]
 
     try:
-        yield booking_room_ids
+        yield booking_room_id
     finally:
         # `bh_agent_rw` has no DELETE grant on `bookings` (see
         # `regrant_booking_agent_role.sql`) -- a `bookings` row is never
@@ -204,66 +223,78 @@ async def _hand_inserted_booking_rooms(
             )
 
 
-class TestFindOverlappingBookingRooms:
-    """Positive/negative controls for `find_overlapping_booking_rooms`."""
+class TestBookingRoomsNoOverlapConstraint:
+    """Positive/negative controls for the `booking_rooms_no_overlap` constraint."""
 
-    def test_hand_inserted_overlapping_pair_is_flagged(self, rw_db_url: str) -> None:
-        """Positive control: two overlapping spans on one room are flagged.
+    def test_second_overlapping_booking_is_rejected(self, rw_db_url: str) -> None:
+        """Positive control: a second, overlapping booking on one room is refused.
 
         Regression test for the "confirmed to go red against a hand-inserted
         overlapping pair" verification the README describes -- previously
-        only done once, ad hoc, before the query was trusted.
+        only done once, ad hoc, before the query it originally exercised was
+        trusted; now it exercises the schema-level constraint that replaced
+        that query as the actual enforcement mechanism.
         """
 
         async def _run() -> None:
             async with _rw_pool(rw_db_url) as pool:
                 customer_id = await _first_customer_id(pool)
                 room_id = await _first_room_id(pool)
-                spans = [
-                    (dt.date(2099, 1, 10), dt.date(2099, 1, 15)),
-                    (dt.date(2099, 1, 12), dt.date(2099, 1, 18)),  # overlaps above
-                ]
-                async with _hand_inserted_booking_rooms(
-                    pool, customer_id=customer_id, room_id=room_id, spans=spans,
-                ) as booking_room_ids:
-                    async with pool.connection() as conn, conn.cursor() as cur:
-                        overlaps = await find_overlapping_booking_rooms(cur)
-
-                    flagged_pairs = {
-                        frozenset((o.a_booking_room_id, o.b_booking_room_id))
-                        for o in overlaps
-                    }
-                    assert frozenset(booking_room_ids) in flagged_pairs
+                async with _hand_inserted_booking_room(
+                    pool,
+                    customer_id=customer_id,
+                    room_id=room_id,
+                    check_in=dt.date(2099, 1, 10),
+                    check_out=dt.date(2099, 1, 15),
+                ):
+                    with pytest.raises(psycopg.errors.ExclusionViolation):
+                        async with _hand_inserted_booking_room(
+                            pool,
+                            customer_id=customer_id,
+                            room_id=room_id,
+                            check_in=dt.date(2099, 1, 12),  # overlaps above
+                            check_out=dt.date(2099, 1, 18),
+                        ):
+                            pass
 
         asyncio.run(_run())
 
-    def test_hand_inserted_adjacent_pair_is_not_flagged(self, rw_db_url: str) -> None:
-        """Negative control: back-to-back same-day-turnover spans are not flagged.
+    def test_second_adjacent_booking_is_not_rejected(self, rw_db_url: str) -> None:
+        """Negative control: back-to-back same-day-turnover bookings both succeed.
 
-        Guards against a check that reports a violation (or none at all)
-        regardless of its input -- the same tautology mistake the historical
-        `room_availability` version of this check made.
+        Guards against a constraint that is too strict (rejecting legitimate
+        turnover) as well as against a `find_overlapping_booking_rooms` false
+        positive on the same data -- the same tautology-avoidance goal the
+        historical `room_availability` version of this check existed for.
         """
 
         async def _run() -> None:
             async with _rw_pool(rw_db_url) as pool:
                 customer_id = await _first_customer_id(pool)
                 room_id = await _first_room_id(pool)
-                spans = [
-                    (dt.date(2098, 1, 10), dt.date(2098, 1, 15)),
-                    (dt.date(2098, 1, 15), dt.date(2098, 1, 20)),  # adjacent, no gap
-                ]
-                async with _hand_inserted_booking_rooms(
-                    pool, customer_id=customer_id, room_id=room_id, spans=spans,
-                ) as booking_room_ids:
+                async with (
+                    _hand_inserted_booking_room(
+                        pool,
+                        customer_id=customer_id,
+                        room_id=room_id,
+                        check_in=dt.date(2098, 1, 10),
+                        check_out=dt.date(2098, 1, 15),
+                    ) as first_id,
+                    _hand_inserted_booking_room(
+                        pool,
+                        customer_id=customer_id,
+                        room_id=room_id,
+                        check_in=dt.date(2098, 1, 15),  # adjacent, no gap
+                        check_out=dt.date(2098, 1, 20),
+                    ) as second_id,
+                ):
                     async with pool.connection() as conn, conn.cursor() as cur:
                         overlaps = await find_overlapping_booking_rooms(cur)
-
                     flagged_ids = {
                         oid
                         for o in overlaps
                         for oid in (o.a_booking_room_id, o.b_booking_room_id)
                     }
-                    assert not (set(booking_room_ids) & flagged_ids)
+                    assert not ({first_id, second_id} & flagged_ids)
 
         asyncio.run(_run())

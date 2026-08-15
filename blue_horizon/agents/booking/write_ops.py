@@ -18,15 +18,17 @@ ownership is tracked through `booking_rooms.booking_id`, not through a
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, LiteralString, cast
 
+from psycopg import errors as psycopg_errors
 from psycopg.rows import dict_row
 
 if TYPE_CHECKING:
     import datetime as dt
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
 
     import psycopg
     from psycopg_pool import AsyncConnectionPool
@@ -365,7 +367,11 @@ async def commit_booking(
 
     Raises:
         BookingWriteError: If any requested night is no longer `Available`
-            with a price set. No partial writes are made.
+            with a price set, or the insert would violate `booking_rooms`'s
+            no-overlap exclusion constraint (only reachable if
+            `room_availability` and `booking_rooms` have drifted out of
+            sync, since the `FOR UPDATE` lock above already re-validates
+            availability). No partial writes are made either way.
 
     """
     async with pool.connection() as conn:
@@ -377,20 +383,21 @@ async def commit_booking(
             booking_id = await _insert_booking(cur, customer_id=customer_id)
             for stay in priced:
                 await _lock_and_book_nights(cur, stay)
-                await cur.execute(
-                    """
-                    INSERT INTO booking_rooms
-                        (booking_id, room_id, check_in, check_out, total_amount)
-                    VALUES (%s, %s, %s, %s, %s)
-                    """,
-                    (
-                        booking_id,
-                        stay.room_id,
-                        stay.check_in,
-                        stay.check_out,
-                        stay.total_amount,
-                    ),
-                )
+                with _refuse_on_overlap(stay.room_number):
+                    await cur.execute(
+                        """
+                        INSERT INTO booking_rooms
+                            (booking_id, room_id, check_in, check_out, total_amount)
+                        VALUES (%s, %s, %s, %s, %s)
+                        """,
+                        (
+                            booking_id,
+                            stay.room_id,
+                            stay.check_in,
+                            stay.check_out,
+                            stay.total_amount,
+                        ),
+                    )
 
             confirmation_number = _confirmation_number(booking_id)
             await cur.execute(
@@ -500,8 +507,13 @@ async def modify_booking(
 
     Raises:
         BookingWriteError: If the booking does not belong to `customer_id`, a
-            `booking_room_id` is unknown, or any replacement night is not
-            `Available` with a price set. No partial writes are made.
+            `booking_room_id` is unknown, any replacement night is not
+            `Available` with a price set, or the replacement would violate
+            `booking_rooms`'s no-overlap exclusion constraint (only
+            reachable if `room_availability` and `booking_rooms` have
+            drifted out of sync, since the `FOR UPDATE` lock above already
+            re-validates availability). No partial writes are made either
+            way.
 
     """
     async with pool.connection() as conn, conn.transaction(), conn.cursor(
@@ -535,20 +547,21 @@ async def modify_booking(
             )
             stay = await _price_one_room(cur, request, lock=True)
             await _lock_and_book_nights(cur, stay)
-            await cur.execute(
-                """
-                UPDATE booking_rooms
-                SET room_id = %s, check_in = %s, check_out = %s, total_amount = %s
-                WHERE booking_room_id = %s
-                """,
-                (
-                    stay.room_id,
-                    stay.check_in,
-                    stay.check_out,
-                    stay.total_amount,
-                    change.booking_room_id,
-                ),
-            )
+            with _refuse_on_overlap(stay.room_number):
+                await cur.execute(
+                    """
+                    UPDATE booking_rooms
+                    SET room_id = %s, check_in = %s, check_out = %s, total_amount = %s
+                    WHERE booking_room_id = %s
+                    """,
+                    (
+                        stay.room_id,
+                        stay.check_in,
+                        stay.check_out,
+                        stay.total_amount,
+                        change.booking_room_id,
+                    ),
+                )
 
         await cur.execute(
             """
@@ -824,6 +837,37 @@ async def _price_one_room(
         check_out=room.check_out,
         total_amount=total,
     )
+
+
+@contextmanager
+def _refuse_on_overlap(room_number: int) -> Iterator[None]:
+    """Translate a `booking_rooms` exclusion-constraint hit into `BookingWriteError`.
+
+    `booking_rooms_no_overlap` (see `setup_booking_rooms_schema`) is the
+    database's own backstop against two rows for one room holding
+    overlapping nights. `_price_one_room`'s `FOR UPDATE` lock on
+    `room_availability` is expected to catch every real double-booking
+    attempt first, so this constraint should only ever fire if that table
+    and `booking_rooms` have drifted out of sync -- but if it does fire, the
+    guest should see the same clean refusal as any other unavailable-night
+    rejection, not a raw `psycopg` error.
+
+    Args:
+        room_number: Room number to name in the refusal message.
+
+    Yields:
+        None. Wrap exactly one `booking_rooms` insert or update statement.
+
+    Raises:
+        BookingWriteError: If the wrapped statement violates
+            `booking_rooms_no_overlap`.
+
+    """
+    try:
+        yield
+    except psycopg_errors.ExclusionViolation as exc:
+        msg = f"Room {room_number} is not available for every night requested."
+        raise BookingWriteError(msg) from exc
 
 
 async def _lock_and_book_nights(

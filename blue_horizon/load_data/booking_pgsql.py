@@ -483,6 +483,17 @@ def setup_bookings_schema(conn: psycopg.Connection) -> None:
 def setup_booking_rooms_schema(conn: psycopg.Connection) -> None:
     """Reset and recreate the `booking_rooms` table.
 
+    Carries a GiST exclusion constraint, `booking_rooms_no_overlap`, that
+    makes two rows for the same `room_id` with overlapping
+    `[check_in, check_out)` spans impossible to insert or update into
+    existence -- the database itself refuses a double-booking, rather than
+    relying solely on `write_ops`'s `FOR UPDATE` locking on
+    `room_availability` to prevent one. The half-open range means one stay's
+    `check_out` equalling another's `check_in` (same-day turnover) does not
+    count as an overlap. Requires the `btree_gist` extension (created by
+    `reload_sql_tables` before this runs) for GiST to support `=` on the
+    integer `room_id` column alongside the range overlap operator.
+
     Args:
         conn: Active database connection.
 
@@ -499,7 +510,11 @@ def setup_booking_rooms_schema(conn: psycopg.Connection) -> None:
                 check_in        DATE   NOT NULL,
                 check_out       DATE   NOT NULL,
                 total_amount    NUMERIC(10,2) NOT NULL,
-                CHECK (check_out > check_in)
+                CHECK (check_out > check_in),
+                CONSTRAINT booking_rooms_no_overlap EXCLUDE USING gist (
+                    room_id WITH =,
+                    daterange(check_in, check_out, '[)') WITH &&
+                )
             );
             """,  # noqa: E501
         )
@@ -548,9 +563,12 @@ def reload_sql_tables() -> None:
     picker). It also (re)creates the `bookings` and `booking_rooms` tables,
     which start empty: this project deliberately loads no pre-existing
     bookings, since cancelling one would return a room to the pool with no
-    rate attached (see notebooks/neonsql.ipynb). Finally, it reapplies the
-    `bh_agent_ro`/`bh_agent_rw` grants that the table rebuilds dropped, via
-    `regrant_booking_agent_role`.
+    rate attached (see notebooks/neonsql.ipynb). `booking_rooms` carries a
+    GiST exclusion constraint (see `setup_booking_rooms_schema`) that makes a
+    double-booking impossible to insert, so this also creates the
+    `btree_gist` extension that constraint depends on. Finally, it reapplies
+    the `bh_agent_ro`/`bh_agent_rw` grants that the table rebuilds dropped,
+    via `regrant_booking_agent_role`.
 
     This function drops and recreates every table it touches, so it must be
     run against a branch's parent, never a branch that gets reset in place —
@@ -576,6 +594,7 @@ def reload_sql_tables() -> None:
 
         with psycopg.connect(conn_string) as conn:
             conn.execute("SET search_path TO public;")
+            conn.execute("CREATE EXTENSION IF NOT EXISTS btree_gist;")
             setup_rooms_schema(conn, room_type_def, bed_type_def, room_status_def)
             insert_rooms_data(conn, df_rooms)
 

@@ -5,6 +5,19 @@ question against the same schema -- does `booking_rooms` contain two rows
 for the same room with overlapping stays? -- so that query lives here once
 and both call it, instead of each carrying its own copy that could silently
 drift out of sync with the other.
+
+`booking_rooms` carries a GiST exclusion constraint,
+`booking_rooms_no_overlap` (see
+`blue_horizon.load_data.booking_pgsql.setup_booking_rooms_schema`), that
+makes the overlap this module looks for impossible to insert or update into
+existence in the first place. This query is therefore belt-and-suspenders
+against real agent-driven usage, not the primary line of defense: it would
+only ever find a match if the constraint were dropped, disabled, or
+bypassed by something other than a normal INSERT/UPDATE (e.g. a future
+schema change, or historical rows loaded before the constraint existed).
+Its true-positive path is accordingly no longer exercisable via integration
+test the way it once was -- see `tests/booking/test_db_invariants.py`, which
+now tests the constraint itself instead.
 """
 
 from __future__ import annotations

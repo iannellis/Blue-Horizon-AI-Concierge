@@ -740,7 +740,12 @@ async def _check_booking_db_invariants(cfg: EvalConfig) -> list[dict[str, Any]]:
     ranges on the same room via
     ``eval.db_invariants.find_overlapping_booking_rooms`` -- the same helper
     ``eval.stress.db._check_invariants`` calls, so both checks can never
-    drift out of sync with each other.
+    drift out of sync with each other. `booking_rooms` now also carries a
+    GiST exclusion constraint making that overlap impossible to write in the
+    first place (see `eval.db_invariants`'s module docstring), so this check
+    is belt-and-suspenders against real usage rather than the primary
+    guarantee -- it stays because it is nearly free to run and gives an
+    independent signal if that constraint is ever dropped or bypassed.
 
     The overlap check is safe to run globally (unscoped to one example or
     customer) even though eval examples run concurrently: `commit_booking`

@@ -265,6 +265,85 @@ async def _availability_status(
     return row["status"], row["price"]
 
 
+async def _hand_insert_conflicting_booking_room(
+    pool: AsyncConnectionPool[Any],
+    *,
+    customer_id: int,
+    room_id: int,
+    check_in: dt.date,
+    check_out: dt.date,
+) -> int:
+    """Insert a `booking_rooms` row directly, leaving `room_availability` untouched.
+
+    Simulates the only scenario `write_ops`'s `booking_rooms_no_overlap`
+    catch (`write_ops._refuse_on_overlap`) exists for: `room_availability`
+    and `booking_rooms` disagreeing about who holds a night. `commit_booking`
+    only ever consults `room_availability` before writing, so it cannot
+    detect a conflict recorded solely in `booking_rooms` -- this bypasses
+    `write_ops` entirely to create exactly that drift.
+
+    Args:
+        pool: Read-write booking database pool.
+        customer_id: Owner of the hand-inserted `bookings` row.
+        room_id: Room booked.
+        check_in: First night of the stay (inclusive).
+        check_out: Departure date (exclusive).
+
+    Returns:
+        int: The new `bookings` row's id, for later cleanup.
+
+    """
+    async with (
+        pool.connection() as conn,
+        conn.transaction(),
+        conn.cursor(row_factory=dict_row) as cur,
+    ):
+        await cur.execute(
+            "INSERT INTO bookings (customer_id) VALUES (%s) RETURNING booking_id",
+            (customer_id,),
+        )
+        booking_id = (await cur.fetchone())["booking_id"]
+        await cur.execute(
+            """
+            INSERT INTO booking_rooms
+                (booking_id, room_id, check_in, check_out, total_amount)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (booking_id, room_id, check_in, check_out, Decimal("100.00")),
+        )
+    return booking_id
+
+
+async def _cancel_hand_inserted_booking(
+    pool: AsyncConnectionPool[Any], *, booking_id: int,
+) -> None:
+    """Clean up a booking created by `_hand_insert_conflicting_booking_room`.
+
+    Mirrors `write_ops.cancel_booking`'s real full-cancel behavior:
+    `bh_agent_rw` has no DELETE grant on `bookings` (see
+    `regrant_booking_agent_role.sql`), so the row is marked cancelled rather
+    than deleted.
+
+    Args:
+        pool: Read-write booking database pool.
+        booking_id: Booking to delete `booking_rooms` rows from and cancel.
+
+    """
+    async with (
+        pool.connection() as conn,
+        conn.transaction(),
+        conn.cursor() as cur,
+    ):
+        await cur.execute(
+            "DELETE FROM booking_rooms WHERE booking_id = %s", (booking_id,),
+        )
+        await cur.execute(
+            "UPDATE bookings SET status = 'cancelled', cancelled_at = now()"
+            " WHERE booking_id = %s",
+            (booking_id,),
+        )
+
+
 class TestCommitBooking:
     """`commit_booking` -- the only path that ever books a night."""
 
@@ -783,6 +862,58 @@ class TestStaleProposalCommit:
                         pool,
                         customer_id=first_customer,
                         booking_id=first_commit.booking_id,
+                    )
+
+        asyncio.run(_run())
+
+
+class TestCommitBookingConstraintTranslation:
+    """`commit_booking` translates a `booking_rooms` constraint hit cleanly."""
+
+    def test_data_drift_overlap_is_refused_not_leaked(self, rw_db_url: str) -> None:
+        """A `booking_rooms`/`room_availability` drift is refused, not leaked raw.
+
+        `_price_one_room`'s lock only ever consults `room_availability`, so
+        it cannot itself detect a night already held in `booking_rooms` but
+        never marked `Booked` there -- exactly the drift
+        `booking_rooms_no_overlap` (and `write_ops._refuse_on_overlap`)
+        exist to catch as a second line of defense. This proves that catch
+        surfaces as `write_ops.BookingWriteError`, not a raw
+        `psycopg.errors.ExclusionViolation` escaping `commit_booking`, and
+        that the attempted commit leaves no partial write behind.
+        """
+
+        async def _run() -> None:
+            async with _rw_pool(rw_db_url) as pool:
+                first_customer, second_customer = await _first_two_customer_ids(pool)
+                request, _ = await _find_available_block(pool, nights=1)
+
+                drift_booking_id = await _hand_insert_conflicting_booking_room(
+                    pool,
+                    customer_id=first_customer,
+                    room_id=request.room_id,
+                    check_in=request.check_in,
+                    check_out=request.check_out,
+                )
+                try:
+                    before = await write_ops.list_bookings(
+                        pool, customer_id=second_customer,
+                    )
+                    with pytest.raises(write_ops.BookingWriteError):
+                        await write_ops.commit_booking(
+                            pool, customer_id=second_customer, rooms=[request],
+                        )
+                    after = await write_ops.list_bookings(
+                        pool, customer_id=second_customer,
+                    )
+                    assert len(after) == len(before)
+                    status, _ = await _availability_status(
+                        pool, room_id=request.room_id, on_date=request.check_in,
+                    )
+                    assert status == "Available"
+                finally:
+                    await _cancel_hand_inserted_booking(
+                        pool, booking_id=drift_booking_id,
                     )
 
         asyncio.run(_run())

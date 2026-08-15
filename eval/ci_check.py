@@ -20,7 +20,7 @@ import sys
 from collections import defaultdict
 from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, SupportsFloat, cast
 
 from eval._result_utils import (
     _normalize_feedback,
@@ -129,7 +129,10 @@ def _collect_scores(results_path: Path) -> dict[str, list[float]]:
                 if score is None:
                     continue
                 with suppress(TypeError, ValueError):
-                    scores[key].append(float(score))
+                    # score is duck-typed here: float() itself raises
+                    # TypeError/ValueError for anything unconvertible, which
+                    # this suppress() already handles.
+                    scores[key].append(float(cast("str | SupportsFloat", score)))
     return dict(scores)
 
 
@@ -244,7 +247,7 @@ def _print_latency_stats(results_path: Path) -> None:
     """
     latency = compute_latency_summary(results_path)
     table = format_latency_table(latency)
-    print(table if table else "\nNo latency data found.")
+    print(table or "\nNo latency data found.")
 
 
 if __name__ == "__main__":

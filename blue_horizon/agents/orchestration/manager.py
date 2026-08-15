@@ -157,7 +157,7 @@ class OrchestrationManager:
 
         try:
             await self._resources.aclose()
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning("Failed to close orchestration resources", exc_info=True)
 
     def bind_thread_customer(self, *, thread_id: str, customer_id: int) -> None:
@@ -363,7 +363,9 @@ class OrchestrationManager:
                     # would return whatever the checkpoint currently holds
                     # and could hand two concurrent requests on one
                     # thread_id each other's reply.
-                    finalize_output = cast("dict[str, Any]", event["data"]["output"])
+                    finalize_output = cast(
+                        "dict[str, Any]", event["data"].get("output"),
+                    )
 
         response_dict = format_chat_response(finalize_output or {})
 

@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import time
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -40,6 +40,11 @@ _OTHER_THREAD_ID = "thread-2"
 _CUSTOMER_ID = 7
 _OTHER_CUSTOMER_ID = 9
 _DEFAULT_TTL_S = 1800.0
+
+# confirm() forwards write_pool to a write_ops function monkeypatched out in
+# every test below, so its value is never actually inspected; typed as None
+# to keep call sites honest that no real pool is used.
+_UNUSED_WRITE_POOL = cast("AsyncConnectionPool[Any]", None)
 
 
 class _FakeCommitResult:
@@ -281,7 +286,7 @@ class TestConfirm:
             store.confirm(
                 proposal_id=proposal.proposal_id,
                 customer_id=_CUSTOMER_ID,
-                write_pool=None,
+                write_pool=_UNUSED_WRITE_POOL,
             ),
         )
 
@@ -338,7 +343,7 @@ class TestConfirm:
             store.confirm(
                 proposal_id=proposal.proposal_id,
                 customer_id=_CUSTOMER_ID,
-                write_pool=None,
+                write_pool=_UNUSED_WRITE_POOL,
             ),
         )
 
@@ -352,7 +357,10 @@ class TestConfirm:
     ) -> None:
         """A `modify` proposal's confirm calls `write_ops.modify_booking`."""
         store = _make_store()
-        changes = ["fake-instruction"]
+        # A bare string stands in for a ModifyRoomInstruction: confirm()'s
+        # dispatch only forwards `details` opaquely to the monkeypatched
+        # fake_modify_booking below, never inspecting its structure.
+        changes = cast("list[write_ops.ModifyRoomInstruction]", ["fake-instruction"])
         proposal = store.create(
             thread_id=_THREAD_ID,
             customer_id=_CUSTOMER_ID,
@@ -401,7 +409,7 @@ class TestConfirm:
             store.confirm(
                 proposal_id=proposal.proposal_id,
                 customer_id=_CUSTOMER_ID,
-                write_pool=None,
+                write_pool=_UNUSED_WRITE_POOL,
             ),
         )
 
@@ -454,12 +462,12 @@ class TestConfirm:
             first = await store.confirm(
                 proposal_id=proposal.proposal_id,
                 customer_id=_CUSTOMER_ID,
-                write_pool=None,
+                write_pool=_UNUSED_WRITE_POOL,
             )
             second = await store.confirm(
                 proposal_id=proposal.proposal_id,
                 customer_id=_CUSTOMER_ID,
-                write_pool=None,
+                write_pool=_UNUSED_WRITE_POOL,
             )
             return first, second
 
@@ -478,7 +486,7 @@ class TestConfirm:
                 store.confirm(
                     proposal_id="does-not-exist",
                     customer_id=_CUSTOMER_ID,
-                    write_pool=None,
+                    write_pool=_UNUSED_WRITE_POOL,
                 ),
             )
 
@@ -491,7 +499,7 @@ class TestConfirm:
                 store.confirm(
                     proposal_id=proposal.proposal_id,
                     customer_id=_OTHER_CUSTOMER_ID,
-                    write_pool=None,
+                    write_pool=_UNUSED_WRITE_POOL,
                 ),
             )
 
@@ -533,12 +541,12 @@ class TestConfirm:
             await store.confirm(
                 proposal_id=proposal.proposal_id,
                 customer_id=_CUSTOMER_ID,
-                write_pool=None,
+                write_pool=_UNUSED_WRITE_POOL,
             )
             await store.confirm(
                 proposal_id=proposal.proposal_id,
                 customer_id=_OTHER_CUSTOMER_ID,
-                write_pool=None,
+                write_pool=_UNUSED_WRITE_POOL,
             )
 
         with pytest.raises(ProposalOwnershipError):
@@ -586,6 +594,6 @@ class TestConfirm:
                 store.confirm(
                     proposal_id=proposal.proposal_id,
                     customer_id=_CUSTOMER_ID,
-                    write_pool=None,
+                    write_pool=_UNUSED_WRITE_POOL,
                 ),
             )

@@ -347,15 +347,19 @@ async def _commit_proposal(
             otherwise be charged a number the dialog never showed.
 
     """
+    # `Proposal.details` is an opaque, `action`-shaped payload (see the class
+    # docstring): its concrete shape is guaranteed by `ProposalStore.create()`'s
+    # caller, not by the type system, so each branch casts it to the shape
+    # `action` promises.
     result: WriteResult
     if proposal.action == "book":
         result = await write_ops.commit_booking(
             write_pool,
             customer_id=proposal.customer_id,
-            rooms=proposal.details,
+            rooms=cast("list[write_ops.RoomRequest]", proposal.details),
         )
     elif proposal.action == "cancel":
-        booking_id, instructions = proposal.details
+        booking_id, instructions = cast("CancelDetails", proposal.details)
         result = await write_ops.cancel_booking(
             write_pool,
             customer_id=proposal.customer_id,
@@ -363,7 +367,7 @@ async def _commit_proposal(
             rooms=instructions,
         )
     else:
-        booking_id, changes = proposal.details
+        booking_id, changes = cast("ModifyDetails", proposal.details)
         result = await write_ops.modify_booking(
             write_pool,
             customer_id=proposal.customer_id,

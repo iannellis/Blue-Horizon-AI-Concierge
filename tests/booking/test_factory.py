@@ -17,15 +17,18 @@ shipping a broken tool schema.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
+from langgraph.prebuilt import ToolNode
 
 from blue_horizon.agents.booking.factory import BookingAgentFactory
 from blue_horizon.config import BookingSqlConfig
 
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
+
+    from blue_horizon.agents.booking.resources import BookingSqlResources
 
 # Every tool the factory is expected to expose to the model, and which of
 # them carry a server-injected `config: RunnableConfig` parameter that must
@@ -120,8 +123,12 @@ def _build_graph(booking_config: BookingSqlConfig) -> CompiledStateGraph:
         The compiled LangGraph agent.
 
     """
+    # _StubBookingSqlResources implements only what build() actually calls
+    # (see its docstring); the cast documents that the substitution is safe
+    # despite not structurally matching the real BookingSqlResources.
     factory = BookingAgentFactory(
-        config=booking_config, resources=_StubBookingSqlResources(),
+        config=booking_config,
+        resources=cast("BookingSqlResources", _StubBookingSqlResources()),
     )
     return factory.build()
 
@@ -135,8 +142,17 @@ def _tools_by_name(graph: CompiledStateGraph) -> dict[str, Any]:
     Returns:
         Mapping of tool name to the LangChain tool object.
 
+    Raises:
+        TypeError: If the "tools" node is not bound to a `ToolNode`.
+
     """
-    return graph.nodes["tools"].bound.tools_by_name
+    bound = graph.nodes["tools"].bound
+    if not isinstance(bound, ToolNode):
+        msg = (
+            f"Expected the 'tools' node to bind a ToolNode, got {type(bound).__name__}"
+        )
+        raise TypeError(msg)
+    return bound.tools_by_name
 
 
 def test_build_succeeds_and_exposes_expected_tools(

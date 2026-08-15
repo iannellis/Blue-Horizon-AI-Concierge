@@ -17,6 +17,7 @@ class SupportsReadyState(Protocol):
     @property
     def is_ready(self) -> bool:
         """Return whether the manager is ready to accept requests."""
+        ...
 
 
 async def wait_for_orchestration_ready(

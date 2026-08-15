@@ -7,10 +7,11 @@ end-to-end eval_injection_tripwires() function using minimal mock objects
 
 # ruff: noqa: S101, FBT003
 
+from __future__ import annotations
+
 import json
-import re
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -24,44 +25,54 @@ from eval.evaluators._injection import (
     eval_injection_tripwires,
 )
 
+if TYPE_CHECKING:
+    import re
+
+    from langsmith.schemas import Example, Run
+
+    from eval.config import EvalConfig
+
 # ---------------------------------------------------------------------------
 # Helpers for constructing minimal mock objects
 # ---------------------------------------------------------------------------
 
 
-def _make_run(turn_outputs: list[dict[str, Any]]) -> SimpleNamespace:
+def _make_run(turn_outputs: list[dict[str, Any]]) -> Run:
     """Build a minimal run-like object for testing.
 
     Args:
         turn_outputs: List of per-turn output dicts.
 
     Returns:
-        SimpleNamespace with an outputs attribute.
+        Run: A `SimpleNamespace` with an `outputs` attribute, cast to `Run`
+        since `eval_injection_tripwires` only ever reads that attribute off it.
 
     """
-    return SimpleNamespace(outputs={"turn_outputs": turn_outputs})
+    return cast("Run", SimpleNamespace(outputs={"turn_outputs": turn_outputs}))
 
 
 def _make_example(
     turns: list[dict[str, Any]],
-) -> SimpleNamespace:
+) -> Example:
     """Build a minimal example-like object for testing.
 
     Args:
         turns: List of turn dicts, each optionally containing expect_injection.
 
     Returns:
-        SimpleNamespace with an inputs attribute.
+        Example: A `SimpleNamespace` with an `inputs` attribute, cast to
+        `Example` since `eval_injection_tripwires` only ever reads that
+        attribute off it.
 
     """
-    return SimpleNamespace(inputs={"turns": turns})
+    return cast("Example", SimpleNamespace(inputs={"turns": turns}))
 
 
 def _make_cfg(
     *,
     json_value_max: int = 10_000,
     tripwire_hits_max: int = 100,
-) -> SimpleNamespace:
+) -> EvalConfig:
     """Build a minimal cfg-like object for testing.
 
     Args:
@@ -69,14 +80,16 @@ def _make_cfg(
         tripwire_hits_max: Maximum number of tripwire hits to capture.
 
     Returns:
-        SimpleNamespace with evaluator_limits attribute.
+        EvalConfig: A `SimpleNamespace` with an `evaluator_limits` attribute,
+        cast to `EvalConfig` since `eval_injection_tripwires` only ever reads
+        that attribute off it.
 
     """
     limits = SimpleNamespace(
         json_value_max=json_value_max,
         tripwire_hits_max=tripwire_hits_max,
     )
-    return SimpleNamespace(evaluator_limits=limits)
+    return cast("EvalConfig", SimpleNamespace(evaluator_limits=limits))
 
 
 def _make_clean_turn(text: str = "The pool is open 9am-9pm.") -> dict[str, Any]:

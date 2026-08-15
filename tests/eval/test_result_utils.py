@@ -56,6 +56,30 @@ def _persisted_evaluators(
     return {"results": {"value": list(feedback_items)}}
 
 
+def _as_dict(value: object) -> dict[str, object]:
+    """Narrow a summary value expected to be a nested dict.
+
+    `_summarize_results()` and `compute_latency_summary()` return
+    structurally heterogeneous ``dict[str, object]`` summaries, so their
+    nested values are only known to be dicts by the tests' own knowledge of
+    what they put in, not by the return type.
+
+    Args:
+        value: Value pulled from a summary dict.
+
+    Returns:
+        dict[str, object]: The same value, narrowed for indexing.
+
+    Raises:
+        TypeError: If `value` is not actually a dict.
+
+    """
+    if not isinstance(value, dict):
+        msg = f"Expected a dict, got {type(value).__name__}"
+        raise TypeError(msg)
+    return value
+
+
 class TestNormalizeFeedback:
     """_normalize_feedback() flattens persisted evaluator payloads."""
 
@@ -196,39 +220,31 @@ class TestSummarizeResults:
         )
 
         summary = _summarize_results(rows, context)
+        case_summary = _as_dict(summary["case_based_summary"])
+        turn_summary = _as_dict(summary["turn_based_summary"])
 
-        assert summary["case_based_summary"]["route_accuracy"] == (
-            expected_case_route_accuracy
-        )
-        assert summary["case_based_summary"]["consumer_quality"] == (
-            expected_case_consumer_quality
-        )
-        assert summary["case_based_summary"]["rag_faithfulness_mean"] == (
-            expected_case_rag_faithfulness
-        )
+        assert case_summary["route_accuracy"] == expected_case_route_accuracy
+        assert case_summary["consumer_quality"] == expected_case_consumer_quality
+        assert case_summary["rag_faithfulness_mean"] == expected_case_rag_faithfulness
         assert (
-            summary["case_based_summary"]["info_expected_filters_pass_rate"]
+            case_summary["info_expected_filters_pass_rate"]
             == expected_case_filter_pass_rate
         )
-        assert summary["turn_based_summary"]["route_accuracy"] == (
-            expected_turn_route_accuracy
-        )
-        assert summary["turn_based_summary"]["info_reference_subset_pass_rate"] == (
+        assert turn_summary["route_accuracy"] == expected_turn_route_accuracy
+        assert turn_summary["info_reference_subset_pass_rate"] == (
             expected_turn_reference_pass_rate
         )
-        assert summary["turn_based_summary"]["booking_no_unexpected_failure_rate"] == (
+        assert turn_summary["booking_no_unexpected_failure_rate"] == (
             expected_turn_booking_pass_rate
         )
-        assert summary["turn_based_summary"]["info_expected_filters_pass_rate"] == (
+        assert turn_summary["info_expected_filters_pass_rate"] == (
             expected_turn_filter_pass_rate
         )
-        assert summary["turn_based_summary"]["rag_faithfulness_mean"] == (
-            expected_turn_rag_faithfulness
-        )
-        assert summary["turn_based_summary"]["rag_context_precision_mean"] == (
+        assert turn_summary["rag_faithfulness_mean"] == expected_turn_rag_faithfulness
+        assert turn_summary["rag_context_precision_mean"] == (
             expected_turn_rag_precision
         )
-        assert "consumer_quality" not in summary["turn_based_summary"]
+        assert "consumer_quality" not in turn_summary
 
 
 class TestComputeLatencySummary:
@@ -259,8 +275,9 @@ class TestComputeLatencySummary:
         results_path.write_text(f"{json.dumps(row)}\n", encoding="utf-8")
 
         summary = compute_latency_summary(results_path)
+        quantiles = _as_dict(summary["latency_quantiles_ms"])
+        booking_quantiles = _as_dict(quantiles["booking"])
+        info_quantiles = _as_dict(quantiles["info"])
 
-        assert (
-            summary["latency_quantiles_ms"]["booking"]["p50_ms"] == expected_booking_p50
-        )
-        assert summary["latency_quantiles_ms"]["info"]["p95_ms"] == expected_info_p95
+        assert booking_quantiles["p50_ms"] == expected_booking_p50
+        assert info_quantiles["p95_ms"] == expected_info_p95

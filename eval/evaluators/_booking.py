@@ -713,13 +713,16 @@ async def _judge_claims_success(text: str, model: str) -> tuple[bool, str]:
         return True, reason
 
     parsed = _safe_json_loads(raw_text)
-    claims_success = parsed.get("claims_success") if isinstance(parsed, dict) else None
+    unparseable_reason = (
+        "Judge returned unparseable output, flagging conservatively. "
+        f"Raw: {truncate(raw_text, 150)}"
+    )
+    if not isinstance(parsed, dict):
+        return True, unparseable_reason
+
+    claims_success = parsed.get("claims_success")
     if not isinstance(claims_success, bool):
-        reason = (
-            "Judge returned unparseable output, flagging conservatively. "
-            f"Raw: {truncate(raw_text, 150)}"
-        )
-        return True, reason
+        return True, unparseable_reason
 
     rationale = parsed.get("rationale")
     return claims_success, rationale if isinstance(rationale, str) else ""

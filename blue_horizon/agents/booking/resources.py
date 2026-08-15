@@ -312,6 +312,11 @@ class BookingSqlResources:
         def _is_retryable(exc: BaseException) -> bool:
             return isinstance(exc, _conn_errors) and _is_transient_conn_error(exc)
 
+        # Default only reached if AsyncRetrying's loop completes without
+        # returning or raising, which tenacity does not do in practice -- this
+        # guards against a silent UnboundLocalError if that assumption ever
+        # breaks.
+        error_message = _user_facing_db_message()
         try:
             async for attempt in AsyncRetrying(
                 retry=retry_if_exception(_is_retryable),

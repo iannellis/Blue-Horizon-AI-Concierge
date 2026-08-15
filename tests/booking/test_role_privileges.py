@@ -18,7 +18,7 @@ Development branch before running these.
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import psycopg
 import pytest
@@ -66,7 +66,15 @@ def _connect(url_env_var: str) -> psycopg.Connection[Any]:
     url = os.environ.get(url_env_var)
     if not url:
         pytest.skip(f"{url_env_var} not set; skipping db_integration test.")
-    conn = psycopg.connect(url, row_factory=dict_row)
+    # psycopg.connect's Row TypeVar is bound only via row_factory's nested
+    # Callable return type, which pyright's solver can't infer from -- it
+    # falls back to the TupleRow default and then rejects dict_row outright.
+    # dict_row genuinely makes every cursor here yield dict rows, so the cast
+    # documents that gap rather than a real type mismatch.
+    conn = cast(
+        "psycopg.Connection[Any]",
+        psycopg.connect(url, row_factory=cast("Any", dict_row)),
+    )
     conn.autocommit = True
     return conn
 

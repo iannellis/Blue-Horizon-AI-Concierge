@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Any, Required, TypedDict
 
 from langchain.agents import create_agent
 
@@ -65,7 +65,7 @@ class CancelRoomRequest(TypedDict, total=False):
 
     """
 
-    booking_room_id: int
+    booking_room_id: Required[int]
     new_check_in: str
     new_check_out: str
 

@@ -7,8 +7,10 @@ end-to-end eval_info_reference_subset() function via minimal mock objects.
 
 # ruff: noqa: S101
 
+from __future__ import annotations
+
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from eval.evaluators._info_references import (
     _build_reference_candidate_text,
@@ -18,29 +20,36 @@ from eval.evaluators._info_references import (
     eval_info_reference_subset,
 )
 
+if TYPE_CHECKING:
+    from langsmith.schemas import Example, Run
+
+    from eval.config import EvalConfig
+
 # ---------------------------------------------------------------------------
 # Helpers for constructing minimal mock objects
 # ---------------------------------------------------------------------------
 
 
-def _make_run(turn_outputs: list[dict[str, Any]]) -> SimpleNamespace:
+def _make_run(turn_outputs: list[dict[str, Any]]) -> Run:
     """Build a minimal run-like object.
 
     Args:
         turn_outputs: Per-turn output dicts to embed in outputs.
 
     Returns:
-        SimpleNamespace with an outputs attribute.
+        Run: A `SimpleNamespace` with an `outputs` attribute, cast to `Run`
+        since `eval_info_reference_subset` only ever reads that attribute
+        off it.
 
     """
-    return SimpleNamespace(outputs={"turn_outputs": turn_outputs})
+    return cast("Run", SimpleNamespace(outputs={"turn_outputs": turn_outputs}))
 
 
 def _make_example(
     turns: list[dict[str, Any]],
     *,
     reference_answers: list[Any] | None = None,
-) -> SimpleNamespace:
+) -> Example:
     """Build a minimal example-like object.
 
     Args:
@@ -48,13 +57,15 @@ def _make_example(
         reference_answers: Optional top-level reference answer list.
 
     Returns:
-        SimpleNamespace with an inputs attribute.
+        Example: A `SimpleNamespace` with an `inputs` attribute, cast to
+        `Example` since `eval_info_reference_subset` only ever reads that
+        attribute off it.
 
     """
     inputs: dict[str, Any] = {"turns": turns}
     if reference_answers is not None:
         inputs["reference_answers"] = reference_answers
-    return SimpleNamespace(inputs=inputs)
+    return cast("Example", SimpleNamespace(inputs=inputs))
 
 
 def _make_cfg(
@@ -62,7 +73,7 @@ def _make_cfg(
     json_value_max: int = 10_000,
     info_filter_failures_max: int = 50,
     reference_chars: int = 2_000,
-) -> SimpleNamespace:
+) -> EvalConfig:
     """Build a minimal cfg-like object.
 
     Args:
@@ -71,7 +82,9 @@ def _make_cfg(
         reference_chars: Maximum reference string length.
 
     Returns:
-        SimpleNamespace with evaluator_limits and ragas attributes.
+        EvalConfig: A `SimpleNamespace` with `evaluator_limits` and `ragas`
+        attributes, cast to `EvalConfig` since `eval_info_reference_subset`
+        only ever reads those attributes off it.
 
     """
     limits = SimpleNamespace(
@@ -79,7 +92,7 @@ def _make_cfg(
         info_filter_failures_max=info_filter_failures_max,
     )
     ragas = SimpleNamespace(reference_chars=reference_chars)
-    return SimpleNamespace(evaluator_limits=limits, ragas=ragas)
+    return cast("EvalConfig", SimpleNamespace(evaluator_limits=limits, ragas=ragas))
 
 
 # ---------------------------------------------------------------------------

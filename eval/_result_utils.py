@@ -12,7 +12,7 @@ import statistics
 from collections.abc import Iterable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import pandas as pd
 from pydantic import TypeAdapter, ValidationError
@@ -273,7 +273,11 @@ def _collect_feedback(
     if isinstance(raw_feedback, Mapping):
         for key, payload in raw_feedback.items():
             if isinstance(payload, Mapping):
-                feedback[key] = dict(json_safe(payload))
+                # json_safe() always returns a dict for a Mapping input; its
+                # signature is deliberately `object` to cover every branch of
+                # its recursive serialization, so that guarantee isn't visible
+                # to the type checker from the call alone.
+                feedback[key] = cast("dict[str, object]", json_safe(payload))
             else:
                 feedback[key] = {"value": json_safe(payload)}
         return feedback
@@ -570,11 +574,14 @@ def compute_latency_summary(results_path: Path) -> dict[str, object]:
     df = pd.DataFrame(records)
     df["route"] = df["route"].fillna("unknown")
     grp = df.groupby("route")["latency_ms"]
+    # Series.quantile() is stubbed to also return a Series, to cover its
+    # list-of-quantiles overload -- not the case for the single-float q used
+    # here, which always returns one scalar.
     result: dict[str, object] = {
         str(route): {
-            "p50_ms": round(float(series.quantile(0.50)), 1),
-            "p95_ms": round(float(series.quantile(0.95)), 1),
-            "p99_ms": round(float(series.quantile(0.99)), 1),
+            "p50_ms": round(float(cast("float", series.quantile(0.50))), 1),
+            "p95_ms": round(float(cast("float", series.quantile(0.95))), 1),
+            "p99_ms": round(float(cast("float", series.quantile(0.99))), 1),
         }
         for route, series in grp
     }

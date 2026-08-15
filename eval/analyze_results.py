@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import SupportsFloat, cast
 
 from eval._utils import truncate
 
@@ -28,7 +29,11 @@ def fmt(v: object, decimals: int = 4) -> str:
     if v is None:
         return "None"
     try:
-        return f"{float(v):.{decimals}f}"
+        # v is duck-typed here by design (see docstring): float() itself
+        # accepts a numeric string or any SupportsFloat object and raises
+        # TypeError/ValueError for anything else, which the except below
+        # already handles.
+        return f"{float(cast('str | SupportsFloat', v)):.{decimals}f}"
     except (TypeError, ValueError):
         return str(v)
 

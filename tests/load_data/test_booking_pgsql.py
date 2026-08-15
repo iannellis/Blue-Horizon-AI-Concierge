@@ -5,9 +5,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Any, Self, cast
 
 import pandas as pd
+import psycopg.sql
 
 from blue_horizon.load_data.booking_pgsql import (
     ROOM_AVAIL_COLUMNS,
@@ -164,8 +165,11 @@ class TestCopyDataFrameIntoTable:
             },
         )
 
+        # _FakeConnection implements only the .cursor()/.copy() surface
+        # copy_dataframe_into_table actually exercises, not the full
+        # psycopg.Connection interface.
         copy_dataframe_into_table(
-            conn,
+            cast("psycopg.Connection[Any]", conn),
             table_name="room_availability",
             columns=ROOM_AVAIL_COLUMNS,
             df=df,
@@ -184,14 +188,17 @@ class _FakeExecuteConnection:
         """Initialize the connection with no recorded SQL yet."""
         self.executed_sql: str | None = None
 
-    def execute(self, sql: str) -> None:
+    def execute(self, sql: str | psycopg.sql.Composable) -> None:
         """Record the SQL text this connection was asked to execute.
 
         Args:
-            sql: The SQL text passed to ``execute``.
+            sql: The SQL text, or a `psycopg.sql.Composable` wrapping it,
+                passed to ``execute``. Normalized to plain text the same way
+                psycopg itself resolves either form before sending it to the
+                database.
 
         """
-        self.executed_sql = sql
+        self.executed_sql = psycopg.sql.as_string(sql)
 
 
 class TestRegrantBookingAgentRole:
@@ -201,7 +208,10 @@ class TestRegrantBookingAgentRole:
         """The connection receives the full text of the .sql file, verbatim."""
         conn = _FakeExecuteConnection()
 
-        regrant_booking_agent_role(conn)
+        # _FakeExecuteConnection implements only the .execute() surface
+        # regrant_booking_agent_role actually exercises, not the full
+        # psycopg.Connection interface.
+        regrant_booking_agent_role(cast("psycopg.Connection[Any]", conn))
 
         sql_path = (
             Path(__file__).parents[2]

@@ -7,6 +7,7 @@ redisvl internals.
 
 # ruff: noqa: S101
 
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -53,6 +54,7 @@ class TestBuildFilters:
         result = build_filters(booking_required=False)
         assert result is not None
         f = result.filters[0]
+        assert isinstance(f, MetadataFilter)
         assert f.value == "False"
 
     def test_min_price(self) -> None:
@@ -70,6 +72,7 @@ class TestBuildFilters:
         result = build_filters(max_price=200.0)
         assert result is not None
         f = result.filters[0]
+        assert isinstance(f, MetadataFilter)
         assert f.key == "price"
         assert f.operator == FilterOperator.LTE
         assert f.value == pytest.approx(200.0)
@@ -79,7 +82,7 @@ class TestBuildFilters:
         result = build_filters(min_price=20.0, max_price=100.0)
         assert result is not None
         assert len(result.filters) == 2  # noqa: PLR2004
-        operators = {f.operator for f in result.filters}
+        operators = {cast("MetadataFilter", f).operator for f in result.filters}
         assert FilterOperator.GTE in operators
         assert FilterOperator.LTE in operators
 
@@ -88,6 +91,7 @@ class TestBuildFilters:
         result = build_filters(max_notice_hours=24)
         assert result is not None
         f = result.filters[0]
+        assert isinstance(f, MetadataFilter)
         assert f.key == "min_notice_hours"
         assert f.operator == FilterOperator.LTE
         assert f.value == 24  # noqa: PLR2004
@@ -97,6 +101,7 @@ class TestBuildFilters:
         result = build_filters(min_duration_minutes=30)
         assert result is not None
         f = result.filters[0]
+        assert isinstance(f, MetadataFilter)
         assert f.key == "duration"
         assert f.operator == FilterOperator.GTE
         assert f.value == 30  # noqa: PLR2004
@@ -106,6 +111,7 @@ class TestBuildFilters:
         result = build_filters(max_duration_minutes=90)
         assert result is not None
         f = result.filters[0]
+        assert isinstance(f, MetadataFilter)
         assert f.key == "duration"
         assert f.operator == FilterOperator.LTE
         assert f.value == 90  # noqa: PLR2004
@@ -144,7 +150,9 @@ class TestBuildFilters:
         """Integer price inputs are stored as float."""
         result = build_filters(min_price=50)  # type: ignore[arg-type]
         assert result is not None
-        assert isinstance(result.filters[0].value, float)
+        f = result.filters[0]
+        assert isinstance(f, MetadataFilter)
+        assert isinstance(f.value, float)
 
 
 # ---------------------------------------------------------------------------

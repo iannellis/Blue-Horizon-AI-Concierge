@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pandas as pd
 import pandera.pandas as pa
@@ -73,6 +73,11 @@ def load_dataframe(name: str, path: Path, schema: pa.DataFrameSchema) -> pd.Data
         df = pd.read_pickle(path)  # noqa: S301
     except (FileNotFoundError, OSError):
         logger.exception("Unable to read %s data from %s", name, path)
+        sys.exit(1)
+    if not isinstance(df, pd.DataFrame):
+        logger.error(
+            "%s data (%s) is not a DataFrame, got %s", name, path, type(df).__name__,
+        )
         sys.exit(1)
 
     try:
@@ -142,6 +147,33 @@ def _to_float(value: object) -> float:
     raise TypeError(msg)
 
 
+def _coerce_numeric_series(series: object) -> pd.Series:
+    """Coerce a column to numeric, turning unparseable values into NaN.
+
+    Takes ``object`` rather than ``pd.Series`` because ``DataFrame.__getitem__``
+    is stubbed to also allow a ``DataFrame`` back (to cover duplicate-labelled
+    columns, not a case that applies to this fixed, flat column layout), and
+    ``pd.to_numeric`` has no input/output type stubs of its own, so pyright
+    infers an overly broad return type from its implementation; this checks
+    the actual runtime type once and casts back to what a Series input with
+    ``errors="coerce"`` always actually produces.
+
+    Args:
+        series: Column to coerce, expected to be a Series.
+
+    Returns:
+        pd.Series: Numeric column, with unparseable values as NaN.
+
+    Raises:
+        TypeError: If `series` is not actually a `pd.Series`.
+
+    """
+    if not isinstance(series, pd.Series):
+        msg = f"Expected a Series, got {type(series).__name__}"
+        raise TypeError(msg)
+    return cast("pd.Series", pd.to_numeric(series, errors="coerce"))
+
+
 _FAQ_SCHEMA = pa.DataFrameSchema(
     columns={
         "question": pa.Column(str, nullable=True, coerce=True),
@@ -209,16 +241,18 @@ def get_faq_nodes(df_faq: pd.DataFrame) -> list[TextNode]:
     )
     return [
         TextNode(
-            text=f"Question:\n{row.question}\n\nAnswer:\n{row.answer}",
-            id_=row.Index,
+            text=f"Question:\n{row['question']}\n\nAnswer:\n{row['answer']}",
+            id_=str(idx),
             metadata={
-                "category": row.category,
-                "subcategory": row.subcategory,
-                "keywords": row.keywords,
-                "last_updated": row.last_updated,
+                "category": row["category"],
+                "subcategory": row["subcategory"],
+                "keywords": row["keywords"],
+                "last_updated": row["last_updated"],
             },
         )
-        for row in normalized.itertuples()
+        for idx, row in zip(
+            normalized.index, normalized.to_dict("records"), strict=True,
+        )
     ]
 
 
@@ -236,29 +270,30 @@ def get_amenities_nodes(df_amenities: pd.DataFrame) -> list[TextNode]:
         name=df_amenities["name"].fillna("").astype(str),
         description=df_amenities["description"].fillna("").astype(str),
         category=df_amenities["category"].fillna("general").astype(str),
-        price=pd.to_numeric(df_amenities["price"], errors="coerce").fillna(0.0),
-        duration=pd.to_numeric(df_amenities["duration"], errors="coerce").fillna(0.0),
+        price=_coerce_numeric_series(df_amenities["price"]).fillna(0.0),
+        duration=_coerce_numeric_series(df_amenities["duration"]).fillna(0.0),
         availability=df_amenities["availability"].fillna("").astype(str),
         booking_required=df_amenities["booking_required"].fillna("False").astype(str),
-        min_notice_hours=pd.to_numeric(
+        min_notice_hours=_coerce_numeric_series(
             df_amenities["min_notice_hours"],
-            errors="coerce",
         ).fillna(0.0),
     )
     return [
         TextNode(
-            text=f"Name:{row.name}\n\nDescription:\n{row.description}",
-            id_=row.Index,
+            text=f"Name:{row['name']}\n\nDescription:\n{row['description']}",
+            id_=str(idx),
             metadata={
-                "category": row.category,
-                "price": _to_float(row.price),
-                "duration": _to_float(row.duration),
-                "availability": row.availability,
-                "booking_required": row.booking_required,
-                "min_notice_hours": _to_float(row.min_notice_hours),
+                "category": row["category"],
+                "price": _to_float(row["price"]),
+                "duration": _to_float(row["duration"]),
+                "availability": row["availability"],
+                "booking_required": row["booking_required"],
+                "min_notice_hours": _to_float(row["min_notice_hours"]),
             },
         )
-        for row in normalized.itertuples()
+        for idx, row in zip(
+            normalized.index, normalized.to_dict("records"), strict=True,
+        )
     ]
 
 
@@ -276,32 +311,32 @@ def get_services_nodes(df_services: pd.DataFrame) -> list[TextNode]:
         name=df_services["name"].fillna("").astype(str),
         description=df_services["description"].fillna("").astype(str),
         service_type=df_services["service_type"].fillna("general").astype(str),
-        duration=pd.to_numeric(
+        duration=_coerce_numeric_series(
             df_services["duration_minutes"],
-            errors="coerce",
         ).fillna(0.0),
-        price=pd.to_numeric(df_services["price"], errors="coerce").fillna(0.0),
+        price=_coerce_numeric_series(df_services["price"]).fillna(0.0),
         department=df_services["department"].fillna("general").astype(str),
         booking_required=df_services["booking_required"].fillna("False").astype(str),
-        min_notice_hours=pd.to_numeric(
+        min_notice_hours=_coerce_numeric_series(
             df_services["min_notice_hours"],
-            errors="coerce",
         ).fillna(0.0),
     )
     return [
         TextNode(
-            text=f"Name:{row.name}\n\nDescription:\n{row.description}",
-            id_=row.Index,
+            text=f"Name:{row['name']}\n\nDescription:\n{row['description']}",
+            id_=str(idx),
             metadata={
-                "service_type": row.service_type,
-                "duration": _to_float(row.duration),
-                "price": _to_float(row.price),
-                "department": row.department,
-                "booking_required": row.booking_required,
-                "min_notice_hours": _to_float(row.min_notice_hours),
+                "service_type": row["service_type"],
+                "duration": _to_float(row["duration"]),
+                "price": _to_float(row["price"]),
+                "department": row["department"],
+                "booking_required": row["booking_required"],
+                "min_notice_hours": _to_float(row["min_notice_hours"]),
             },
         )
-        for row in normalized.itertuples()
+        for idx, row in zip(
+            normalized.index, normalized.to_dict("records"), strict=True,
+        )
     ]
 
 

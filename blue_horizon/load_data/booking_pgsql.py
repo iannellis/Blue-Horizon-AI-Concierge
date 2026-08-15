@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, LiteralString, cast
 
 import pandas as pd
 import psycopg
@@ -51,6 +51,33 @@ def ensure_pickle_path(path: Path) -> None:
         msg = f"Missing expected pickle at {path}"
         logger.error(msg)
         raise FileNotFoundError(msg)
+
+
+def read_pickle_dataframe(path: Path) -> pd.DataFrame:
+    """Verify, then unpickle a data file expected to hold a DataFrame.
+
+    ``pd.read_pickle`` can return any pickled object, including a bare
+    ``Series`` -- this checks the loaded value against what every pickle in
+    this pipeline is documented to hold, rather than trusting the source
+    file's shape.
+
+    Args:
+        path: Pickle file to load.
+
+    Returns:
+        pd.DataFrame: The unpickled DataFrame.
+
+    Raises:
+        FileNotFoundError: If the target file is missing.
+        TypeError: If the pickle did not contain a DataFrame.
+
+    """
+    ensure_pickle_path(path)
+    df = pd.read_pickle(path)  # noqa: S301
+    if not isinstance(df, pd.DataFrame):
+        msg = f"Expected a DataFrame in {path}, got {type(df).__name__}"
+        raise TypeError(msg)
+    return df
 
 
 ROOMS_COLUMNS: Sequence[str] = [
@@ -156,9 +183,11 @@ def prepare_rooms_dataframe(
 
     """
     rooms_path = data_path / "rooms.pkl"
-    ensure_pickle_path(rooms_path)
-    df = pd.read_pickle(rooms_path)  # noqa: S301
-    df["room_id"] = _normalize_room_id_series(df["room_id"])
+    df = read_pickle_dataframe(rooms_path)
+    # pandas-stubs' DataFrame.__getitem__(str) overloads also allow a
+    # DataFrame back, to cover duplicate-labelled columns -- not a case that
+    # applies to this fixed, flat column layout.
+    df["room_id"] = _normalize_room_id_series(cast("pd.Series", df["room_id"]))
 
     room_types = df["type"].unique().tolist()
     room_bed_types = df["bed_type"].unique().tolist()
@@ -182,9 +211,11 @@ def prepare_room_availability_dataframe(
 
     """
     availability_path = data_path / "room_availability.pkl"
-    ensure_pickle_path(availability_path)
-    df = pd.read_pickle(availability_path)  # noqa: S301
-    df["room_id"] = _normalize_room_id_series(df["room_id"])
+    df = read_pickle_dataframe(availability_path)
+    # pandas-stubs' DataFrame.__getitem__(str) overloads also allow a
+    # DataFrame back, to cover duplicate-labelled columns -- not a case that
+    # applies to this fixed, flat column layout.
+    df["room_id"] = _normalize_room_id_series(cast("pd.Series", df["room_id"]))
 
     availability_statuses = df["status"].unique().tolist()
     df = df.loc[:, ROOM_AVAIL_COLUMNS]
@@ -208,10 +239,11 @@ def prepare_customers_dataframe(data_path: Path) -> pd.DataFrame:
 
     """
     customers_path = data_path / "customers.pkl"
-    ensure_pickle_path(customers_path)
-    df = pd.read_pickle(customers_path)  # noqa: S301
-    df = df[:_CUSTOMER_COUNT][["first_name", "last_name"]]
-    return df.reset_index()
+    df = read_pickle_dataframe(customers_path)
+    # Selecting a list of column labels always yields a DataFrame; cast past
+    # the same __getitem__ stub imprecision as above.
+    trimmed = cast("pd.DataFrame", df[:_CUSTOMER_COUNT][["first_name", "last_name"]])
+    return trimmed.reset_index()
 
 
 def setup_rooms_schema(
@@ -499,7 +531,12 @@ def regrant_booking_agent_role(conn: psycopg.Connection) -> None:
 
     """
     sql_path = Path(__file__).with_name("regrant_booking_agent_role.sql")
-    conn.execute(sql_path.read_text(encoding="utf-8"))
+    # SQL() requires a LiteralString because it does no escaping -- a
+    # deliberate guard against composing untrusted/dynamic SQL text. This
+    # text is a repo-committed script read verbatim, not untrusted input, so
+    # the cast documents that this is exactly the case the guard is fine with.
+    sql_text = cast("LiteralString", sql_path.read_text(encoding="utf-8"))
+    conn.execute(SQL(sql_text))
 
 
 def reload_sql_tables() -> None:

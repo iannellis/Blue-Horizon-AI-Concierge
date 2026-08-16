@@ -179,10 +179,13 @@ Runtime secrets are read from a `.env` file (or environment variables). Both the
 | `PGSQL_RW_DB_URL` | PostgreSQL connection URL, authenticated as the read-write `bh_agent_rw` role — backs `write_ops` (booking commits), `/v1/customers`, and `/v1/bookings`. Never reachable from the model. |
 | `PGSQL_RO_DB_URL` | PostgreSQL connection URL, authenticated as the read-only `bh_agent_ro` role — the *only* database connection the model's `run_sql` tool can use; Postgres itself refuses any write attempted through it |
 
+`bh_agent_rw` and `bh_agent_ro` are not created automatically — they must already exist in the database with passwords set before these URLs will work. See [Load data](#1-load-data) for the one-time grant step.
+
 **Optional:**
 
 | Variable | Description |
 |----------|-------------|
+| `PGSQL_ROOT_DB_URL` | PostgreSQL connection URL, authenticated with schema-owner privileges — used only by the data-loading tooling ([`booking_pgsql.py`](blue_horizon/load_data/booking_pgsql.py) and `regrant_booking_agent_role.sql`) to create/reload tables and (re)grant the `bh_agent_rw`/`bh_agent_ro` roles; not read by the API or UI at runtime. Required to run [Load data](#1-load-data), not to start the app afterward. |
 | `NEON_API_KEY` | Neon management API key — enables the `/v1/reset` endpoint; omit to disable |
 | `LANGSMITH_API_KEY` | LangSmith API key — enables LangSmith tracing |
 | `LANGSMITH_TRACING` | Set to `true` to activate tracing (requires `LANGSMITH_API_KEY`) |
@@ -220,7 +223,7 @@ Populate PostgreSQL with room, availability, and customer data:
 python -m blue_horizon.load_data.booking_pgsql
 ```
 
-Then grant the two database roles the agent depends on — `bh_agent_ro` (read-only, used by the model's `run_sql` tool) and `bh_agent_rw` (used only by server-side write functions):
+Then grant the two database roles the agent depends on — `bh_agent_ro` (read-only, used by the model's `run_sql` tool) and `bh_agent_rw` (used only by server-side write functions). The roles themselves are not created by this step: they must already exist in the database with passwords set (`PGSQL_RO_DB_URL` / `PGSQL_RW_DB_URL` authenticate as them) before it runs. `regrant_booking_agent_role.sql` only (re)applies the least-privilege grants to those already-present roles:
 
 ```bash
 psql "$PGSQL_ROOT_DB_URL" -f blue_horizon/load_data/regrant_booking_agent_role.sql

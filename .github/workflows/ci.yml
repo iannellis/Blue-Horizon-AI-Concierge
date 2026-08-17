@@ -30,6 +30,18 @@
 #   PGSQL_RO_EVAL_DB_URL – Read-only (bh_agent_ro) PostgreSQL connection string
 #                          for the Development database. Reused by the
 #                          db-integration-tests job as PGSQL_RO_DB_URL.
+#   PGSQL_ROOT_EVAL_DB_URL – Schema-owner PostgreSQL connection string for the
+#                          Development database. Reused by the
+#                          db-integration-tests job as PGSQL_ROOT_DB_URL, for
+#                          the one test in test_db_invariants.py that needs
+#                          DDL privilege (temporarily dropping
+#                          booking_rooms_no_overlap inside a rolled-back
+#                          transaction -- bh_agent_rw cannot). Optional: that
+#                          test skips gracefully if this is unset. Distinct
+#                          from PGSQL_ROOT_PARENT_DB_URL, which
+#                          booking_pgsql.reload_sql_tables reads and which
+#                          must only ever point at the Parent branch, never
+#                          Development.
 #   REDIS_URL           – Redis connection URL for the agent's cache.
 #   HF_TOKEN            – HuggingFace write token (Settings → Access Tokens).
 #
@@ -156,6 +168,7 @@ jobs:
           REDIS_URL: ${{ secrets.REDIS_URL }}
           PGSQL_RW_DB_URL: ${{ secrets.PGSQL_RW_EVAL_DB_URL }}
           PGSQL_RO_DB_URL: ${{ secrets.PGSQL_RO_EVAL_DB_URL }}
+          PGSQL_ROOT_DB_URL: ${{ secrets.PGSQL_ROOT_EVAL_DB_URL }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: python -m pytest tests/ -m db_integration -q
 

@@ -1,4 +1,4 @@
-"""Utilities to rebuild the PostgreSQL booking schema (rooms, availability, and booking tables)."""  # noqa: E501
+"""Utilities to rebuild the PostgreSQL booking schema (rooms, availability,and booking tables)."""  # noqa: E501
 
 from __future__ import annotations
 
@@ -113,25 +113,33 @@ CUSTOMERS_COLUMNS: Sequence[str] = [
     "last_name",
 ]
 
-# Only the first N customers are loaded, matching the dropdown identity picker
-# in the UI. There is no email/notification functionality in this project, so
+# The N customers with the richest accepted pre-existing booking history are
+# loaded (see `_select_richest_customer_ids`), not an arbitrary first N, so
+# the dropdown identity picker in the UI has real booking history to demo
+# against. There is no email/notification functionality in this project, so
 # the remaining source columns (email, phone, address, ...) are never loaded.
 _CUSTOMER_COUNT: int = 25
 
 
 def get_pgsql_conn_string() -> str:
-    """Load the PGSQL connection string from the environment.
+    """Load the Parent branch's root PGSQL connection string from the environment.
+
+    Deliberately reads ``PGSQL_ROOT_PARENT_DB_URL``, not ``PGSQL_ROOT_DB_URL``:
+    `reload_sql_tables` may only run against the Parent branch (see its
+    docstring), so its connection string needs a name that can't be confused
+    with, or accidentally aliased to, whatever branch a `db_integration` test
+    run targets.
 
     Returns:
-        str: The PGSQL connection string stored in PGSQL_ROOT_DB_URL.
+        str: The PGSQL connection string stored in PGSQL_ROOT_PARENT_DB_URL.
 
     Raises:
-        RuntimeError: If PGSQL_ROOT_DB_URL is unset.
+        RuntimeError: If PGSQL_ROOT_PARENT_DB_URL is unset.
 
     """
-    conn_string = load_app_config().pgsql_root_db_url
+    conn_string = load_app_config().pgsql_root_parent_db_url
     if conn_string is None:
-        msg = "PGSQL_ROOT_DB_URL is unset."
+        msg = "PGSQL_ROOT_PARENT_DB_URL is unset."
         raise RuntimeError(msg)
     return conn_string
 
@@ -223,27 +231,292 @@ def prepare_room_availability_dataframe(
     return df, availability_statuses
 
 
-def prepare_customers_dataframe(data_path: Path) -> pd.DataFrame:
-    """Load and normalize the first `_CUSTOMER_COUNT` customers for the dropdown picker.
+def _map_booking_room_ids(
+    df_bookings: pd.DataFrame,
+    df_rooms: pd.DataFrame,
+) -> pd.DataFrame:
+    """Map each booking's `room_number` to the `room_id` primary key `rooms` uses.
 
-    Mirrors the exact procedure prototyped in ``notebooks/neonsql.ipynb``: keep
-    only `first_name`/`last_name` from the first `_CUSTOMER_COUNT` rows, then
-    call ``reset_index()`` to materialize the pickle's `customer_id` index into
-    a regular column.
+    Args:
+        df_bookings: Bookings with a `room_number` column.
+        df_rooms: Prepared rooms data (see `prepare_rooms_dataframe`), with
+            `room_number` and `room_id` columns.
+
+    Returns:
+        pd.DataFrame: `df_bookings` with an added integer `room_id` column.
+
+    Raises:
+        ValueError: If any `room_number` has no matching `room_id`.
+
+    """
+    room_id_by_number = dict(
+        zip(
+            cast("pd.Series", df_rooms["room_number"]),
+            cast("pd.Series", df_rooms["room_id"]),
+            strict=True,
+        ),
+    )
+    df_bookings = df_bookings.copy()
+    df_bookings["room_id"] = cast(
+        "pd.Series", df_bookings["room_number"],
+    ).map(room_id_by_number)
+    if bool(cast("pd.Series", df_bookings["room_id"]).isna().any()):
+        msg = "Some pre-existing bookings reference an unknown room_number."
+        raise ValueError(msg)
+    df_bookings["room_id"] = df_bookings["room_id"].astype(int)
+    return df_bookings
+
+
+def _availability_date_bounds(
+    df_availability: pd.DataFrame,
+) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """Return the half-open ``[min_date, max_date)`` range `room_availability` covers.
+
+    Args:
+        df_availability: Prepared availability data (see
+            `prepare_room_availability_dataframe`), with a `date` column.
+
+    Returns:
+        Tuple of the earliest covered date and the exclusive end of the
+        covered range (one day past the latest covered date).
+
+    """
+    dates = pd.to_datetime(df_availability["date"])
+    return dates.min(), dates.max() + pd.Timedelta(days=1)
+
+
+def _clamp_booking_dates_to_availability(
+    df_bookings: pd.DataFrame,
+    df_availability: pd.DataFrame,
+) -> pd.DataFrame:
+    """Drop bookings entirely outside `room_availability`'s date range, clamp the rest.
+
+    The source booking data spans a wider date range than the pre-generated
+    `room_availability` table does. Rows are dropped or clamped here, before
+    the overlap resolution below, so nothing needs later reconciliation
+    against dates `room_availability` was never generated for.
+
+    Args:
+        df_bookings: Bookings with `check_in`/`check_out` columns.
+        df_availability: Prepared availability data (see
+            `prepare_room_availability_dataframe`).
+
+    Returns:
+        pd.DataFrame: Bookings within range, with `check_in`/`check_out`
+        clamped to `room_availability`'s covered dates.
+
+    """
+    min_date, max_date = _availability_date_bounds(df_availability)
+    out_of_range = (df_bookings["check_out"] <= min_date) | (
+        df_bookings["check_in"] >= max_date
+    )
+    dropped = int(out_of_range.sum())
+    df_bookings = df_bookings.loc[~out_of_range].copy()
+    # No pandas-stubs package is installed (pandas ships no bundled stubs for
+    # this method either), so type checkers fall back to their own bundled
+    # typeshed snapshot of pandas-stubs -- and CLI pyright and Pylance's
+    # bundled pyright disagree on that snapshot's version. A scalar
+    # Timestamp bound is correct, ordinary pandas usage for a datetime64
+    # Series.clip() at runtime; suppressed rather than contorted to satisfy
+    # an incomplete stub.
+    df_bookings["check_in"] = df_bookings["check_in"].clip(
+        lower=min_date,  # pyright: ignore[reportCallIssue, reportArgumentType]
+    )
+    df_bookings["check_out"] = df_bookings["check_out"].clip(
+        upper=max_date, # pyright: ignore[reportCallIssue, reportArgumentType]
+    )
+    logger.info(
+        "Dropped %s pre-existing bookings entirely outside room_availability's "
+        "covered range [%s, %s); clamped check_in/check_out on the remaining "
+        "%s rows to that range.",
+        dropped, min_date.date(), max_date.date(), len(df_bookings),
+    )
+    return df_bookings
+
+
+def _select_non_overlapping_bookings(df: pd.DataFrame) -> pd.Series:
+    """Keep the maximum non-overlapping subset of bookings, per room.
+
+    Sorts each room's rows by ``check_out`` and greedily keeps a row whenever
+    its ``check_in`` is on or after the ``check_out`` of the last row kept for
+    that room. Once sorted, kept intervals for a room are automatically
+    ordered by both ``check_in`` and ``check_out``, so comparing only against
+    the most recently kept row (rather than every row kept so far) is enough
+    to catch any overlap. Sorting by ``check_out`` is the classic
+    interval-scheduling greedy: it maximizes the number of rows kept, which
+    sorting by ``check_in`` -- or leaving rows in source order -- does not
+    guarantee.
+
+    Args:
+        df: Bookings with ``room_id``, ``check_in``, and ``check_out``
+            columns.
+
+    Returns:
+        pd.Series: Boolean mask aligned to `df`'s index, True for rows to
+        keep.
+
+    """
+    sorted_df = df.sort_values(["room_id", "check_out"])
+    last_check_out: dict[int, pd.Timestamp] = {}
+    keep = []
+    for room_id, check_in, check_out in zip(
+        sorted_df["room_id"], sorted_df["check_in"], sorted_df["check_out"],
+        strict=True,
+    ):
+        room_last_check_out = last_check_out.get(room_id)
+        kept = room_last_check_out is None or check_in >= room_last_check_out
+        keep.append(kept)
+        if kept:
+            last_check_out[room_id] = check_out
+    return pd.Series(keep, index=sorted_df.index).reindex(df.index)
+
+
+def prepare_accepted_bookings(
+    data_path: Path,
+    df_rooms: pd.DataFrame,
+    df_availability: pd.DataFrame,
+) -> pd.DataFrame:
+    """Load pre-existing bookings and keep the maximal non-overlapping, in-range subset.
+
+    Every row is loaded as a `confirmed` booking regardless of the source
+    `booking_status` (including rows the source data marked `Cancelled`),
+    since the pre-generated `room_availability` table already marks those
+    rooms/dates `Booked` on account of these reservations. `booking_rooms`
+    carries the `booking_rooms_no_overlap` GiST exclusion constraint (see
+    `setup_booking_rooms_schema`), and the source data does have overlapping
+    stays for a given room, so `_select_non_overlapping_bookings` keeps only
+    the maximum non-overlapping subset per room before anything is inserted.
+
+    Args:
+        data_path: Directory containing room_bookings.pkl.
+        df_rooms: Prepared rooms data (see `prepare_rooms_dataframe`).
+        df_availability: Prepared availability data (see
+            `prepare_room_availability_dataframe`).
+
+    Returns:
+        pd.DataFrame: Accepted bookings with `source_booking_id`,
+        `customer_id` (still the source pickle's ids, not yet remapped to the
+        loaded `customers` table -- see `prepare_customers_dataframe`),
+        `room_id`, `check_in`, `check_out`, and `total_amount` columns.
+
+    """
+    bookings_path = data_path / "room_bookings.pkl"
+    df_bookings = read_pickle_dataframe(bookings_path)
+    # The pickle's index holds source ids like "BK000001". Keep it under its
+    # own name -- the DB-generated `bookings.booking_id` is a different value.
+    df_bookings = df_bookings.reset_index(names="source_booking_id")
+    df_bookings = _map_booking_room_ids(df_bookings, df_rooms)
+    df_bookings = _clamp_booking_dates_to_availability(df_bookings, df_availability)
+
+    accepted_mask = _select_non_overlapping_bookings(df_bookings)
+    accepted = df_bookings.loc[accepted_mask].reset_index(drop=True)
+    logger.info(
+        "%s of %s in-range pre-existing bookings kept (%s skipped for "
+        "overlapping another kept booking on the same room).",
+        len(accepted), len(df_bookings), len(df_bookings) - len(accepted),
+    )
+    return accepted
+
+
+def _select_richest_customer_ids(
+    df_accepted_bookings: pd.DataFrame,
+    count: int,
+) -> list[int]:
+    """Pick the source `customer_id`s with the most accepted pre-existing bookings.
+
+    Ties are broken by ascending `customer_id`, so the result is reproducible
+    across runs against the same source data.
+
+    Args:
+        df_accepted_bookings: Accepted bookings (see
+            `prepare_accepted_bookings`), still keyed by the source pickle's
+            `customer_id`.
+        count: Number of customer ids to select.
+
+    Returns:
+        list[int]: Up to `count` source customer ids, sorted ascending.
+
+    """
+    booking_counts = (
+        df_accepted_bookings.groupby("customer_id")
+        .size()
+        .to_frame("booking_count")
+        .reset_index()
+        .sort_values(["booking_count", "customer_id"], ascending=[False, True])
+    )
+    selected = booking_counts["customer_id"].head(count).astype(int).tolist()
+    return sorted(selected)
+
+
+def prepare_customers_dataframe(
+    data_path: Path,
+    df_accepted_bookings: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict[int, int]]:
+    """Load the `_CUSTOMER_COUNT` customers with the richest booking history.
+
+    Each selected customer's source `customer_id` is remapped to a new, dense
+    id in ``[1, _CUSTOMER_COUNT]`` (assigned in ascending source-id order),
+    because `eval/stress/workload.py` and `eval/langsmith_target/target.py`
+    both pick a simulated guest identity by assuming exactly that contiguous
+    range, not whatever ids happen to survive selection.
 
     Args:
         data_path: Directory containing customers.pkl.
+        df_accepted_bookings: Accepted bookings (see
+            `prepare_accepted_bookings`), used only to rank customers by
+            booking count.
 
     Returns:
-        pd.DataFrame: Columns matching `CUSTOMERS_COLUMNS`.
+        A tuple of the prepared customers DataFrame (columns matching
+        `CUSTOMERS_COLUMNS`, already using the new ids) and the
+        ``{source customer_id: new customer_id}`` remap, for
+        `_remap_and_filter_bookings_to_loaded_customers` to apply to the
+        bookings themselves.
 
     """
+    richest_ids = _select_richest_customer_ids(df_accepted_bookings, _CUSTOMER_COUNT)
+    new_id_by_source_id = {
+        source_id: new_id for new_id, source_id in enumerate(richest_ids, start=1)
+    }
+
     customers_path = data_path / "customers.pkl"
     df = read_pickle_dataframe(customers_path)
     # Selecting a list of column labels always yields a DataFrame; cast past
     # the same __getitem__ stub imprecision as above.
-    trimmed = cast("pd.DataFrame", df[:_CUSTOMER_COUNT][["first_name", "last_name"]])
-    return trimmed.reset_index()
+    selected = cast(
+        "pd.DataFrame", df.loc[richest_ids, ["first_name", "last_name"]],
+    ).copy()
+    selected["customer_id"] = [
+        new_id_by_source_id[source_id] for source_id in selected.index
+    ]
+    selected = selected.loc[:, CUSTOMERS_COLUMNS].reset_index(drop=True)
+    return selected, new_id_by_source_id
+
+
+def _remap_and_filter_bookings_to_loaded_customers(
+    df_accepted_bookings: pd.DataFrame,
+    new_customer_id_by_source_id: dict[int, int],
+) -> pd.DataFrame:
+    """Keep only bookings whose customer was loaded, remapped to its new id.
+
+    Args:
+        df_accepted_bookings: Accepted bookings (see
+            `prepare_accepted_bookings`), still keyed by the source pickle's
+            `customer_id`.
+        new_customer_id_by_source_id: ``{source customer_id: new customer_id}``
+            remap from `prepare_customers_dataframe`.
+
+    Returns:
+        pd.DataFrame: `df_accepted_bookings`, filtered to bookings whose
+        customer was selected, with `customer_id` replaced by the new id.
+
+    """
+    in_scope = df_accepted_bookings["customer_id"].isin(new_customer_id_by_source_id)
+    df_bookings = df_accepted_bookings.loc[in_scope].copy()
+    df_bookings["customer_id"] = (
+        df_bookings["customer_id"].map(new_customer_id_by_source_id).astype(int)
+    )
+    return df_bookings.reset_index(drop=True)
 
 
 def setup_rooms_schema(
@@ -520,6 +793,258 @@ def setup_booking_rooms_schema(conn: psycopg.Connection) -> None:
         )
 
 
+def _insert_bookings_rows(
+    cur: psycopg.Cursor, customer_ids: Iterable[int],
+) -> list[int]:
+    """Insert one `bookings` row per pre-existing booking, returning each new id.
+
+    Uses ``executemany(..., returning=True)`` rather than `copy_dataframe_into_table`:
+    each row's `booking_id` is generated by the database and is needed
+    immediately after to link that booking's `booking_rooms` rows, which a
+    plain `COPY` cannot hand back.
+
+    Args:
+        cur: Open cursor inside an active connection.
+        customer_ids: One customer id per booking to insert, in order.
+
+    Returns:
+        list[int]: The new `booking_id` values, in the same order as
+        `customer_ids`.
+
+    Raises:
+        RuntimeError: If any ``INSERT ... RETURNING`` statement produced no
+            row (unreachable in practice: every single-row insert here
+            returns exactly one row).
+
+    """
+    cur.executemany(
+        "INSERT INTO bookings (customer_id, status) VALUES (%s, 'confirmed') "
+        "RETURNING booking_id;",
+        [(customer_id,) for customer_id in customer_ids],
+        returning=True,
+    )
+    # cur.results() walks the per-statement result sets executemany(returning=True)
+    # produced, in submission order.
+    booking_ids: list[int] = []
+    for result in cur.results():
+        row = result.fetchone()
+        if row is None:
+            msg = "INSERT INTO bookings ... RETURNING booking_id produced no row."
+            raise RuntimeError(msg)
+        booking_ids.append(row[0])
+    return booking_ids
+
+
+def _set_confirmation_numbers(cur: psycopg.Cursor) -> None:
+    """Set a `BH######` confirmation number on every booking that still lacks one.
+
+    Matches `write_ops._confirmation_number`'s format exactly, so a
+    pre-existing booking looks indistinguishable from one made through the
+    app.
+
+    Args:
+        cur: Open cursor inside an active connection.
+
+    """
+    cur.execute(
+        "UPDATE bookings "
+        "SET confirmation_number = 'BH' || lpad(booking_id::text, 6, '0') "
+        "WHERE confirmation_number IS NULL;",
+    )
+
+
+def _insert_booking_rooms_rows(
+    cur: psycopg.Cursor,
+    df_booking_rooms: pd.DataFrame,
+) -> None:
+    """Insert one `booking_rooms` row per priced, kept room-stay.
+
+    Args:
+        cur: Open cursor inside an active connection.
+        df_booking_rooms: Rows with `booking_id`, `room_id`, `check_in`,
+            `check_out`, `total_amount` columns, in that order.
+
+    """
+    cur.executemany(
+        "INSERT INTO booking_rooms "
+        "(booking_id, room_id, check_in, check_out, total_amount) "
+        "VALUES (%s, %s, %s, %s, %s);",
+        df_booking_rooms.itertuples(index=False, name=None),
+    )
+
+
+def insert_bookings_data(conn: psycopg.Connection, df_bookings: pd.DataFrame) -> None:
+    """Insert pre-existing bookings into `bookings` and `booking_rooms`.
+
+    Args:
+        conn: Active database connection.
+        df_bookings: Accepted, clamped, customer-remapped bookings with
+            `customer_id`, `room_id`, `check_in`, `check_out`, `total_amount`
+            columns (see `prepare_accepted_bookings` and
+            `_remap_and_filter_bookings_to_loaded_customers`).
+
+    """
+    if df_bookings.empty:
+        logger.warning("No pre-existing bookings to insert; skipping.")
+        return
+
+    with conn.cursor() as cur:
+        booking_ids = _insert_bookings_rows(cur, df_bookings["customer_id"].tolist())
+        df_bookings = df_bookings.copy()
+        df_bookings["booking_id"] = booking_ids
+        _set_confirmation_numbers(cur)
+
+        # Selecting a list of column labels always yields a DataFrame; cast
+        # past the same __getitem__ stub imprecision noted above.
+        df_booking_rooms = cast(
+            "pd.DataFrame",
+            df_bookings[
+                ["booking_id", "room_id", "check_in", "check_out", "total_amount"]
+            ],
+        ).copy()
+        df_booking_rooms["check_in"] = cast(
+            "pd.Series", df_booking_rooms["check_in"],
+        ).dt.date
+        df_booking_rooms["check_out"] = cast(
+            "pd.Series", df_booking_rooms["check_out"],
+        ).dt.date
+        _insert_booking_rooms_rows(cur, df_booking_rooms)
+
+    logger.info("Inserted %s bookings and their booking_rooms.", len(df_bookings))
+
+
+def _flip_unmatched_booked_rows_to_available(cur: psycopg.Cursor) -> int:
+    """Flip `room_availability` rows marked `Booked` with no matching reservation.
+
+    Args:
+        cur: Open cursor inside an active connection.
+
+    Returns:
+        int: Number of rows flipped to `Available`.
+
+    """
+    cur.execute("""
+        UPDATE room_availability AS ra
+        SET status = 'Available'
+        WHERE ra.status = 'Booked'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM booking_rooms AS br
+            WHERE br.room_id = ra.room_id
+              AND ra.date >= br.check_in
+              AND ra.date < br.check_out
+          );
+        """)
+    return cur.rowcount
+
+
+def _flip_unmatched_available_rows_to_booked(cur: psycopg.Cursor) -> int:
+    """Flip `room_availability` rows marked `Available` despite a matching reservation.
+
+    Args:
+        cur: Open cursor inside an active connection.
+
+    Returns:
+        int: Number of rows flipped to `Booked`.
+
+    """
+    cur.execute("""
+        UPDATE room_availability AS ra
+        SET status = 'Booked'
+        WHERE ra.status = 'Available'
+          AND EXISTS (
+            SELECT 1
+            FROM booking_rooms AS br
+            WHERE br.room_id = ra.room_id
+              AND ra.date >= br.check_in
+              AND ra.date < br.check_out
+          );
+        """)
+    return cur.rowcount
+
+
+def reconcile_room_availability_status(conn: psycopg.Connection) -> None:
+    """Reconcile `room_availability.status` against loaded `booking_rooms`, both ways.
+
+    `prepare_accepted_bookings` skips a large share of the source bookings
+    (to satisfy `booking_rooms_no_overlap`), so plenty of rows the
+    pre-generated `room_availability` table marks `Booked` no longer have a
+    matching reservation -- those are flipped to `Available`. `price` is
+    already filled in for `Booked` rows in the seed data (see
+    `notebooks/eda.ipynb`, which backfills it from the overlapping
+    reservations' `total_amount`), so this flip carries a real price forward
+    rather than leaving it `NULL`. The reverse direction is checked too: any
+    `Available` row that does have a matching `booking_rooms` reservation is
+    flipped to `Booked`, with `price` left untouched -- matching how the live
+    app books a room (`write_ops.commit_booking` only ever flips `status`, so
+    the nightly rate survives a book-then-cancel round trip).
+
+    Args:
+        conn: Active database connection.
+
+    """
+    with conn.cursor() as cur:
+        flipped_to_available = _flip_unmatched_booked_rows_to_available(cur)
+        flipped_to_booked = _flip_unmatched_available_rows_to_booked(cur)
+    logger.info(
+        "Reconciled room_availability against booking_rooms: %s rows set to "
+        "Available, %s rows set to Booked.",
+        flipped_to_available, flipped_to_booked,
+    )
+
+
+def setup_maintenance_booking_guard(conn: psycopg.Connection) -> None:
+    """Create a trigger refusing `booking_rooms` writes that cover a Maintenance night.
+
+    Belt-and-suspenders, the same relationship `booking_rooms_no_overlap` has
+    to `write_ops`'s `FOR UPDATE` locking: `write_ops._price_one_room` already
+    refuses to price any night whose `room_availability.status` isn't
+    `Available`, so a real `commit_booking`/`modify_booking` call should
+    never reach this trigger. It exists as a schema-level backstop in case
+    `booking_rooms` and `room_availability` ever drift out of sync, or a row
+    is written some other way than through `write_ops` -- e.g. by the
+    pre-existing bookings this module itself loads.
+
+    Args:
+        conn: Active database connection.
+
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "DROP TRIGGER IF EXISTS booking_rooms_no_maintenance ON booking_rooms;",
+        )
+        cur.execute("DROP FUNCTION IF EXISTS prevent_maintenance_booking();")
+
+        cur.execute("""
+            CREATE FUNCTION prevent_maintenance_booking()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1
+                    FROM room_availability
+                    WHERE room_id = NEW.room_id
+                      AND date >= NEW.check_in
+                      AND date < NEW.check_out
+                      AND status = 'Maintenance'
+                ) THEN
+                    RAISE EXCEPTION
+                        'Room % is under maintenance for one or more nights in [%, %)',
+                        NEW.room_id, NEW.check_in, NEW.check_out
+                        USING ERRCODE = 'check_violation';
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+            """)
+
+        cur.execute("""
+            CREATE TRIGGER booking_rooms_no_maintenance
+            BEFORE INSERT OR UPDATE ON booking_rooms
+            FOR EACH ROW
+            EXECUTE FUNCTION prevent_maintenance_booking();
+            """)
+
+
 def regrant_booking_agent_role(conn: psycopg.Connection) -> None:
     """Reapply the `bh_agent_ro`/`bh_agent_rw` grants dropped by table rebuilds.
 
@@ -555,20 +1080,33 @@ def regrant_booking_agent_role(conn: psycopg.Connection) -> None:
 
 
 def reload_sql_tables() -> None:
-    """Prepare data and rebuild the room, availability, and booking tables.
+    """Prepare data and rebuild the room, availability, customer, and booking tables.
 
     The function reads pickled source data, reconstructs the required enums,
-    and inserts records into `rooms`, `room_availability`, and `customers`
-    (the first `_CUSTOMER_COUNT` customers only, for the UI's dropdown identity
-    picker). It also (re)creates the `bookings` and `booking_rooms` tables,
-    which start empty: this project deliberately loads no pre-existing
-    bookings, since cancelling one would return a room to the pool with no
-    rate attached (see notebooks/neonsql.ipynb). `booking_rooms` carries a
-    GiST exclusion constraint (see `setup_booking_rooms_schema`) that makes a
+    and inserts records into `rooms` and `room_availability`. It also
+    (re)creates `customers`, `bookings`, and `booking_rooms`, and loads all
+    three: `customers` gets the `_CUSTOMER_COUNT` source customers with the
+    richest accepted pre-existing booking history (see
+    `prepare_customers_dataframe`), remapped to a dense `[1, _CUSTOMER_COUNT]`
+    id range so the UI's dropdown identity picker and the eval/stress
+    harnesses' simulated-guest selection keep working unchanged; `bookings`
+    and `booking_rooms` get that same customer set's pre-existing
+    reservations (see `prepare_accepted_bookings`), clamped to the date range
+    `room_availability` covers and filtered down to the maximum
+    non-overlapping subset per room, since `booking_rooms` carries a GiST
+    exclusion constraint (see `setup_booking_rooms_schema`) that makes a
     double-booking impossible to insert, so this also creates the
-    `btree_gist` extension that constraint depends on. Finally, it reapplies
-    the `bh_agent_ro`/`bh_agent_rw` grants that the table rebuilds dropped,
-    via `regrant_booking_agent_role`.
+    `btree_gist` extension that constraint depends on.
+
+    Loading real bookings can leave `room_availability` rows marked `Booked`
+    with no matching `booking_rooms` reservation, or `Available` despite one
+    existing; `reconcile_room_availability_status` fixes both directions.
+    `setup_maintenance_booking_guard` then adds a trigger refusing any
+    `booking_rooms` write that would cover a night `room_availability` marks
+    `Maintenance`, as a schema-level backstop alongside the GiST constraint.
+
+    Finally, it reapplies the `bh_agent_ro`/`bh_agent_rw` grants that the
+    table rebuilds dropped, via `regrant_booking_agent_role`.
 
     This function drops and recreates every table it touches, so it must be
     run against a branch's parent, never a branch that gets reset in place —
@@ -585,7 +1123,15 @@ def reload_sql_tables() -> None:
                 get_data_path(),
             )
         )
-        df_customers = prepare_customers_dataframe(get_data_path())
+        df_accepted_bookings = prepare_accepted_bookings(
+            get_data_path(), df_rooms, df_availability,
+        )
+        df_customers, new_customer_id_by_source_id = prepare_customers_dataframe(
+            get_data_path(), df_accepted_bookings,
+        )
+        df_bookings = _remap_and_filter_bookings_to_loaded_customers(
+            df_accepted_bookings, new_customer_id_by_source_id,
+        )
 
         room_type_def = build_enum_definition(room_type_values)
         bed_type_def = build_enum_definition(bed_type_values)
@@ -606,6 +1152,9 @@ def reload_sql_tables() -> None:
 
             setup_bookings_schema(conn)
             setup_booking_rooms_schema(conn)
+            insert_bookings_data(conn, df_bookings)
+            reconcile_room_availability_status(conn)
+            setup_maintenance_booking_guard(conn)
 
             regrant_booking_agent_role(conn)
     except Exception:  # pragma: no cover - retries logged

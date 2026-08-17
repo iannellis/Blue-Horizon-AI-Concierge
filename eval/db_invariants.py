@@ -15,9 +15,11 @@ against real agent-driven usage, not the primary line of defense: it would
 only ever find a match if the constraint were dropped, disabled, or
 bypassed by something other than a normal INSERT/UPDATE (e.g. a future
 schema change, or historical rows loaded before the constraint existed).
-Its true-positive path is accordingly no longer exercisable via integration
-test the way it once was -- see `tests/booking/test_db_invariants.py`, which
-now tests the constraint itself instead.
+Its true-positive path is accordingly no longer exercisable through normal
+agent usage -- see `tests/booking/test_db_invariants.py`, which tests the
+constraint's own refusal directly, and separately proves this query would
+still catch a violation by temporarily dropping the constraint inside a
+rolled-back transaction.
 """
 
 from __future__ import annotations

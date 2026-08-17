@@ -83,7 +83,7 @@ blue_horizon/          # Main application package
     app.py             # FastAPI application
   load_data/
     information_redis.py  # Loads FAQ/services/amenities into Redis
-    booking_pgsql.py      # Loads room/availability/customers data and rebuilds booking tables in PostgreSQL
+    booking_pgsql.py      # Loads room/availability/customer/booking data and rebuilds booking tables in PostgreSQL
   system_prompts/      # System prompt templates (.txt)
   config.py            # Pydantic configuration models
   neon.py              # Neon branch reset utility
@@ -185,7 +185,7 @@ Runtime secrets are read from a `.env` file (or environment variables). Both the
 
 | Variable | Description |
 |----------|-------------|
-| `PGSQL_ROOT_DB_URL` | PostgreSQL connection URL, authenticated with schema-owner privileges — used only by the data-loading tooling ([`booking_pgsql.py`](blue_horizon/load_data/booking_pgsql.py) and `regrant_booking_agent_role.sql`) to create/reload tables and (re)grant the `bh_agent_rw`/`bh_agent_ro` roles; not read by the API or UI at runtime. Required to run [Load data](#1-load-data), not to start the app afterward. |
+| `PGSQL_ROOT_PARENT_DB_URL` | PostgreSQL connection URL, authenticated with schema-owner privileges against the **Parent** branch specifically — used only by the data-loading tooling ([`booking_pgsql.py`](blue_horizon/load_data/booking_pgsql.py) and `regrant_booking_agent_role.sql`) to create/reload tables and (re)grant the `bh_agent_rw`/`bh_agent_ro` roles; not read by the API or UI at runtime. Required to run [Load data](#1-load-data), not to start the app afterward. Deliberately not named `PGSQL_ROOT_DB_URL`: `reload_sql_tables` must never run against a branch that gets reset in place (see its docstring), so this name can't be confused with `PGSQL_ROOT_DB_URL`, the unrelated, test-only variable described under [Running Tests](#running-tests) that points at whatever branch a `db_integration` run targets. |
 | `NEON_API_KEY` | Neon management API key — enables the `/v1/reset` endpoint; omit to disable |
 | `LANGSMITH_API_KEY` | LangSmith API key — enables LangSmith tracing |
 | `LANGSMITH_TRACING` | Set to `true` to activate tracing (requires `LANGSMITH_API_KEY`) |
@@ -217,16 +217,18 @@ Populate Redis with hotel information:
 python -m blue_horizon.load_data.information_redis
 ```
 
-Populate PostgreSQL with room, availability, and customer data:
+Populate PostgreSQL with room, availability, customer, and pre-existing booking data:
 
 ```bash
 python -m blue_horizon.load_data.booking_pgsql
 ```
 
+Besides `rooms` and `room_availability`, this seeds `customers`, `bookings`, and `booking_rooms`. `customers` gets the 25 source customers with the richest pre-existing booking history — not an arbitrary first 25 — remapped to a dense `customer_id` range of 1–25 so the UI's dropdown identity picker and the `eval`/stress harnesses' simulated-guest selection keep working unchanged. Those same 25 customers' pre-existing reservations are loaded into `bookings`/`booking_rooms`, clamped to the date range `room_availability` covers and filtered down to the maximum non-overlapping subset per room, since the source data has overlapping stays for a given room and `booking_rooms_no_overlap` (see below) refuses to allow that. Loading real bookings can leave `room_availability` out of sync with what actually got kept, in either direction, so the loader reconciles it against the loaded `booking_rooms` rows before finishing. It also (re)creates a `prevent_maintenance_booking` trigger on `booking_rooms`, refusing any insert or update that would cover a night `room_availability` marks `Maintenance` — a schema-level backstop alongside `booking_rooms_no_overlap`, since `write_ops._price_one_room` already refuses to price such a night through the app.
+
 Then grant the two database roles the agent depends on — `bh_agent_ro` (read-only, used by the model's `run_sql` tool) and `bh_agent_rw` (used only by server-side write functions). The roles themselves are not created by this step: they must already exist in the database with passwords set (`PGSQL_RO_DB_URL` / `PGSQL_RW_DB_URL` authenticate as them) before it runs. `regrant_booking_agent_role.sql` only (re)applies the least-privilege grants to those already-present roles:
 
 ```bash
-psql "$PGSQL_ROOT_DB_URL" -f blue_horizon/load_data/regrant_booking_agent_role.sql
+psql "$PGSQL_ROOT_PARENT_DB_URL" -f blue_horizon/load_data/regrant_booking_agent_role.sql
 ```
 
 `booking_pgsql.py` drops and recreates tables, so this grant step must run after every reload, and both `PGSQL_RW_DB_URL` and `PGSQL_RO_DB_URL` must point at their respective roles before starting the API — pointing both at the same role silently defeats the read-only guarantee, which is why `startup_check` refuses to start if a trial write through the read-only URL succeeds.
@@ -332,7 +334,7 @@ The high conflict rate is expected and by design — 80% of operations target th
 
 A **double-booking violation** is two `booking_rooms` rows for the same room with overlapping date ranges — i.e., `commit_booking`/`modify_booking` failed to enforce mutual exclusion under load. This is now a schema-level impossibility, not just something checked for after the fact: `booking_rooms` carries a GiST exclusion constraint, `booking_rooms_no_overlap` (see `setup_booking_rooms_schema` in [`blue_horizon/load_data/booking_pgsql.py`](blue_horizon/load_data/booking_pgsql.py)), that Postgres enforces on every insert or update, on top of `commit_booking`/`modify_booking`'s own `FOR UPDATE` locking on `room_availability`. If that constraint is ever hit — only possible if `room_availability` and `booking_rooms` have drifted out of sync — `write_ops` catches it and turns it into the same clean `BookingWriteError` refusal a guest sees for any other unavailable night, instead of leaking a raw database error.
 
-The stress test's own violation check queries `booking_rooms` directly, via the shared [`eval/db_invariants.py`](eval/db_invariants.py) helper the eval harness also uses so the two can't drift apart. An earlier version instead grouped `room_availability` by `(room_id, date)` — a tautology, since that table's own `UNIQUE` constraint makes such a group impossible to violate regardless of what the agent did. With the exclusion constraint above in place, this query is now belt-and-suspenders rather than the primary guarantee: a genuine violation is unreachable through normal writes, so it mainly serves as an audit signal if the constraint is ever dropped or bypassed. It was first trusted only after being confirmed to go red against a hand-inserted overlapping pair, once, by hand; that verification is now a permanent regression test in [`tests/booking/test_db_invariants.py`](tests/booking/test_db_invariants.py), which today tests the constraint's own refusal directly, since a hand-inserted overlapping pair can no longer even be inserted — see [its pre-constraint history](https://github.com/iannellis/Blue-Horizon-AI-Concierge/blob/e67fb9b33279219a0d4b6b8fc8a85bbb92733dfa/tests/booking/test_db_invariants.py) for how it worked before.
+The stress test's own violation check queries `booking_rooms` directly, via the shared [`eval/db_invariants.py`](eval/db_invariants.py) helper the eval harness also uses so the two can't drift apart. An earlier version instead grouped `room_availability` by `(room_id, date)` — a tautology, since that table's own `UNIQUE` constraint makes such a group impossible to violate regardless of what the agent did. With the exclusion constraint above in place, this query is now belt-and-suspenders rather than the primary guarantee: a genuine violation is unreachable through normal writes, so it mainly serves as an audit signal if the constraint is ever dropped or bypassed. It was first trusted only after being confirmed to go red against a hand-inserted overlapping pair, once, by hand; that verification is now a permanent regression test in [`tests/booking/test_db_invariants.py`](tests/booking/test_db_invariants.py), which today tests the constraint's own refusal directly, since a hand-inserted overlapping pair can no longer even be inserted — see [its pre-constraint history](https://github.com/iannellis/Blue-Horizon-AI-Concierge/blob/e67fb9b33279219a0d4b6b8fc8a85bbb92733dfa/tests/booking/test_db_invariants.py) for how it worked before. That same test file separately verifies the *detection query* itself still works, by temporarily dropping `booking_rooms_no_overlap` inside a transaction that always rolls back, inserting an overlapping pair, and asserting the query flags it — the constraint is deliberately not made `DEFERRABLE` to allow that check some other way, since deferring it would let overlapping rows exist transiently mid-transaction in production too. This check is retained as regression detection in case the constraint is ever dropped or bypassed; its passing during normal stress/eval runs is expected to be uninformative about agent behavior, since the constraint makes a real violation unreachable in the first place.
 
 A **null-status reservation** is a `room_availability` row without a valid status field, indicating a partially-written or corrupted booking. Separately, the harness reconciles every thread's expected final booking against the database — all 26 threads that ended with a successful book/modify had that exact room and date range sitting `Booked` in the database, confirming the agent never reported a success that didn't actually commit.
 
@@ -354,6 +356,13 @@ pytest -m "not db_integration"
 # PGSQL_RO_DB_URL with the bh_agent_rw/bh_agent_ro roles granted (see
 # blue_horizon/load_data/regrant_booking_agent_role.sql); tests/api/test_app.py
 # additionally needs REDIS_URL and OPENAI_API_KEY to start the real app.
+# One test in test_db_invariants.py also wants PGSQL_ROOT_DB_URL
+# (schema-owner privilege against whichever branch the rest of this run
+# targets, to temporarily drop booking_rooms_no_overlap inside a
+# rolled-back transaction) but skips gracefully if it is unset. This is
+# NOT the same variable as PGSQL_ROOT_PARENT_DB_URL above -- that one is
+# reserved for the Parent branch and must never point at a branch these
+# tests run against.
 pytest -m db_integration
 ```
 

@@ -11,9 +11,15 @@ import pandas as pd
 import psycopg.sql
 
 from blue_horizon.load_data.booking_pgsql import (
+    CUSTOMERS_COLUMNS,
     ROOM_AVAIL_COLUMNS,
     ROOMS_COLUMNS,
+    _remap_and_filter_bookings_to_loaded_customers,
+    _select_non_overlapping_bookings,
+    _select_richest_customer_ids,
     copy_dataframe_into_table,
+    prepare_accepted_bookings,
+    prepare_customers_dataframe,
     prepare_room_availability_dataframe,
     prepare_rooms_dataframe,
     regrant_booking_agent_role,
@@ -82,6 +88,155 @@ class TestPrepareRoomAvailabilityDataFrame:
         assert df["status"].tolist() == ["Held", "Available"]
         assert statuses == ["Held", "Available"]
         assert list(df.columns) == list(ROOM_AVAIL_COLUMNS)
+
+
+class TestSelectNonOverlappingBookings:
+    """_select_non_overlapping_bookings keeps the maximum non-overlapping subset."""
+
+    def test_overlap_loses_to_earlier_check_out_kept_first(self) -> None:
+        """Of two overlapping rows on one room, the earliest-ending one is kept."""
+        df = pd.DataFrame(
+            {
+                "room_id": [1, 1],
+                "check_in": pd.to_datetime(["2025-01-02", "2025-01-04"]),
+                "check_out": pd.to_datetime(["2025-01-05", "2025-01-06"]),
+            },
+        )
+
+        kept = _select_non_overlapping_bookings(df)
+
+        assert kept.tolist() == [True, False]
+
+    def test_adjacent_rows_are_both_kept(self) -> None:
+        """Back-to-back rows (one's check_out equals the other's check_in) both fit."""
+        df = pd.DataFrame(
+            {
+                "room_id": [1, 1],
+                "check_in": pd.to_datetime(["2025-01-02", "2025-01-05"]),
+                "check_out": pd.to_datetime(["2025-01-05", "2025-01-07"]),
+            },
+        )
+
+        kept = _select_non_overlapping_bookings(df)
+
+        assert kept.tolist() == [True, True]
+
+    def test_different_rooms_do_not_affect_each_other(self) -> None:
+        """Overlapping date ranges on different rooms are independent."""
+        df = pd.DataFrame(
+            {
+                "room_id": [1, 2],
+                "check_in": pd.to_datetime(["2025-01-02", "2025-01-02"]),
+                "check_out": pd.to_datetime(["2025-01-05", "2025-01-05"]),
+            },
+        )
+
+        kept = _select_non_overlapping_bookings(df)
+
+        assert kept.tolist() == [True, True]
+
+
+class TestPrepareAcceptedBookings:
+    """prepare_accepted_bookings maps, clamps, and filters pre-existing bookings."""
+
+    def test_maps_clamps_and_filters(self, tmp_path: Path) -> None:
+        """Room numbers are mapped, dates clamped/dropped, overlaps resolved."""
+        bookings_path = tmp_path / "room_bookings.pkl"
+        pd.DataFrame(
+            {
+                "customer_id": [1, 2, 3, 1, 2],
+                "room_number": [101, 101, 101, 102, 102],
+                "check_in": pd.to_datetime(
+                    [
+                        "2025-01-02", "2025-01-04", "2025-01-05",
+                        "2024-12-30", "2025-01-20",
+                    ],
+                ),
+                "check_out": pd.to_datetime(
+                    [
+                        "2025-01-05", "2025-01-06", "2025-01-07",
+                        "2025-01-02", "2025-01-25",
+                    ],
+                ),
+                "total_amount": [100.0, 100.0, 100.0, 100.0, 100.0],
+            },
+            index=pd.Index(
+                ["BK1", "BK2", "BK3", "BK4", "BK5"], name="booking_id",
+            ),
+        ).to_pickle(bookings_path)
+
+        df_rooms = pd.DataFrame({"room_number": [101, 102], "room_id": [1, 2]})
+        df_availability = pd.DataFrame(
+            {"date": pd.to_datetime(["2025-01-01", "2025-01-10"])},
+        )
+
+        accepted = prepare_accepted_bookings(tmp_path, df_rooms, df_availability)
+
+        # BK2 loses to BK1's earlier check_out (both room 101); BK5 is
+        # entirely outside room_availability's range and is dropped.
+        assert set(accepted["source_booking_id"]) == {"BK1", "BK3", "BK4"}
+        bk4 = accepted.set_index("source_booking_id").loc["BK4"]
+        assert bk4["room_id"] == 2  # noqa: PLR2004
+        # BK4's check_in (2024-12-30) was clamped up to the covered range's start.
+        assert bk4["check_in"] == pd.Timestamp("2025-01-01")
+
+
+class TestSelectRichestCustomerIds:
+    """_select_richest_customer_ids ranks customers by accepted-booking count."""
+
+    def test_picks_top_count_breaking_ties_by_ascending_id(self) -> None:
+        """More bookings outranks fewer; ties among equal counts go to the lower id."""
+        df_accepted_bookings = pd.DataFrame(
+            {"customer_id": [5, 5, 5, 2, 2, 2, 9, 1]},
+        )
+
+        selected = _select_richest_customer_ids(df_accepted_bookings, count=2)
+
+        # Customers 5 and 2 both have 3 bookings (a tie); 9 and 1 have one
+        # each. The tie is broken by ascending customer_id, and the final
+        # result is sorted ascending regardless of booking count.
+        assert selected == [2, 5]
+
+
+class TestPrepareCustomersDataframe:
+    """prepare_customers_dataframe loads and remaps the richest customers."""
+
+    def test_remaps_to_dense_ascending_ids(self, tmp_path: Path) -> None:
+        """Selected customers get new ids 1..N in ascending source-id order."""
+        customers_path = tmp_path / "customers.pkl"
+        pd.DataFrame(
+            {
+                "first_name": ["Ana", "Bo", "Cy"],
+                "last_name": ["Adams", "Blake", "Cruz"],
+            },
+            index=pd.Index([10, 20, 30], name="customer_id"),
+        ).to_pickle(customers_path)
+        df_accepted_bookings = pd.DataFrame(
+            {"customer_id": [30, 30, 10, 20]},
+        )
+
+        df_customers, new_id_by_source_id = prepare_customers_dataframe(
+            tmp_path, df_accepted_bookings,
+        )
+
+        assert new_id_by_source_id == {10: 1, 20: 2, 30: 3}
+        assert list(df_customers.columns) == list(CUSTOMERS_COLUMNS)
+        assert df_customers.set_index("customer_id").loc[3, "first_name"] == "Cy"
+
+
+class TestRemapAndFilterBookingsToLoadedCustomers:
+    """_remap_and_filter_bookings_to_loaded_customers scopes bookings to loaded ones."""
+
+    def test_drops_unselected_customers_and_remaps_selected_ones(self) -> None:
+        """Only bookings for a selected customer survive, with the new id applied."""
+        df_accepted_bookings = pd.DataFrame({"customer_id": [1, 2, 3, 4]})
+        new_customer_id_by_source_id = {1: 10, 3: 11}
+
+        result = _remap_and_filter_bookings_to_loaded_customers(
+            df_accepted_bookings, new_customer_id_by_source_id,
+        )
+
+        assert result["customer_id"].tolist() == [10, 11]
 
 
 class _FakeCopy:

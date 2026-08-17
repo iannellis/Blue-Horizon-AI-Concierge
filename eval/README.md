@@ -106,6 +106,21 @@ Both commands write results to `eval/outputs/<experiment_name>/`:
 
 Logs are written to `eval/logs/<experiment_name>.log` and mirrored to stdout.
 
+### CLI options
+
+| Flag | Description |
+|---|---|
+| `--config PATH` | TOML config to use. Defaults to the packaged `eval_config.toml` when omitted. |
+| `--case-id CASE_ID` | Restrict the run to one dataset `case_id` (e.g. `case_0117`). May be passed multiple times. Defaults to the full configured dataset. |
+| `--router-only` | Run only the `eval_routing_accuracy` evaluator, skipping every other evaluator (including the LLM judge and Ragas metrics). Useful for a fast, judge/Ragas-free routing check. |
+| `--no-upload` | Run entirely locally: bypasses `aevaluate` altogether (not just its `upload_results` parameter, which still traces every target run due to a hardcoded `tracing_context(enabled=True)` in the installed LangSmith SDK) so zero requests reach LangSmith's trace-ingestion endpoint. Dataset examples are still read from LangSmith (a lightweight read, not a trace). Local `results.jsonl`/`summary.json` are written as normal. Useful for frequent local iteration without burning trace quota or budget. |
+
+Example: a quick, fully local routing check over the full dataset:
+
+```bash
+python -m eval.run_experiment --config eval/eval_config_206.toml --router-only --no-upload
+```
+
 ---
 
 ## How evaluation works

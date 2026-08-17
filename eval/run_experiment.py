@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import partial
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from dotenv import load_dotenv
 from langsmith import Client
@@ -50,7 +50,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, MutableMapping
     from pathlib import Path
 
-    from langsmith.schemas import Example
+    from langsmith.schemas import Example, Run
 
     from blue_horizon.config import AppConfig
     from eval.config import EvalConfig
@@ -210,6 +210,8 @@ def _build_metadata(
     cfg: EvalConfig,
     app_cfg: AppConfig,
     eval_config_path: str | None,
+    *,
+    upload_results: bool,
 ) -> dict[str, object]:
     """Build the metadata dictionary attached to the LangSmith experiment.
 
@@ -224,6 +226,10 @@ def _build_metadata(
         app_cfg: Loaded application configuration.
         eval_config_path: The ``--config`` path passed on the command line,
             or ``None`` when the packaged default was used.
+        upload_results: The effective upload-results setting for this run
+            (``cfg.experiment.upload_results`` unless overridden by
+            ``--no-upload``), recorded here so the local summary reflects
+            what actually happened rather than only what was configured.
 
     Returns:
         Metadata payload for LangSmith experiment tracking and the local
@@ -232,7 +238,7 @@ def _build_metadata(
     """
     metadata: dict[str, object] = {
         **_git_metadata(),
-        **_experiment_metadata(cfg),
+        **_experiment_metadata(cfg, upload_results=upload_results),
         **_model_metadata(app_cfg, cfg),
         **_config_fingerprint_metadata(app_cfg, eval_config_path),
     }
@@ -261,11 +267,16 @@ def _git_metadata() -> dict[str, object]:
     }
 
 
-def _experiment_metadata(cfg: EvalConfig) -> dict[str, object]:
+def _experiment_metadata(
+    cfg: EvalConfig,
+    *,
+    upload_results: bool,
+) -> dict[str, object]:
     """Capture dataset identity and run-shape settings for the experiment.
 
     Args:
         cfg: Loaded evaluation configuration.
+        upload_results: The effective upload-results setting for this run.
 
     Returns:
         Mapping describing which dataset ran, at what concurrency, and
@@ -276,7 +287,7 @@ def _experiment_metadata(cfg: EvalConfig) -> dict[str, object]:
         "dataset_name": cfg.experiment.dataset_name,
         "dataset_limit": cfg.experiment.limit,
         "max_concurrency": cfg.experiment.max_concurrency,
-        "upload_results": cfg.experiment.upload_results,
+        "upload_results": upload_results,
     }
 
 
@@ -332,51 +343,61 @@ def _config_fingerprint_metadata(
     return {
         "app_config_sha256": _hash_text(app_config_source_text()),
         "eval_config_sha256": _hash_text(eval_config_source_text(eval_config_path)),
-        "prompts_sha256": _hash_text(_read_prompt_texts(app_cfg)),
+        **_prompt_fingerprint_metadata(app_cfg),
     }
 
 
-def _read_prompt_texts(app_cfg: AppConfig) -> str:
-    """Concatenate every system/parser prompt actually used by the agents.
+def _prompt_fingerprint_metadata(app_cfg: AppConfig) -> dict[str, object]:
+    """Fingerprint each system/parser prompt actually used by the agents.
+
+    Hashed separately per prompt, rather than one combined hash, so a diff
+    between two runs' metadata points at which specific prompt changed
+    instead of just "something in the prompts changed".
 
     Args:
         app_cfg: Loaded application configuration.
 
     Returns:
-        The router, info system, info parser, and booking system prompt
-        contents joined by a delimiter, in that fixed order.
+        Mapping of per-prompt short content-hash fingerprints.
 
     """
     orchestration_prompts = app_cfg.orchestration.prompts
     info_prompts = app_cfg.info.prompts
     booking_prompts = app_cfg.booking.prompts
-    texts = [
-        load_packaged_text(
-            _prompt_resource_path(
-                orchestration_prompts.folder,
-                orchestration_prompts.orchestration_prompt_filename,
+    return {
+        "router_prompt_sha256": _hash_text(
+            load_packaged_text(
+                _prompt_resource_path(
+                    orchestration_prompts.folder,
+                    orchestration_prompts.orchestration_prompt_filename,
+                ),
             ),
         ),
-        load_packaged_text(
-            _prompt_resource_path(
-                info_prompts.folder,
-                info_prompts.system_prompt_filename,
+        "info_system_prompt_sha256": _hash_text(
+            load_packaged_text(
+                _prompt_resource_path(
+                    info_prompts.folder,
+                    info_prompts.system_prompt_filename,
+                ),
             ),
         ),
-        load_packaged_text(
-            _prompt_resource_path(
-                info_prompts.folder,
-                info_prompts.parser_prompt_filename,
+        "info_parser_prompt_sha256": _hash_text(
+            load_packaged_text(
+                _prompt_resource_path(
+                    info_prompts.folder,
+                    info_prompts.parser_prompt_filename,
+                ),
             ),
         ),
-        load_packaged_text(
-            _prompt_resource_path(
-                booking_prompts.folder,
-                booking_prompts.system_prompt_filename,
+        "booking_prompt_sha256": _hash_text(
+            load_packaged_text(
+                _prompt_resource_path(
+                    booking_prompts.folder,
+                    booking_prompts.system_prompt_filename,
+                ),
             ),
         ),
-    ]
-    return "\n----\n".join(texts)
+    }
 
 
 def _prompt_resource_path(folder: str, filename: str) -> str:
@@ -649,6 +670,21 @@ def _parse_args() -> argparse.Namespace:
             "evaluator (including the LLM judge and Ragas metrics)."
         ),
     )
+    parser.add_argument(
+        "--no-upload",
+        action="store_true",
+        help=(
+            "Run entirely locally: bypass aevaluate's LangSmith tracing "
+            "altogether, so no run traces (and no results) reach LangSmith. "
+            "aevaluate's own upload_results=False still traces every target "
+            "run due to a hardcoded tracing_context(enabled=True) in the "
+            "installed langsmith SDK, so this flag skips aevaluate for the "
+            "target/evaluator execution rather than relying on that "
+            "parameter. Local results.jsonl/summary.json are written as "
+            "usual; the dataset examples are still read from LangSmith "
+            "(a lightweight read, not a trace)."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -670,6 +706,8 @@ def _build_aevaluate_kwargs(
     experiment_name: str,
     metadata: dict[str, object],
     evaluators: list[Any],
+    *,
+    upload_results: bool,
 ) -> MutableMapping[str, Any]:
     """Build the keyword-argument dict for ``aevaluate``.
 
@@ -682,6 +720,9 @@ def _build_aevaluate_kwargs(
         experiment_name: Formatted experiment name string.
         metadata: Metadata dict for LangSmith experiment tracking.
         evaluators: List of evaluator callables.
+        upload_results: The effective upload-results setting for this run
+            (``cfg.experiment.upload_results`` unless overridden by
+            ``--no-upload``).
 
     Returns:
         A mapping of keyword arguments ready to unpack into ``aevaluate``.
@@ -690,7 +731,7 @@ def _build_aevaluate_kwargs(
     kwargs: MutableMapping[str, Any] = {
         "evaluators": evaluators,
         "max_concurrency": cfg.experiment.max_concurrency,
-        "upload_results": cfg.experiment.upload_results,
+        "upload_results": upload_results,
         "metadata": metadata,
     }
     signature = inspect.signature(aevaluate)
@@ -701,12 +742,145 @@ def _build_aevaluate_kwargs(
     return kwargs
 
 
-async def _run_and_write_results(
+@dataclass(frozen=True)
+class _LocalRun:
+    """Minimal local stand-in for a LangSmith ``Run``, holding only outputs.
+
+    Evaluators only ever read ``run.outputs`` (see
+    ``eval.evaluators._common``), so this needs no other fields. Defines
+    ``__getattr__`` purely so ``eval._result_utils``'s duck-typing (which
+    accepts a ``Mapping`` or an object exposing ``__getattr__``) treats this
+    the same way it treats a real LangSmith ``Run``.
+
+    Attributes:
+        outputs: The target function's output payload for one example.
+
+    """
+
+    outputs: dict[str, object]
+
+    def __getattr__(self, name: str) -> object:
+        """Raise ``AttributeError`` for any field other than ``outputs``.
+
+        Args:
+            name: Attribute name being accessed.
+
+        Raises:
+            AttributeError: Always, for any name reaching this fallback.
+
+        """
+        msg = f"{type(self).__name__!r} object has no attribute {name!r}"
+        raise AttributeError(msg)
+
+
+async def _run_locally(
+    cfg: EvalConfig,
+    examples: list[Example],
+    evaluators: list[Any],
+) -> list[dict[str, object]]:
+    """Run the target and evaluators for every example with no LangSmith tracing.
+
+    Unlike ``aevaluate(..., upload_results=False)`` -- which still traces
+    every target run because the installed LangSmith SDK's ``_aforward``
+    helper hardcodes ``tracing_context(enabled=True)`` regardless of that
+    parameter -- this calls ``run_example`` directly with no tracing wrapper
+    at all, so zero requests reach LangSmith's trace-ingestion endpoint.
+
+    Args:
+        cfg: Loaded evaluation configuration.
+        examples: Dataset examples to evaluate.
+        evaluators: Evaluator callables (a mix of sync and async).
+
+    Returns:
+        Result-row dicts in the same shape ``_build_results_row`` produces
+        for `aevaluate`-backed runs.
+
+    """
+    semaphore = asyncio.Semaphore(cfg.experiment.max_concurrency)
+
+    async def _run_one(example: Example) -> dict[str, object]:
+        async with semaphore:
+            return await _run_and_score_example_locally(cfg, example, evaluators)
+
+    return list(await asyncio.gather(*(_run_one(example) for example in examples)))
+
+
+async def _run_and_score_example_locally(
+    cfg: EvalConfig,
+    example: Example,
+    evaluators: list[Any],
+) -> dict[str, object]:
+    """Run one dataset example and score it, entirely outside LangSmith tracing.
+
+    Args:
+        cfg: Loaded evaluation configuration.
+        example: Dataset example to run.
+        evaluators: Evaluator callables (a mix of sync and async).
+
+    Returns:
+        A result-row dict built via ``_build_results_row``.
+
+    """
+    error: str | None = None
+    run_output: dict[str, object] = {}
+    try:
+        run_output = await run_example(dict(example.inputs or {}), cfg=cfg)
+    except Exception as exc:  # captured as a per-example error, not raised
+        error = str(exc)
+        logger.exception("Error running example %r locally.", example.id)
+
+    local_run = _LocalRun(outputs=run_output)
+    feedback: list[dict[str, object]] = []
+    if error is None:
+        # Evaluators only read `.outputs`, so `_LocalRun` satisfies `Run`
+        # structurally; the cast documents that deliberate stand-in.
+        feedback = await _score_example_locally(
+            cast("Run", local_run), example, evaluators,
+        )
+
+    result: dict[str, object] = {
+        "example": example,
+        "run": local_run,
+        "feedback": feedback,
+        "error": error,
+    }
+    return _build_results_row(result)
+
+
+async def _score_example_locally(
+    run: Run,
+    example: Example,
+    evaluators: list[Any],
+) -> list[dict[str, object]]:
+    """Apply every evaluator to one run/example pair and flatten their results.
+
+    Args:
+        run: Local ``Run`` stand-in for the completed target execution.
+        example: Dataset example being scored.
+        evaluators: Evaluator callables (a mix of sync and async).
+
+    Returns:
+        Flat list combining every evaluator's per-metric feedback dicts.
+
+    """
+    feedback: list[dict[str, object]] = []
+    for evaluator in evaluators:
+        response = evaluator(run, example)
+        if inspect.isawaitable(response):
+            response = await response
+        if isinstance(response, list):
+            feedback.extend(response)
+    return feedback
+
+
+async def _run_and_write_results(  # noqa: PLR0913
     cfg: EvalConfig,
     artifacts: RunArtifacts,
-    examples: list[Any],
+    examples: list[Example],
     aevaluate_kwargs: MutableMapping[str, Any],
     started_at: datetime,
+    *,
+    local: bool,
 ) -> None:
     """Execute evaluation, write results JSONL, and write the summary JSON.
 
@@ -720,8 +894,12 @@ async def _run_and_write_results(
         cfg: Loaded evaluation configuration (passed to ``run_example``).
         artifacts: Filesystem paths for the output files.
         examples: Dataset examples to evaluate.
-        aevaluate_kwargs: Keyword arguments forwarded to ``aevaluate``.
+        aevaluate_kwargs: Keyword arguments forwarded to ``aevaluate`` (also
+            supplies ``evaluators``/``experiment_name``/``metadata`` for the
+            local path, so the summary looks the same either way).
         started_at: Timestamp when the experiment was started.
+        local: When ``True``, bypass ``aevaluate`` entirely via
+            ``_run_locally`` so no LangSmith trace requests are made.
 
     Raises:
         Exception: Re-raises any exception thrown during evaluation or
@@ -731,11 +909,15 @@ async def _run_and_write_results(
     result_rows: list[Any] = []
     caught_exc: BaseException | None = None
     try:
-        target = partial(run_example, cfg=cfg)
-        results = await aevaluate(target, examples, **aevaluate_kwargs)
-        if results is not None:
-            result_rows.extend([item async for item in results])
-        result_rows = [_build_results_row(result) for result in result_rows]
+        if local:
+            evaluators = cast("list[Any]", aevaluate_kwargs["evaluators"])
+            result_rows = await _run_locally(cfg, examples, evaluators)
+        else:
+            target = partial(run_example, cfg=cfg)
+            results = await aevaluate(target, examples, **aevaluate_kwargs)
+            if results is not None:
+                result_rows.extend([item async for item in results])
+            result_rows = [_build_results_row(result) for result in result_rows]
         _write_jsonl(artifacts.results_path, result_rows)
     except Exception as exc:
         caught_exc = exc
@@ -753,7 +935,7 @@ async def _run_and_write_results(
             max_concurrency=cfg.experiment.max_concurrency,
             started_at=started_at,
             finished_at=datetime.now(UTC),
-            upload_results=cfg.experiment.upload_results,
+            upload_results=bool(aevaluate_kwargs.get("upload_results")),
             metadata=run_metadata,
         )
         if caught_exc is not None:
@@ -811,12 +993,16 @@ async def main() -> None:
 
     configure_logging(experiment_name, cfg.experiment.log_dir)
 
+    upload_results = cfg.experiment.upload_results and not args.no_upload
+
     # Setting LANGSMITH_TEST_CACHE enables caching of example runs to reduce cost/time.
-    metadata = _build_metadata(cfg, app_cfg, args.config)
+    metadata = _build_metadata(
+        cfg, app_cfg, args.config, upload_results=upload_results,
+    )
 
     evaluators = _build_evaluators(cfg, router_only=args.router_only)
     aevaluate_kwargs = _build_aevaluate_kwargs(
-        cfg, experiment_name, metadata, evaluators,
+        cfg, experiment_name, metadata, evaluators, upload_results=upload_results,
     )
 
     examples = _load_dataset_examples(dataset_name, cfg.experiment.limit)
@@ -824,7 +1010,9 @@ async def main() -> None:
     if _has_booking_cases(examples):
         await _prepare_eval_database(cfg)
 
-    await _run_and_write_results(cfg, artifacts, examples, aevaluate_kwargs, started_at)
+    await _run_and_write_results(
+        cfg, artifacts, examples, aevaluate_kwargs, started_at, local=args.no_upload,
+    )
 
 
 if __name__ == "__main__":

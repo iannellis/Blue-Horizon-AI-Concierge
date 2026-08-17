@@ -481,9 +481,16 @@ class AppConfig(BaseSettings):
         booking: Booking SQL agent settings.
         load_data: Data ingestion settings for local loaders.
         redis_url: Redis connection URL from environment.
-        pgsql_root_db_url: PostgreSQL connection URL from environment for root
-            DB.  Optional; ``None`` when unset (e.g. environments that never
-            run the root-DB data loaders).
+        pgsql_root_parent_db_url: PostgreSQL connection URL from environment
+            (``PGSQL_ROOT_PARENT_DB_URL``), authenticated with schema-owner
+            privileges against the Parent branch specifically -- the only
+            branch `booking_pgsql.reload_sql_tables` may run against (see its
+            docstring). Optional; ``None`` when unset (e.g. environments that
+            never run the root-DB data loaders). Deliberately not named
+            ``PGSQL_ROOT_DB_URL``: that name is reserved for whatever branch
+            a `db_integration` test run targets (see
+            `tests/booking/test_db_invariants.py`'s `root_db_url` fixture),
+            which must never be the Parent branch.
         pgsql_rw_db_url: PostgreSQL connection URL from environment
             (``PGSQL_RW_DB_URL``) for branch DB, authenticated as the
             read-write booking agent role (``bh_agent_rw``). Used by
@@ -508,8 +515,8 @@ class AppConfig(BaseSettings):
     booking: BookingSqlConfig
     load_data: LoadDataConfig
     redis_url: str = Field(validation_alias="REDIS_URL")
-    pgsql_root_db_url: str | None = Field(
-        default=None, validation_alias="PGSQL_ROOT_DB_URL",
+    pgsql_root_parent_db_url: str | None = Field(
+        default=None, validation_alias="PGSQL_ROOT_PARENT_DB_URL",
     )
     pgsql_rw_db_url: str = Field(validation_alias="PGSQL_RW_DB_URL")
     pgsql_ro_db_url: str = Field(validation_alias="PGSQL_RO_DB_URL")
@@ -531,20 +538,35 @@ def load_app_config(path: Path | str | None = None) -> AppConfig:
         RuntimeError: If the provided path is invalid or its contents cannot be parsed.
 
     """
+    toml_data = tomllib.loads(app_config_source_text(path))
+    return AppConfig.model_validate(toml_data)
+
+
+def app_config_source_text(path: Path | str | None = None) -> str:
+    """Read the raw TOML source text backing the app configuration.
+
+    Exposed separately from ``load_app_config`` so callers that need to
+    fingerprint the exact configuration in effect (e.g. attaching a content
+    hash to eval-run metadata) can do so without re-parsing it.
+
+    Args:
+        path: Optional explicit path to a TOML file; defaults to the packaged resource.
+
+    Returns:
+        The raw, unparsed TOML text.
+
+    Raises:
+        RuntimeError: If ``path`` is provided but does not point to an existing file.
+
+    """
     if path is None:
-        # Load the packaged TOML resource
-        toml_content = (
+        return (
             importlib_resources.files(BASE_PACKAGE)
             .joinpath(_APP_CONFIG_RESOURCE)
             .read_text(encoding="utf-8")
         )
-        toml_data = tomllib.loads(toml_content)
-        return AppConfig.model_validate(toml_data)
     target_path = Path(path).expanduser().resolve()
     if not target_path.exists() or not target_path.is_file():
         msg = f"Config file not found: {target_path}"
         raise RuntimeError(msg)
-    # Load custom TOML file
-    toml_content = target_path.read_text(encoding="utf-8")
-    toml_data = tomllib.loads(toml_content)
-    return AppConfig.model_validate(toml_data)
+    return target_path.read_text(encoding="utf-8")

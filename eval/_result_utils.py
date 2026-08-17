@@ -903,6 +903,7 @@ def _build_summary_base(
         "started_at": context.started_at.isoformat(),
         "finished_at": context.finished_at.isoformat(),
         "upload_results": context.upload_results,
+        "metadata": dict(context.metadata),
         "num_examples": num_examples,
         "num_failed_runs": num_failed_runs,
     }
@@ -947,5 +948,6 @@ def _build_error_summary(
         "started_at": context.started_at.isoformat(),
         "finished_at": context.finished_at.isoformat(),
         "upload_results": context.upload_results,
+        "metadata": dict(context.metadata),
         "error": str(error),
     }

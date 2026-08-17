@@ -16,16 +16,6 @@ upload_results = true
 # Optional limit on dataset examples (empty runs full dataset).
 limit = ""
 
-[metadata]
-# Git commit SHA to attach to LangSmith metadata (optional).
-git_sha = ""
-# Router model identifier to attach to LangSmith metadata (optional).
-router_model = ""
-# Judge model identifier to attach to LangSmith metadata (optional).
-judge_model = ""
-# Database schema version label to attach to LangSmith metadata (optional).
-schema_version = ""
-
 [evaluator_limits]
 # Maximum characters per context snippet passed to the judge LLM.
 context_max_chars = 1200

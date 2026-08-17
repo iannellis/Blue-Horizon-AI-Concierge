@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import inspect
 import json
 import logging
@@ -18,9 +19,11 @@ from typing import TYPE_CHECKING, Any
 
 from dotenv import load_dotenv
 from langsmith import Client
+from langsmith import env as ls_env
 from langsmith.evaluation import aevaluate
 
-from blue_horizon.config import load_app_config
+from blue_horizon.agents.prompt_utils import load_packaged_text
+from blue_horizon.config import app_config_source_text, load_app_config
 from eval._result_utils import (
     _build_error_summary,
     _build_results_row,
@@ -30,7 +33,7 @@ from eval._result_utils import (
 )
 from eval._utils import configure_logging, json_safe
 from eval.booking_db_manager import reset_neon_branch
-from eval.config import MetadataConfig, load_eval_config
+from eval.config import eval_config_source_text, load_eval_config
 from eval.evaluators import (
     eval_booking_outcome_and_invariants,
     eval_info_expected_filters,
@@ -49,6 +52,7 @@ if TYPE_CHECKING:
 
     from langsmith.schemas import Example
 
+    from blue_horizon.config import AppConfig
     from eval.config import EvalConfig
 
 load_dotenv()
@@ -83,6 +87,10 @@ class SummaryContext:
         started_at: Experiment start timestamp.
         finished_at: Experiment completion timestamp.
         upload_results: Whether LangSmith uploads were enabled.
+        metadata: The same metadata attached to the LangSmith experiment
+            (git commit, models, config fingerprints), mirrored into
+            ``summary.json`` so it is available locally even when
+            ``upload_results`` is ``False``.
 
     """
 
@@ -92,6 +100,7 @@ class SummaryContext:
     started_at: datetime
     finished_at: datetime
     upload_results: bool
+    metadata: Mapping[str, object]
 
 
 def _build_experiment_name(
@@ -197,23 +206,230 @@ def _build_output_paths(base_dir: Path, experiment_name: str) -> RunArtifacts:
     )
 
 
-def _build_metadata(metadata_cfg: MetadataConfig) -> dict[str, object]:
-    """Build a metadata dictionary for the LangSmith experiment.
+def _build_metadata(
+    cfg: EvalConfig,
+    app_cfg: AppConfig,
+    eval_config_path: str | None,
+) -> dict[str, object]:
+    """Build the metadata dictionary attached to the LangSmith experiment.
+
+    Combines everything needed to answer "what exactly produced these
+    scores": the commit and dirty-tree state, the dataset/concurrency shape,
+    every model (and reasoning effort) in the call path, and content
+    fingerprints of the config/prompt files. LangSmith only auto-attaches
+    the commit -- none of the rest is visible without this.
 
     Args:
-        metadata_cfg: Metadata configuration for optional labels.
+        cfg: Loaded evaluation configuration.
+        app_cfg: Loaded application configuration.
+        eval_config_path: The ``--config`` path passed on the command line,
+            or ``None`` when the packaged default was used.
 
     Returns:
-        Metadata payload for LangSmith experiment tracking.
+        Metadata payload for LangSmith experiment tracking and the local
+        summary.json, with empty/``None`` values dropped.
 
     """
     metadata: dict[str, object] = {
-        "git_sha": metadata_cfg.git_sha,
-        "router_model": metadata_cfg.router_model,
-        "judge_model": metadata_cfg.judge_model,
-        "schema_version": metadata_cfg.schema_version,
+        **_git_metadata(),
+        **_experiment_metadata(cfg),
+        **_model_metadata(app_cfg, cfg),
+        **_config_fingerprint_metadata(app_cfg, eval_config_path),
     }
-    return {key: value for key, value in metadata.items() if value}
+    return _drop_empty(metadata)
+
+
+def _git_metadata() -> dict[str, object]:
+    """Capture the repository commit and dirty-tree state for the run.
+
+    Uses ``langsmith.env.get_git_info``, the same helper LangSmith itself
+    calls when auto-attaching a ``git`` block to the experiment -- so
+    ``git_sha`` always matches the commit LangSmith's UI links to. Also
+    mirrors it into ``summary.json`` locally, which LangSmith's auto-attached
+    block never reaches. Note this is always ``HEAD``: with a dirty working
+    tree, the linked commit is not the code that actually ran, which is why
+    ``git_dirty`` is recorded alongside it.
+
+    Returns:
+        Mapping with ``git_sha`` (full commit SHA) and ``git_dirty``.
+
+    """
+    git_info = ls_env.get_git_info()
+    return {
+        "git_sha": git_info.get("commit"),
+        "git_dirty": git_info.get("dirty"),
+    }
+
+
+def _experiment_metadata(cfg: EvalConfig) -> dict[str, object]:
+    """Capture dataset identity and run-shape settings for the experiment.
+
+    Args:
+        cfg: Loaded evaluation configuration.
+
+    Returns:
+        Mapping describing which dataset ran, at what concurrency, and
+        whether results were uploaded.
+
+    """
+    return {
+        "dataset_name": cfg.experiment.dataset_name,
+        "dataset_limit": cfg.experiment.limit,
+        "max_concurrency": cfg.experiment.max_concurrency,
+        "upload_results": cfg.experiment.upload_results,
+    }
+
+
+def _model_metadata(app_cfg: AppConfig, cfg: EvalConfig) -> dict[str, object]:
+    """Capture every LLM/embedding model actually used by the run.
+
+    Includes the reasoning-effort hint for the three OpenAI chat models
+    (router, info, booking); the judge and Ragas models are Gemini-backed,
+    and this codebase has no reasoning-effort knob for them.
+
+    Args:
+        app_cfg: Loaded application configuration (router/info/booking models).
+        cfg: Loaded evaluation configuration (judge/Ragas models).
+
+    Returns:
+        Mapping of model-identity fields.
+
+    """
+    return {
+        "router_model": app_cfg.orchestration.llm.model,
+        "router_reasoning_effort": app_cfg.orchestration.llm.reasoning_effort,
+        "info_model": app_cfg.info.llm.model,
+        "info_reasoning_effort": app_cfg.info.llm.reasoning_effort,
+        "info_embeddings_model": app_cfg.info.embeddings.model,
+        "booking_model": app_cfg.booking.llm.model,
+        "booking_reasoning_effort": app_cfg.booking.llm.reasoning_effort,
+        "judge_model": cfg.judge.model,
+        "ragas_llm_model": cfg.ragas.llm_model,
+        "ragas_embedding_model": cfg.ragas.embedding_model,
+    }
+
+
+def _config_fingerprint_metadata(
+    app_cfg: AppConfig,
+    eval_config_path: str | None,
+) -> dict[str, object]:
+    """Fingerprint the config and prompt files that shaped this run.
+
+    ``git_sha`` alone does not prove what actually ran: a dirty working tree
+    or a ``--config`` override can change behavior without changing the
+    commit. Hashing the resolved file contents catches both.
+
+    Args:
+        app_cfg: Loaded application configuration, used to resolve which
+            prompt files were actually read.
+        eval_config_path: The ``--config`` path passed on the command line,
+            or ``None`` when the packaged default was used.
+
+    Returns:
+        Mapping of short content-hash fingerprints.
+
+    """
+    return {
+        "app_config_sha256": _hash_text(app_config_source_text()),
+        "eval_config_sha256": _hash_text(eval_config_source_text(eval_config_path)),
+        "prompts_sha256": _hash_text(_read_prompt_texts(app_cfg)),
+    }
+
+
+def _read_prompt_texts(app_cfg: AppConfig) -> str:
+    """Concatenate every system/parser prompt actually used by the agents.
+
+    Args:
+        app_cfg: Loaded application configuration.
+
+    Returns:
+        The router, info system, info parser, and booking system prompt
+        contents joined by a delimiter, in that fixed order.
+
+    """
+    orchestration_prompts = app_cfg.orchestration.prompts
+    info_prompts = app_cfg.info.prompts
+    booking_prompts = app_cfg.booking.prompts
+    texts = [
+        load_packaged_text(
+            _prompt_resource_path(
+                orchestration_prompts.folder,
+                orchestration_prompts.orchestration_prompt_filename,
+            ),
+        ),
+        load_packaged_text(
+            _prompt_resource_path(
+                info_prompts.folder,
+                info_prompts.system_prompt_filename,
+            ),
+        ),
+        load_packaged_text(
+            _prompt_resource_path(
+                info_prompts.folder,
+                info_prompts.parser_prompt_filename,
+            ),
+        ),
+        load_packaged_text(
+            _prompt_resource_path(
+                booking_prompts.folder,
+                booking_prompts.system_prompt_filename,
+            ),
+        ),
+    ]
+    return "\n----\n".join(texts)
+
+
+def _prompt_resource_path(folder: str, filename: str) -> str:
+    """Build a packaged-resource path for a prompt file.
+
+    Mirrors the folder/filename join each agent's resource loader performs
+    internally, so the hashed text matches what the agent actually reads.
+
+    Args:
+        folder: Prompt folder relative to the ``blue_horizon`` package root.
+        filename: Prompt filename within that folder.
+
+    Returns:
+        The resource path, or bare ``filename`` when ``folder`` is empty.
+
+    """
+    stripped_folder = folder.strip("/")
+    if stripped_folder:
+        return f"{stripped_folder}/{filename}"
+    return filename
+
+
+def _hash_text(text: str) -> str:
+    """Compute a short content fingerprint for a text blob.
+
+    Args:
+        text: Text to hash.
+
+    Returns:
+        The first 12 hex characters of the text's SHA-256 digest.
+
+    """
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+def _drop_empty(metadata: dict[str, object]) -> dict[str, object]:
+    """Drop ``None``/empty-string values from a metadata mapping.
+
+    Keeps falsy-but-meaningful values (``False``, ``0``) that a plain
+    truthiness filter would silently discard.
+
+    Args:
+        metadata: Metadata mapping to filter.
+
+    Returns:
+        Filtered mapping containing only meaningfully-set values.
+
+    """
+    return {
+        key: value
+        for key, value in metadata.items()
+        if value is not None and value != ""
+    }
 
 
 def _load_dataset_examples(
@@ -425,6 +641,14 @@ def _parse_args() -> argparse.Namespace:
             "Defaults to the full configured dataset when omitted."
         ),
     )
+    parser.add_argument(
+        "--router-only",
+        action="store_true",
+        help=(
+            "Run only the routing-accuracy evaluator, skipping every other "
+            "evaluator (including the LLM judge and Ragas metrics)."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -522,6 +746,7 @@ async def _run_and_write_results(
             or aevaluate_kwargs.get("experiment_prefix")
             or "",
         )
+        run_metadata = aevaluate_kwargs.get("metadata") or {}
         context = SummaryContext(
             dataset_name=cfg.experiment.dataset_name,
             experiment_name=exp_name,
@@ -529,6 +754,7 @@ async def _run_and_write_results(
             started_at=started_at,
             finished_at=datetime.now(UTC),
             upload_results=cfg.experiment.upload_results,
+            metadata=run_metadata,
         )
         if caught_exc is not None:
             summary: Mapping[str, object] = _build_error_summary(context, caught_exc)
@@ -541,10 +767,39 @@ async def _run_and_write_results(
         _write_summary(artifacts.summary_path, summary)
 
 
+def _build_evaluators(cfg: EvalConfig, *, router_only: bool) -> list[Any]:
+    """Build the list of evaluators to pass to ``aevaluate``.
+
+    Args:
+        cfg: Loaded evaluation configuration, forwarded to evaluators that
+            need it.
+        router_only: When ``True``, return only the routing-accuracy
+            evaluator, skipping every other evaluator (including the LLM
+            judge and Ragas metrics).
+
+    Returns:
+        List of evaluator callables ready to pass to ``aevaluate``.
+
+    """
+    if router_only:
+        return [eval_routing_accuracy]
+    return [
+        eval_routing_accuracy,
+        partial(eval_injection_tripwires, cfg=cfg),
+        partial(eval_booking_outcome_and_invariants, cfg=cfg),
+        partial(eval_llm_rubrics, cfg=cfg),
+        partial(eval_rag_metrics_info_turns, cfg=cfg),
+        partial(eval_info_reference_subset, cfg=cfg),
+        partial(eval_info_expected_filters, cfg=cfg),
+        eval_turn_latency,
+    ]
+
+
 async def main() -> None:
     """Run the LangSmith experiment and persist local artifacts."""
     args = _parse_args()
     cfg = load_eval_config(path=args.config)
+    app_cfg = load_app_config()
     started_at = datetime.now(UTC)
     dataset_name = cfg.experiment.dataset_name
     experiment_name = _build_experiment_name(
@@ -557,18 +812,9 @@ async def main() -> None:
     configure_logging(experiment_name, cfg.experiment.log_dir)
 
     # Setting LANGSMITH_TEST_CACHE enables caching of example runs to reduce cost/time.
-    metadata = _build_metadata(cfg.metadata)
+    metadata = _build_metadata(cfg, app_cfg, args.config)
 
-    evaluators = [
-        eval_routing_accuracy,
-        partial(eval_injection_tripwires, cfg=cfg),
-        partial(eval_booking_outcome_and_invariants, cfg=cfg),
-        partial(eval_llm_rubrics, cfg=cfg),
-        partial(eval_rag_metrics_info_turns, cfg=cfg),
-        partial(eval_info_reference_subset, cfg=cfg),
-        partial(eval_info_expected_filters, cfg=cfg),
-        eval_turn_latency,
-    ]
+    evaluators = _build_evaluators(cfg, router_only=args.router_only)
     aevaluate_kwargs = _build_aevaluate_kwargs(
         cfg, experiment_name, metadata, evaluators,
     )

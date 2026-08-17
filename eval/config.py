@@ -70,39 +70,6 @@ class ExperimentConfig(BaseModel):
         return _resolve_path(value, base_dir=_BASE_DIR)
 
 
-class MetadataConfig(BaseModel):
-    """Optional metadata attached to LangSmith runs.
-
-    Attributes:
-        git_sha: Git commit SHA to record (optional).
-        router_model: Router model identifier (optional).
-        judge_model: Judge model identifier (optional).
-        schema_version: Database schema version label (optional).
-
-    """
-
-    model_config = {"frozen": True}
-
-    git_sha: str | None = None
-    router_model: str | None = None
-    judge_model: str | None = None
-    schema_version: str | None = None
-
-    @field_validator(
-        "git_sha",
-        "router_model",
-        "judge_model",
-        "schema_version",
-        mode="before",
-    )
-    @classmethod
-    def _empty_str_to_none(cls, value: object) -> object:
-        """Convert empty strings to None for optional metadata."""
-        if isinstance(value, str) and not value.strip():
-            return None
-        return value
-
-
 class EvaluatorLimitsConfig(BaseModel):
     """Limits controlling judge LLM inputs and stored evaluator output sizes.
 
@@ -375,7 +342,6 @@ class EvalConfig(BaseSettings):
 
     Attributes:
         experiment: Experiment execution settings.
-        metadata: Optional LangSmith metadata values.
         evaluator_limits: Limits used by evaluators and summaries.
         neon: Neon branch reset configuration for eval runs.
         orchestration: Orchestration readiness timing.
@@ -405,7 +371,6 @@ class EvalConfig(BaseSettings):
     )
 
     experiment: ExperimentConfig
-    metadata: MetadataConfig
     evaluator_limits: EvaluatorLimitsConfig
     neon: NeonConfig
     orchestration: OrchestrationConfig
@@ -491,18 +456,58 @@ def _load_toml(path: Path | str | None, resource_name: str) -> dict[str, object]
         RuntimeError: If ``path`` points to a missing or non-file path.
 
     """
+    return tomllib.loads(_read_toml_text(path, resource_name))
+
+
+def _read_toml_text(path: Path | str | None, resource_name: str) -> str:
+    """Read the raw TOML source text from a path or packaged eval resource.
+
+    Args:
+        path: Explicit path to a TOML file, or ``None`` to read the named
+            packaged resource from the ``eval`` package.
+        resource_name: Filename of the packaged resource to use when
+            ``path`` is ``None``.
+
+    Returns:
+        The raw, unparsed TOML text.
+
+    Raises:
+        RuntimeError: If ``path`` points to a missing or non-file path.
+
+    """
     if path is None:
-        content = (
+        return (
             importlib_resources.files(BASE_PACKAGE)
             .joinpath(resource_name)
             .read_text(encoding="utf-8")
         )
-        return tomllib.loads(content)
     target_path = Path(path).expanduser().resolve()
     if not target_path.exists() or not target_path.is_file():
         msg = f"Config file not found: {target_path}"
         raise RuntimeError(msg)
-    return tomllib.loads(target_path.read_text(encoding="utf-8"))
+    return target_path.read_text(encoding="utf-8")
+
+
+def eval_config_source_text(path: Path | str | None = None) -> str:
+    """Read the raw TOML source text backing the evaluation configuration.
+
+    Exposed separately from ``load_eval_config`` so callers that need to
+    fingerprint the exact configuration in effect (e.g. attaching a content
+    hash to eval-run metadata) can do so without re-parsing it.
+
+    Args:
+        path: Optional explicit path to a TOML file; defaults to the packaged
+            ``eval_config.toml`` resource.
+
+    Returns:
+        The raw, unparsed TOML text.
+
+    Raises:
+        RuntimeError: If ``path`` is provided but does not point to an
+            existing file.
+
+    """
+    return _read_toml_text(path, _EVAL_CONFIG_RESOURCE)
 
 
 @lru_cache(maxsize=1)

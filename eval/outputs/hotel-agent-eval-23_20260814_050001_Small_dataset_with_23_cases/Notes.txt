@@ -1,0 +1,3 @@
+Judge: gemini-3.5-flash-lite
+Note: uses modified precision judge prompt that better handles multi-part queries. Also
+        drops items with a reference of "I could not find exactly what you requested"

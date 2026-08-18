@@ -370,3 +370,16 @@ Plain `pytest` runs both groups together, so the `db_integration` tests will fai
 without that setup — see the `db_integration` marker docstring in `pyproject.toml`
 and the `db-integration-tests` job in `.github/workflows/ci.yml` for how CI
 provisions them (against a scratch Neon branch).
+
+If `.env` points `PGSQL_RW_DB_URL`/`PGSQL_RO_DB_URL` at the Production branch
+(a normal local setup, for running the app itself), running `db_integration`
+tests locally would otherwise book and cancel real rows there.
+[`tests/conftest.py`](tests/conftest.py) guards against this: whenever
+`PGSQL_RW_EVAL_DB_URL`/`PGSQL_RO_EVAL_DB_URL`/`PGSQL_ROOT_EVAL_DB_URL` are also
+set, it copies each onto its plain-named counterpart before any test runs, so
+a local `db_integration` run lands on the Development branch instead — the
+same substitution `db-integration-tests` in CI gets from its own secrets.
+Without those `_EVAL` variables set locally, `db_integration` tests run
+against whatever `PGSQL_RW_DB_URL`/`PGSQL_RO_DB_URL`/`PGSQL_ROOT_DB_URL`
+already point at, Production included, so setting the `_EVAL` variables
+locally is worth doing before running this suite by hand.

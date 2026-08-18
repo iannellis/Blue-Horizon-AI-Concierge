@@ -104,7 +104,10 @@ def root_db_url() -> str:
     `rw_db_url`) -- it is deliberately a different environment variable from
     `PGSQL_ROOT_PARENT_DB_URL`, which `booking_pgsql.reload_sql_tables` reads
     and which must never point at a branch a test run touches, since that
-    function drops and recreates every table it loads.
+    function drops and recreates every table it loads. `tests/conftest.py`
+    copies `PGSQL_ROOT_EVAL_DB_URL` onto this variable when present, the same
+    way it does for `rw_db_url`/`ro_db_url`, so a local run lands on the
+    Development branch instead of skipping or (worse) touching Production.
 
     Returns:
         The root database URL.

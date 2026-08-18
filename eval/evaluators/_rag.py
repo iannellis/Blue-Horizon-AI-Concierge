@@ -28,7 +28,7 @@ from ragas.metrics.collections import (
 
 from eval._utils import json_value, truncate
 from eval.evaluators._common import _rag_extract_reference, _rag_extract_turn_inputs
-from eval.evaluators._rag_prompts import HotelContextPrecisionPrompt
+from eval.evaluators._rag_prompts import PartialCoverageContextPrecisionPrompt
 
 if TYPE_CHECKING:
     from langsmith.schemas import Example, Run
@@ -311,7 +311,7 @@ async def _get_ragas_metrics(
         if ragas_cfg.custom_precision_prompt:
             # Ragas reads the prompt off the instance at scoring time, so
             # swapping it post-construction is enough to replace it.
-            context_precision.prompt = HotelContextPrecisionPrompt()
+            context_precision.prompt = PartialCoverageContextPrecisionPrompt()
         _RAGAS_METRICS = (
             Faithfulness(llm=ragas_llm),
             AnswerRelevancy(llm=ragas_llm, embeddings=ragas_embeddings),

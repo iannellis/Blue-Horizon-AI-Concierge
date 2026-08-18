@@ -16,10 +16,10 @@ from ragas.metrics.collections.context_precision.util import (
 )
 
 from eval.evaluators._rag import _rag_reference_is_no_match, _rag_score_turn
-from eval.evaluators._rag_prompts import HotelContextPrecisionPrompt
+from eval.evaluators._rag_prompts import PartialCoverageContextPrecisionPrompt
 
 SENTINEL = "I could not find exactly what you requested"
-EXPECTED_EXAMPLE_COUNT = 3
+EXPECTED_EXAMPLE_COUNT = 4
 
 
 # ---------------------------------------------------------------------------
@@ -62,20 +62,20 @@ def test_empty_sentinel_disables_the_check() -> None:
 
 
 # ---------------------------------------------------------------------------
-# HotelContextPrecisionPrompt
+# PartialCoverageContextPrecisionPrompt
 # ---------------------------------------------------------------------------
 
 
 def test_custom_prompt_keeps_stock_input_and_output_models() -> None:
     """The override inherits Ragas' models so the judge schema is unchanged."""
-    prompt = HotelContextPrecisionPrompt()
+    prompt = PartialCoverageContextPrecisionPrompt()
     assert prompt.input_model is ContextPrecisionInput
     assert prompt.output_model is ContextPrecisionOutput
 
 
 def test_custom_prompt_examples_use_ragas_model_instances() -> None:
     """Examples must be real Ragas models for to_string() to serialize them."""
-    prompt = HotelContextPrecisionPrompt()
+    prompt = PartialCoverageContextPrecisionPrompt()
     assert len(prompt.examples) == EXPECTED_EXAMPLE_COUNT
     for example_input, example_output in prompt.examples:
         assert isinstance(example_input, ContextPrecisionInput)
@@ -85,7 +85,7 @@ def test_custom_prompt_examples_use_ragas_model_instances() -> None:
 
 def test_custom_prompt_renders_with_instruction_and_input() -> None:
     """to_string() embeds the overridden instruction and the supplied input."""
-    prompt = HotelContextPrecisionPrompt()
+    prompt = PartialCoverageContextPrecisionPrompt()
     rendered = prompt.to_string(
         ContextPrecisionInput(
             question="Do you have a pool, and what time is checkout?",

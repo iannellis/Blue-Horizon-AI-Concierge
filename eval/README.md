@@ -286,6 +286,36 @@ threshold, followed by per-route p50/p95/p99 latency stats. Exits with code
 
 ---
 
+## Known issues and possible improvements
+
+### Context precision scoring on sentinel-bundled compound references
+
+`eval_rag_metrics_info_turns` already skips context-precision scoring for
+turns whose reference is *entirely* the "nothing matched" sentinel
+(`_rag_reference_is_no_match` in [_rag.py:534](evaluators/_rag.py#L534)), on
+the grounds that a bare refusal string carries no content for a retrieved
+chunk to support, so the judge verdict reflects its own temperament rather
+than retrieval quality. But a compound reference that *mixes* the sentinel
+with a real answer (a multi-part question where only one clause had no
+match) is deliberately left eligible, since the other clause is real content
+the judge can meaningfully score. In practice this partial case still hurts:
+digging into the before/after precision-prompt-update comparison, the two
+affected turns (`case_0023` turn 0, `case_0196` turn 0) took the single
+largest hit of any turns in the dataset, averaging -0.25 after the prompt
+generalization, because the judge has to weigh a chunk-less clause alongside
+a supportable one in the same score.
+
+**Possible fix:** instead of an all-or-nothing skip, strip out just the
+sentinel segments from the reference before scoring, and score
+context-precision against what remains. The segment-splitting-and-checking
+logic already exists at [_rag.py:472](evaluators/_rag.py#L472) (split the
+reference on `|`, check whether each segment equals the sentinel); filtering
+to the non-sentinel segments is the same parsing with a different reducer
+(`filter` instead of `all`). This keeps the answerable clause (e.g. the
+breakfast answer) in the reference passed to Ragas while dropping the clause
+no chunk can ever support, which is the same principle that justifies the
+existing full-sentinel skip, just applied per-segment instead of per-turn.
+
 ## Baseline files
 
 Each baseline JSON file records the metric values from a reference run and the

@@ -1,8 +1,0 @@
-Judge: gemini-3.5-flash-lite
-Note: uses modified precision judge prompt that better handles multi-part queries. Also
-        drops items with a reference of "I could not find exactly what you requested"
-
-The new prompt was too hotel-specific. These runs are from before it was updated to
-generalize it.
-
-Some runs are dated after the prompt update. I reverted it to run them for comparison.

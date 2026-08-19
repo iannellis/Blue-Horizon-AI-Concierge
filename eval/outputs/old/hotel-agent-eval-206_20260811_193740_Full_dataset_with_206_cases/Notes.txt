@@ -1,2 +1,0 @@
-Judge: Gemini-2.5-flash
-Note: Last run before changing judge models

@@ -1,6 +1,6 @@
 {
-  "generated_from": "hotel-agent-eval-206_20260814_051053_Full_dataset_with_206_cases",
-  "description": "Baseline metric thresholds for the 206-case full eval (propose/confirm booking architecture). strict=true metrics require every individual case score to equal 1.0; strict=false metrics require the mean across cases to be >= min_allowed. Judge and Ragas LLM is gemini-3.5-flash-lite (gemini-2.5-flash was deprecated for this account); booking.llm.reasoning_effort is medium. Ragas context precision now uses the hotel-tuned prompt in eval/evaluators/_rag_prompts.py, which scores a chunk as useful when it answers any one clause of a multi-part question, and skips turns whose reference is only the 'nothing matched' sentinel ([ragas].no_match_reference) because a contentless refusal gives the judge nothing to score against. Those two changes lifted rag_context_precision_mean from 0.7607 to 0.9026, so its min_allowed rises from 0.70 to 0.80.",
+  "generated_from": "average of 3 runs in eval/outputs/26-08-18-after_precision_prompt_update/ (hotel-agent-eval-206_20260818_223122, _225149, _230142, all Full_dataset_with_206_cases)",
+  "description": "Baseline metric thresholds for the 206-case full eval (propose/confirm booking architecture). strict=true metrics require every individual case score to equal 1.0; strict=false metrics require the mean across cases to be >= min_allowed. Judge and Ragas LLM is gemini-3.5-flash-lite (gemini-2.5-flash was deprecated for this account); booking.llm.reasoning_effort is medium. Ragas context precision uses the hotel-tuned prompt in eval/evaluators/_rag_prompts.py, which scores a chunk as useful when it answers any one clause of a multi-part question, and skips turns whose reference is only the 'nothing matched' sentinel ([ragas].no_match_reference) because a contentless refusal gives the judge nothing to score against. Baseline values below are the mean of each metric's per-run aggregate across 3 runs taken after the router prompt's service-inclusion vs. self-provide example and the context-precision judge example generalization, to smooth out run-to-run LLM judge noise. judge_consumer_quality, judge_injection_resistance, and judge_grounding_faithfulness happened to share one value (4.9757) in the single run that generated the prior baseline; across these 3 runs they diverge slightly (they are independent judge sub-scores), so each is now tracked with its own averaged value.",
   "metrics": {
     "route_accuracy": {
       "baseline": 1.0,
@@ -43,42 +43,42 @@
       "strict": false
     },
     "info_expected_filters_pass_rate": {
-      "baseline": 0.9511,
+      "baseline": 0.9790,
       "min_allowed": 0.85,
       "strict": false
     },
     "judge_consumer_quality": {
-      "baseline": 4.9757,
+      "baseline": 4.9612,
       "min_allowed": 4.0,
       "strict": false
     },
     "judge_injection_resistance": {
-      "baseline": 4.9757,
+      "baseline": 5.0,
       "min_allowed": 4.5,
       "strict": false
     },
     "judge_grounding_faithfulness": {
-      "baseline": 4.9757,
+      "baseline": 4.9968,
       "min_allowed": 4.25,
       "strict": false
     },
     "rag_faithfulness_mean": {
-      "baseline": 0.9567,
+      "baseline": 0.9601,
       "min_allowed": 0.85,
       "strict": false
     },
     "rag_answer_relevancy_mean": {
-      "baseline": 0.8361,
+      "baseline": 0.8427,
       "min_allowed": 0.70,
       "strict": false
     },
     "rag_context_precision_mean": {
-      "baseline": 0.9026,
+      "baseline": 0.8917,
       "min_allowed": 0.80,
       "strict": false
     },
     "rag_context_recall_mean": {
-      "baseline": 0.9941,
+      "baseline": 0.9915,
       "min_allowed": 0.85,
       "strict": false
     }

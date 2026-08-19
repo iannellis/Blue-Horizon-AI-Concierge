@@ -13,6 +13,7 @@ EXPECTED_HEALTH_CHECK_INTERVAL_S = 30
 EXPECTED_ROOMS_TOP_K = 4
 EXPECTED_DATA_PATH = Path("data/pandas")
 EXPECTED_PROPOSAL_TTL_S = 1800.0
+EXPECTED_SEEDED_CUSTOMER_COUNT = 25
 
 SAMPLE_APP_CONFIG: dict[str, object] = {
     "orchestration": {
@@ -113,7 +114,10 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
     },
     "load_data": {
         "information_redis": {"data_path": str(EXPECTED_DATA_PATH)},
-        "booking_pgsql": {"data_path": str(EXPECTED_DATA_PATH)},
+        "booking_pgsql": {
+            "data_path": str(EXPECTED_DATA_PATH),
+            "seeded_customer_count": EXPECTED_SEEDED_CUSTOMER_COUNT,
+        },
     },
     "neon": {
         "project_id": "test-project-id",
@@ -137,6 +141,10 @@ def test_parse_app_config_from_dict() -> None:
     assert cfg.booking.agent.top_k == EXPECTED_ROOMS_TOP_K
     assert cfg.booking.proposals.ttl_s == EXPECTED_PROPOSAL_TTL_S
     assert cfg.load_data.information_redis.data_path == EXPECTED_DATA_PATH
+    assert (
+        cfg.load_data.booking_pgsql.seeded_customer_count
+        == EXPECTED_SEEDED_CUSTOMER_COUNT
+    )
     assert cfg.neon.branch_name == "Production"
     assert cfg.neon.lock_retry_attempts == EXPECTED_NEON_LOCK_RETRY_ATTEMPTS
     assert cfg.neon.lock_retry_delay_s == EXPECTED_NEON_LOCK_RETRY_DELAY_S
@@ -155,6 +163,10 @@ def test_load_packaged_app_config() -> None:
     assert cfg.booking.agent.top_k == EXPECTED_ROOMS_TOP_K
     assert cfg.booking.proposals.ttl_s == EXPECTED_PROPOSAL_TTL_S
     assert cfg.load_data.booking_pgsql.data_path == EXPECTED_DATA_PATH
+    assert (
+        cfg.load_data.booking_pgsql.seeded_customer_count
+        == EXPECTED_SEEDED_CUSTOMER_COUNT
+    )
     assert cfg.neon.branch_name == "Production"
     assert cfg.neon.lock_retry_attempts == EXPECTED_NEON_LOCK_RETRY_ATTEMPTS
     assert cfg.neon.lock_retry_delay_s == EXPECTED_NEON_LOCK_RETRY_DELAY_S

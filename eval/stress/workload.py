@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from typing import cast
 from uuid import uuid4
 
+from blue_horizon.config import load_app_config
 from eval._utils import truncate as _truncate
 from eval.langsmith_target import EvalCaptureCallback, OrchestrationManager
 from eval.langsmith_target._confirm import auto_confirm_pending_proposal
@@ -22,12 +23,6 @@ from eval.langsmith_target._text_utils import _extract_assistant_text_from_resul
 from eval.stress.models import OperationBuildResult, StressRunConfig, UserState
 
 logger = logging.getLogger(__name__)
-
-# Only the first 25 customers are seeded (see booking_pgsql.py::_CUSTOMER_COUNT).
-# Simulated users beyond this count wrap around and share a guest identity
-# with an earlier user -- acceptable here, since contention across users is
-# the point of a stress run and the UI's own dropdown offers the same 25.
-_SEEDED_CUSTOMER_COUNT = 25
 
 # Tool names that create a proposal -- mirrors eval.evaluators._booking and
 # proposals.ProposalAction, though the stress harness only cares whether one
@@ -62,6 +57,13 @@ async def _run_workload(
     op_logs: list[dict[str, object]] = []
     user_logs: list[dict[str, object]] = []
     semaphore = asyncio.Semaphore(cfg.max_concurrency)
+    # Simulated users beyond this count wrap around and share a guest
+    # identity with an earlier user -- acceptable here, since contention
+    # across users is the point of a stress run and the UI's own dropdown
+    # offers the same seeded guests.
+    seeded_customer_count = (
+        load_app_config().load_data.booking_pgsql.seeded_customer_count
+    )
 
     async def user_task(user_idx: int) -> dict[str, object]:
         """Run a single simulated user's workload under a semaphore.
@@ -74,7 +76,7 @@ async def _run_workload(
 
         """
         thread_id = uuid4().hex
-        customer_id = (user_idx % _SEEDED_CUSTOMER_COUNT) + 1
+        customer_id = (user_idx % seeded_customer_count) + 1
         state = UserState()
         local_ops: list[dict[str, object]] = []
 

@@ -186,3 +186,9 @@ data_path = "data/pandas"
 # Folder containing the PostgreSQL ingestion pickle files.
 # Specified from the same level as the blue_horizon package.
 data_path = "data/pandas"
+# Number of source customers -- the ones with the richest pre-existing
+# booking history -- remapped to a dense customer_id range [1, N] and loaded
+# first. The UI's dropdown identity picker (write_ops.list_customers) and the
+# eval/stress harnesses' simulated-guest selection both assume this exact
+# range, so this is the single source of truth for that count.
+seeded_customer_count = 25

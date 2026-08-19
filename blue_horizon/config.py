@@ -315,12 +315,25 @@ class LoadDataBookingConfig(BaseModel):
 
     Attributes:
         data_path: Relative path to the booking pickle dataset folder.
+        seeded_customer_count: Number of source customers -- the ones with
+            the richest pre-existing booking history -- remapped to the
+            dense low `customer_id` block ``[1, seeded_customer_count]`` and
+            loaded first (see
+            `blue_horizon.load_data.booking_pgsql.prepare_customers_dataframe`).
+            Every other source customer is still loaded, just with a higher
+            id. This is the single source of truth for that count: the UI's
+            dropdown identity picker
+            (`blue_horizon.agents.booking.write_ops.list_customers`) and the
+            `eval`/stress harnesses' simulated-guest selection both assume
+            this exact range, so it must never drift out of sync between
+            them.
 
     """
 
     model_config = {"frozen": True}
 
     data_path: Path
+    seeded_customer_count: int
 
 
 class LoadDataConfig(BaseModel):

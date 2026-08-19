@@ -158,7 +158,12 @@ async def list_customers() -> list[dict[str, Any]]:
 
     """
     resources = orchestrator.get_booking_resources()
-    customers = await write_ops.list_customers(resources.get_write_pool())
+    seeded_customer_count = (
+        load_app_config().load_data.booking_pgsql.seeded_customer_count
+    )
+    customers = await write_ops.list_customers(
+        resources.get_write_pool(), seeded_customer_count=seeded_customer_count,
+    )
     return [
         {
             "customer_id": c.customer_id,
@@ -265,7 +270,7 @@ async def _event_stream(payload: ChatPayload) -> AsyncGenerator[str]:
                 customer_id=payload.customer_id,
             ):
                 await queue.put(event)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("chat stream failed: %s", exc, exc_info=True)
             await queue.put({"type": "error", "message": _error_message(exc)})
         finally:

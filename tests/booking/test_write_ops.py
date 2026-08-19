@@ -919,6 +919,39 @@ class TestCommitBookingConstraintTranslation:
         asyncio.run(_run())
 
 
+class TestListCustomers:
+    """`list_customers` -- the read path the UI's identity dropdown relies on."""
+
+    def test_result_is_capped_at_seeded_customer_count(self, rw_db_url: str) -> None:
+        """`customers` may hold far more rows than the dropdown should offer.
+
+        `booking_pgsql.reload_sql_tables` loads every source customer, not
+        just the dropdown identities, so this asserts `list_customers` caps
+        its result at the `seeded_customer_count` it is given, rather than
+        trusting the table to already be small.
+        """
+        seeded_customer_count = 3
+
+        async def _run() -> None:
+            async with _rw_pool(rw_db_url) as pool:
+                async with pool.connection() as conn, conn.cursor() as cur:
+                    await cur.execute("SELECT count(*) FROM customers;")
+                    row = await cur.fetchone()
+                total_customers = row[0] if row is not None else 0
+
+                customers = await write_ops.list_customers(
+                    pool, seeded_customer_count=seeded_customer_count,
+                )
+
+                expected_count = min(seeded_customer_count, total_customers)
+                assert len(customers) == expected_count
+                assert [c.customer_id for c in customers] == list(
+                    range(1, expected_count + 1),
+                )
+
+        asyncio.run(_run())
+
+
 class TestListBookings:
     """`list_bookings` -- the read path the confirmation panel relies on."""
 

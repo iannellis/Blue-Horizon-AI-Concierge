@@ -14,7 +14,7 @@ from blue_horizon.load_data.booking_pgsql import (
     CUSTOMERS_COLUMNS,
     ROOM_AVAIL_COLUMNS,
     ROOMS_COLUMNS,
-    _remap_and_filter_bookings_to_loaded_customers,
+    _remap_bookings_to_new_customer_ids,
     _select_non_overlapping_bookings,
     _select_richest_customer_ids,
     copy_dataframe_into_table,
@@ -199,44 +199,49 @@ class TestSelectRichestCustomerIds:
 
 
 class TestPrepareCustomersDataframe:
-    """prepare_customers_dataframe loads and remaps the richest customers."""
+    """prepare_customers_dataframe loads every customer, richest history first."""
 
-    def test_remaps_to_dense_ascending_ids(self, tmp_path: Path) -> None:
-        """Selected customers get new ids 1..N in ascending source-id order."""
+    def test_remaps_richest_first_then_remaining_in_ascending_order(
+        self, tmp_path: Path,
+    ) -> None:
+        """Customers with accepted bookings get ids 1..N; the rest follow, ascending."""
         customers_path = tmp_path / "customers.pkl"
         pd.DataFrame(
             {
-                "first_name": ["Ana", "Bo", "Cy"],
-                "last_name": ["Adams", "Blake", "Cruz"],
+                "first_name": ["Ana", "Bo", "Cy", "Dee", "Eli"],
+                "last_name": ["Adams", "Blake", "Cruz", "Diaz", "Evans"],
             },
-            index=pd.Index([10, 20, 30], name="customer_id"),
+            index=pd.Index([10, 20, 30, 40, 50], name="customer_id"),
         ).to_pickle(customers_path)
+        # Only customers 10/20/30 have accepted bookings; 40/50 have none.
         df_accepted_bookings = pd.DataFrame(
             {"customer_id": [30, 30, 10, 20]},
         )
 
         df_customers, new_id_by_source_id = prepare_customers_dataframe(
-            tmp_path, df_accepted_bookings,
+            tmp_path, df_accepted_bookings, seeded_customer_count=25,
         )
 
-        assert new_id_by_source_id == {10: 1, 20: 2, 30: 3}
+        assert new_id_by_source_id == {10: 1, 20: 2, 30: 3, 40: 4, 50: 5}
         assert list(df_customers.columns) == list(CUSTOMERS_COLUMNS)
+        assert df_customers["customer_id"].tolist() == [1, 2, 3, 4, 5]
         assert df_customers.set_index("customer_id").loc[3, "first_name"] == "Cy"
+        assert df_customers.set_index("customer_id").loc[5, "first_name"] == "Eli"
 
 
-class TestRemapAndFilterBookingsToLoadedCustomers:
-    """_remap_and_filter_bookings_to_loaded_customers scopes bookings to loaded ones."""
+class TestRemapBookingsToNewCustomerIds:
+    """_remap_bookings_to_new_customer_ids applies the loaded customer id remap."""
 
-    def test_drops_unselected_customers_and_remaps_selected_ones(self) -> None:
-        """Only bookings for a selected customer survive, with the new id applied."""
+    def test_remaps_mapped_rows_and_drops_unmapped_ones(self) -> None:
+        """Every mapped row gets its new id; a row with no entry is dropped."""
         df_accepted_bookings = pd.DataFrame({"customer_id": [1, 2, 3, 4]})
-        new_customer_id_by_source_id = {1: 10, 3: 11}
+        new_customer_id_by_source_id = {1: 10, 2: 11, 3: 12}
 
-        result = _remap_and_filter_bookings_to_loaded_customers(
+        result = _remap_bookings_to_new_customer_ids(
             df_accepted_bookings, new_customer_id_by_source_id,
         )
 
-        assert result["customer_id"].tolist() == [10, 11]
+        assert result["customer_id"].tolist() == [10, 11, 12]
 
 
 class _FakeCopy:

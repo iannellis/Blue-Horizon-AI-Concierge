@@ -113,12 +113,14 @@ CUSTOMERS_COLUMNS: Sequence[str] = [
     "last_name",
 ]
 
-# The N customers with the richest accepted pre-existing booking history are
-# loaded (see `_select_richest_customer_ids`), not an arbitrary first N, so
-# the dropdown identity picker in the UI has real booking history to demo
-# against. There is no email/notification functionality in this project, so
-# the remaining source columns (email, phone, address, ...) are never loaded.
-_CUSTOMER_COUNT: int = 25
+# There is no email/notification functionality in this project, so the
+# remaining source columns customers.pkl has (email, phone, address, ...)
+# are never loaded, for any customer. How many customers get the dense low
+# `customer_id` block reserved for the UI dropdown / eval-harness identities
+# is not hard-coded here -- see `AppConfig.load_data.booking_pgsql.
+# seeded_customer_count`'s docstring, and `prepare_customers_dataframe`
+# below, for why it must stay a single, shared value rather than a constant
+# private to this module.
 
 
 def get_pgsql_conn_string() -> str:
@@ -451,40 +453,73 @@ def _select_richest_customer_ids(
 def prepare_customers_dataframe(
     data_path: Path,
     df_accepted_bookings: pd.DataFrame,
+    seeded_customer_count: int,
 ) -> tuple[pd.DataFrame, dict[int, int]]:
-    """Load the `_CUSTOMER_COUNT` customers with the richest booking history.
+    """Load every customer; remap the richest customers to a dense id block.
 
-    Each selected customer's source `customer_id` is remapped to a new, dense
-    id in ``[1, _CUSTOMER_COUNT]`` (assigned in ascending source-id order),
-    because `eval/stress/workload.py` and `eval/langsmith_target/target.py`
-    both pick a simulated guest identity by assuming exactly that contiguous
-    range, not whatever ids happen to survive selection.
+    Every customer in `customers.pkl` is loaded, not just
+    `seeded_customer_count` of them: most accepted pre-existing bookings
+    belong to a customer outside any small subset (see
+    `_select_richest_customer_ids`), so loading only a subset leaves the bulk
+    of `room_availability` marked `Booked` with no matching `booking_rooms`
+    reservation once `reconcile_room_availability_status` runs. The
+    `seeded_customer_count` customers with the richest booking history are
+    still singled out, remapped to a dense id range
+    ``[1, seeded_customer_count]`` (assigned in ascending source-id order),
+    and loaded first, because `eval/stress/workload.py` and
+    `eval/langsmith_target/target.py` both pick a simulated guest identity by
+    assuming exactly that contiguous range, and the UI's dropdown identity
+    picker (`write_ops.list_customers`) should offer guests with real
+    booking history to demo against. Every other customer is appended after
+    them, remapped to a unique id starting at ``seeded_customer_count + 1``
+    (also in ascending source-id order, for reproducibility). Every consumer
+    of this range must be passed the *same* `seeded_customer_count` -- see
+    `AppConfig.load_data.booking_pgsql.seeded_customer_count`'s docstring for
+    why this is a config value rather than a constant private to this
+    module.
 
     Args:
         data_path: Directory containing customers.pkl.
         df_accepted_bookings: Accepted bookings (see
             `prepare_accepted_bookings`), used only to rank customers by
             booking count.
+        seeded_customer_count: Number of richest customers to remap into the
+            dense low id block. Should be
+            `AppConfig.load_data.booking_pgsql.seeded_customer_count` in
+            every real call, so it stays in sync with every other reader of
+            that range.
 
     Returns:
         A tuple of the prepared customers DataFrame (columns matching
-        `CUSTOMERS_COLUMNS`, already using the new ids) and the
-        ``{source customer_id: new customer_id}`` remap, for
-        `_remap_and_filter_bookings_to_loaded_customers` to apply to the
+        `CUSTOMERS_COLUMNS`, the richest `seeded_customer_count` first,
+        already using the new ids) and the
+        ``{source customer_id: new customer_id}`` remap for every loaded
+        customer, for `_remap_bookings_to_new_customer_ids` to apply to the
         bookings themselves.
 
     """
-    richest_ids = _select_richest_customer_ids(df_accepted_bookings, _CUSTOMER_COUNT)
-    new_id_by_source_id = {
-        source_id: new_id for new_id, source_id in enumerate(richest_ids, start=1)
-    }
+    richest_ids = _select_richest_customer_ids(
+        df_accepted_bookings, seeded_customer_count,
+    )
 
     customers_path = data_path / "customers.pkl"
     df = read_pickle_dataframe(customers_path)
+
+    richest_set = set(richest_ids)
+    remaining_ids = sorted(
+        source_id for source_id in (int(index) for index in df.index)
+        if source_id not in richest_set
+    )
+    ordered_source_ids = richest_ids + remaining_ids
+    new_id_by_source_id = {
+        source_id: new_id
+        for new_id, source_id in enumerate(ordered_source_ids, start=1)
+    }
+
     # Selecting a list of column labels always yields a DataFrame; cast past
     # the same __getitem__ stub imprecision as above.
     selected = cast(
-        "pd.DataFrame", df.loc[richest_ids, ["first_name", "last_name"]],
+        "pd.DataFrame", df.loc[ordered_source_ids, ["first_name", "last_name"]],
     ).copy()
     selected["customer_id"] = [
         new_id_by_source_id[source_id] for source_id in selected.index
@@ -493,25 +528,43 @@ def prepare_customers_dataframe(
     return selected, new_id_by_source_id
 
 
-def _remap_and_filter_bookings_to_loaded_customers(
+def _remap_bookings_to_new_customer_ids(
     df_accepted_bookings: pd.DataFrame,
     new_customer_id_by_source_id: dict[int, int],
 ) -> pd.DataFrame:
-    """Keep only bookings whose customer was loaded, remapped to its new id.
+    """Replace each booking's source `customer_id` with its loaded, remapped id.
+
+    `prepare_customers_dataframe` now loads every customer, so every source
+    `customer_id` here is expected to have an entry in
+    `new_customer_id_by_source_id`. Rows with no entry are still dropped, as
+    a defensive backstop against that assumption ever silently breaking
+    (e.g. `customers.pkl` and `room_bookings.pkl` regenerated out of sync
+    with each other), rather than letting an unmapped row reach the
+    `bookings.customer_id` foreign key check and fail the whole reload.
 
     Args:
         df_accepted_bookings: Accepted bookings (see
             `prepare_accepted_bookings`), still keyed by the source pickle's
             `customer_id`.
         new_customer_id_by_source_id: ``{source customer_id: new customer_id}``
-            remap from `prepare_customers_dataframe`.
+            remap from `prepare_customers_dataframe`, covering every loaded
+            customer.
 
     Returns:
-        pd.DataFrame: `df_accepted_bookings`, filtered to bookings whose
-        customer was selected, with `customer_id` replaced by the new id.
+        pd.DataFrame: `df_accepted_bookings` with `customer_id` replaced by
+        the new id, minus any row whose customer had no match.
 
     """
     in_scope = df_accepted_bookings["customer_id"].isin(new_customer_id_by_source_id)
+    # Series[bool].sum() resolves to a scalar at runtime; cast past the same
+    # pandas-stubs overload imprecision noted elsewhere in this module.
+    unmapped = int(cast("int", (~in_scope).sum()))
+    if unmapped:
+        logger.warning(
+            "%s accepted pre-existing bookings reference a customer_id with "
+            "no entry in customers.pkl; dropping them.",
+            unmapped,
+        )
     df_bookings = df_accepted_bookings.loc[in_scope].copy()
     df_bookings["customer_id"] = (
         df_bookings["customer_id"].map(new_customer_id_by_source_id).astype(int)
@@ -1085,18 +1138,19 @@ def reload_sql_tables() -> None:
     The function reads pickled source data, reconstructs the required enums,
     and inserts records into `rooms` and `room_availability`. It also
     (re)creates `customers`, `bookings`, and `booking_rooms`, and loads all
-    three: `customers` gets the `_CUSTOMER_COUNT` source customers with the
-    richest accepted pre-existing booking history (see
-    `prepare_customers_dataframe`), remapped to a dense `[1, _CUSTOMER_COUNT]`
-    id range so the UI's dropdown identity picker and the eval/stress
-    harnesses' simulated-guest selection keep working unchanged; `bookings`
-    and `booking_rooms` get that same customer set's pre-existing
-    reservations (see `prepare_accepted_bookings`), clamped to the date range
-    `room_availability` covers and filtered down to the maximum
-    non-overlapping subset per room, since `booking_rooms` carries a GiST
-    exclusion constraint (see `setup_booking_rooms_schema`) that makes a
-    double-booking impossible to insert, so this also creates the
-    `btree_gist` extension that constraint depends on.
+    three: `customers` gets every source customer (see
+    `prepare_customers_dataframe`), with the
+    `AppConfig.load_data.booking_pgsql.seeded_customer_count` richest by
+    accepted pre-existing booking history remapped to a dense low id range
+    and loaded first, so the UI's dropdown identity picker and the
+    eval/stress harnesses' simulated-guest selection keep working unchanged;
+    `bookings` and `booking_rooms` get pre-existing
+    reservations for every loaded customer (see `prepare_accepted_bookings`),
+    clamped to the date range `room_availability` covers and filtered down to
+    the maximum non-overlapping subset per room, since `booking_rooms`
+    carries a GiST exclusion constraint (see `setup_booking_rooms_schema`)
+    that makes a double-booking impossible to insert, so this also creates
+    the `btree_gist` extension that constraint depends on.
 
     Loading real bookings can leave `room_availability` rows marked `Booked`
     with no matching `booking_rooms` reservation, or `Available` despite one
@@ -1115,6 +1169,9 @@ def reload_sql_tables() -> None:
     """
     try:
         conn_string = get_pgsql_conn_string()
+        seeded_customer_count = (
+            load_app_config().load_data.booking_pgsql.seeded_customer_count
+        )
         df_rooms, room_type_values, bed_type_values, room_status_values = (
             prepare_rooms_dataframe(get_data_path())
         )
@@ -1127,9 +1184,9 @@ def reload_sql_tables() -> None:
             get_data_path(), df_rooms, df_availability,
         )
         df_customers, new_customer_id_by_source_id = prepare_customers_dataframe(
-            get_data_path(), df_accepted_bookings,
+            get_data_path(), df_accepted_bookings, seeded_customer_count,
         )
-        df_bookings = _remap_and_filter_bookings_to_loaded_customers(
+        df_bookings = _remap_bookings_to_new_customer_ids(
             df_accepted_bookings, new_customer_id_by_source_id,
         )
 

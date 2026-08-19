@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from blue_horizon.agents.orchestration import OrchestrationManager
+from blue_horizon.config import load_app_config
 from eval.langsmith_target._callback import EvalCaptureCallback
 from eval.langsmith_target._confirm import auto_confirm_pending_proposal
 from eval.langsmith_target._orchestration_utils import wait_for_orchestration_ready
@@ -28,30 +29,32 @@ _ORCHESTRATION: OrchestrationManager | None = None
 
 _ROUTE_KEY = "route"  # key from orchestration.py
 
-# Only the first 25 customers are seeded (see booking_pgsql.py::_CUSTOMER_COUNT).
-_SEEDED_CUSTOMER_COUNT = 25
-
 # Case tag that opts a case out of post-turn auto-confirmation, so a
 # `propose_*` call is left pending rather than always committed -- the only
 # way to represent abandonment or supersession without a browser.
 _NO_AUTO_CONFIRM_TAG = "no_auto_confirm"
 
 
-def _customer_id_for_case(case_id: str) -> int:
-    """Deterministically assign one of the 25 seeded guests to a case.
+def _customer_id_for_case(case_id: str, seeded_customer_count: int) -> int:
+    """Deterministically assign one of the seeded guests to a case.
 
     Deterministic (not random) so a re-run of the same case exercises the
     same guest, and stable across processes without any shared counter.
 
     Args:
         case_id: Dataset case identifier.
+        seeded_customer_count: Number of seeded guests to pick from. Should
+            be `AppConfig.load_data.booking_pgsql.seeded_customer_count`, the
+            same value `booking_pgsql.py` used to decide which customers got
+            the low `customer_id` block, so this never picks an id outside
+            the actually-seeded range.
 
     Returns:
-        int: A customer_id in `[1, _SEEDED_CUSTOMER_COUNT]`.
+        int: A customer_id in `[1, seeded_customer_count]`.
 
     """
     digest = hashlib.sha256(case_id.encode("utf-8")).hexdigest()
-    return (int(digest, 16) % _SEEDED_CUSTOMER_COUNT) + 1
+    return (int(digest, 16) % seeded_customer_count) + 1
 
 
 async def run_example(
@@ -61,7 +64,7 @@ async def run_example(
 ) -> dict[str, Any]:
     """Run a single LangSmith example through the orchestration pipeline.
 
-    Each case is deterministically assigned one of the 25 seeded guests (see
+    Each case is deterministically assigned one of the seeded guests (see
     `_customer_id_for_case`), and after every turn any proposal left pending
     is auto-confirmed -- the harness's stand-in for a human clicking Confirm
     -- unless the case carries the `"no_auto_confirm"` tag, which leaves a
@@ -88,7 +91,10 @@ async def run_example(
     orchestration_mgr = await ensure_orchestration_ready(cfg)
 
     thread_id = uuid4().hex
-    customer_id = _customer_id_for_case(case_id)
+    seeded_customer_count = (
+        load_app_config().load_data.booking_pgsql.seeded_customer_count
+    )
+    customer_id = _customer_id_for_case(case_id, seeded_customer_count)
 
     turn_outputs: list[dict[str, Any]] = []
 

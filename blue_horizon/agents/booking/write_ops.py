@@ -667,20 +667,32 @@ async def list_bookings(
     return summaries
 
 
-async def list_customers(pool: AsyncConnectionPool[Any]) -> list[CustomerSummary]:
-    """List every guest available for the identity dropdown.
+async def list_customers(
+    pool: AsyncConnectionPool[Any], *, seeded_customer_count: int,
+) -> list[CustomerSummary]:
+    """List the `seeded_customer_count` guests available for the identity dropdown.
+
+    `customers` holds every source customer (see
+    `blue_horizon.load_data.booking_pgsql.prepare_customers_dataframe`), not
+    just the dropdown identities, so this deliberately limits to the lowest
+    ids rather than selecting every row.
 
     Args:
         pool: Read-write booking database pool (`bh_agent_rw`).
+        seeded_customer_count: Number of lowest-id customers to return.
+            Should be `AppConfig.load_data.booking_pgsql.seeded_customer_count`
+            in every real call, so it stays in sync with how `customers` was
+            loaded (see that field's docstring).
 
     Returns:
-        list[CustomerSummary]: All seeded guests, ordered by id.
+        list[CustomerSummary]: The seeded dropdown guests, ordered by id.
 
     """
     async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         await cur.execute(
             "SELECT customer_id, first_name, last_name "
-            "FROM customers ORDER BY customer_id",
+            "FROM customers ORDER BY customer_id LIMIT %s",
+            (seeded_customer_count,),
         )
         rows = cast("list[dict[str, Any]]", await cur.fetchall())
     return [CustomerSummary(**row) for row in rows]

@@ -538,12 +538,14 @@ def _has_booking_cases(examples: Iterable[Example]) -> bool:
     return False
 
 
-async def _prepare_eval_database(cfg: EvalConfig) -> None:
-    """Redirect the DB URL to the eval database and reset the Neon branch.
+async def _reset_eval_database(cfg: EvalConfig) -> None:
+    """Reset the eval database's Neon branch to its parent baseline.
 
-    Applies any ``PGSQL_RW_EVAL_DB_URL`` override so the booking agent
-    connects to the eval database, then calls the Neon management API to
-    restore the configured branch to its parent baseline.
+    The ``PGSQL_RW_EVAL_DB_URL``/``PGSQL_RO_EVAL_DB_URL`` override is applied
+    separately, unconditionally, near the top of ``main()`` -- every
+    ``load_app_config()`` call needs it, not just booking-case runs, so it
+    can't wait until here (this function only runs when
+    ``_has_booking_cases()`` is true).
 
     Args:
         cfg: The loaded evaluation configuration.
@@ -552,7 +554,6 @@ async def _prepare_eval_database(cfg: EvalConfig) -> None:
         RuntimeError: If the Neon branch reset fails.
 
     """
-    _override_eval_db_url(cfg)
     logger.info(
         "Resetting Neon branch %r in project %r.",
         cfg.neon.branch_name,
@@ -981,6 +982,7 @@ async def main() -> None:
     """Run the LangSmith experiment and persist local artifacts."""
     args = _parse_args()
     cfg = load_eval_config(path=args.config)
+    _override_eval_db_url(cfg)
     app_cfg = load_app_config()
     started_at = datetime.now(UTC)
     dataset_name = cfg.experiment.dataset_name
@@ -1008,7 +1010,7 @@ async def main() -> None:
     examples = _load_dataset_examples(dataset_name, cfg.experiment.limit)
     examples = _filter_examples_by_case_id(examples, args.case_id)
     if _has_booking_cases(examples):
-        await _prepare_eval_database(cfg)
+        await _reset_eval_database(cfg)
 
     await _run_and_write_results(
         cfg, artifacts, examples, aevaluate_kwargs, started_at, local=args.no_upload,

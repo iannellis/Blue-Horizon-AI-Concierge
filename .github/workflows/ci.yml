@@ -266,12 +266,8 @@ jobs:
           git remote add space "https://user:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}"
           MAIN_SHA=$(git rev-parse --short HEAD)
           git checkout --orphan hf-deploy
-          # Exclude data/: it's LFS-tracked but never pulled above (only
-          # assets/ is), and the Dockerfile never COPYs it (see
-          # .dockerignore -- resets are done via Neon branches instead).
-          # Staging it here would make `git push` try to upload LFS
-          # objects that were never fetched locally, failing with
-          # "Git LFS upload failed: (missing) ...".
+          # Do not attempt to push data directory as it isn't pulled above
+          git rm -r --cached --ignore-unmatch -- data
           git add -A -- . ':!data'
           git commit -m "Deploy from main@${MAIN_SHA}"
           git push space hf-deploy:main --force

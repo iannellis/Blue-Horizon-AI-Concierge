@@ -217,6 +217,7 @@ class TestSummarizeResults:
             started_at=datetime(2026, 3, 1, tzinfo=UTC),
             finished_at=datetime(2026, 3, 1, 0, 5, tzinfo=UTC),
             upload_results=False,
+            metadata={"git_commit": "abc123"},
         )
 
         summary = _summarize_results(rows, context)
@@ -245,6 +246,7 @@ class TestSummarizeResults:
             expected_turn_rag_precision
         )
         assert "consumer_quality" not in turn_summary
+        assert summary["metadata"] == {"git_commit": "abc123"}
 
 
 class TestComputeLatencySummary:

@@ -385,6 +385,13 @@ class TestCommitBooking:
                 customer_id, _ = await _first_two_customer_ids(pool)
                 request, _ = await _find_available_block(pool, nights=1)
 
+                before = await write_ops.list_bookings(
+                    pool, customer_id=customer_id,
+                )
+                active_before = len(
+                    [b for b in before if b.status != "cancelled"],
+                )
+
                 first = await write_ops.commit_booking(
                     pool, customer_id=customer_id, rooms=[request],
                 )
@@ -397,8 +404,8 @@ class TestCommitBooking:
                         pool, customer_id=customer_id,
                     )
                     active = [b for b in bookings if b.status != "cancelled"]
-                    assert len(active) == 1
-                    assert active[0].booking_id == first.booking_id
+                    assert len(active) == active_before + 1
+                    assert any(b.booking_id == first.booking_id for b in active)
                 finally:
                     await write_ops.cancel_booking(
                         pool, customer_id=customer_id, booking_id=first.booking_id,

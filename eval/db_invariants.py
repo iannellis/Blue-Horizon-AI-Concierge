@@ -26,6 +26,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, NamedTuple
 
+from psycopg.rows import tuple_row
+
 if TYPE_CHECKING:
     import psycopg
 
@@ -60,23 +62,33 @@ async def find_overlapping_booking_rooms(
     Args:
         cur: An open async cursor. The caller is responsible for the
             connection's `search_path` already resolving `booking_rooms` to
-            the intended schema (e.g. via `SET search_path`).
+            the intended schema (e.g. via `SET search_path`). Its
+            `row_factory` is temporarily switched to `tuple_row` for this
+            query and restored before returning, so this works regardless of
+            what row shape the caller's cursor was opened with (e.g.
+            `dict_row`, used elsewhere in this codebase).
 
     Returns:
         One `BookingRoomOverlap` per violating pair. Empty when no two
         `booking_rooms` rows on the same room overlap.
 
     """
-    await cur.execute(
-        """
-        SELECT a.booking_room_id AS a_id, b.booking_room_id AS b_id, a.room_id
-        FROM booking_rooms a
-        JOIN booking_rooms b
-          ON a.room_id = b.room_id
-         AND a.booking_room_id < b.booking_room_id
-         AND a.check_in < b.check_out
-         AND b.check_in < a.check_out
-        """,
-    )
-    rows = await cur.fetchall()
+    original_row_factory = cur.row_factory
+    cur.row_factory = tuple_row
+    try:
+        await cur.execute(
+            """
+            SELECT a.booking_room_id AS a_id, b.booking_room_id AS b_id,
+                   a.room_id
+            FROM booking_rooms a
+            JOIN booking_rooms b
+              ON a.room_id = b.room_id
+             AND a.booking_room_id < b.booking_room_id
+             AND a.check_in < b.check_out
+             AND b.check_in < a.check_out
+            """,
+        )
+        rows = await cur.fetchall()
+    finally:
+        cur.row_factory = original_row_factory
     return [BookingRoomOverlap(*row) for row in rows]

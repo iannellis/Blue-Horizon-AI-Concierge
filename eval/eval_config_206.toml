@@ -80,7 +80,7 @@ llm_model = "gemini-3.5-flash-lite"
 llm_max_tokens = 2048
 # Gemini model used for Ragas embeddings.
 embedding_model = "gemini-embedding-2"
-# Replace the stock Ragas context-precision prompt with the hotel-tuned variant
+# Replace the stock Ragas context-precision prompt with one
 # that counts a chunk as useful when it answers any one clause of a multi-part
 # question (see eval/evaluators/_rag_prompts.py).
 custom_precision_prompt = true

@@ -270,11 +270,12 @@ class BookingSqlResources:
 
         Returns:
             Dict with keys:
-              - status: str ("ok" or "error")
-              - rows: list[dict[str, Any]]
-              - truncated: bool
-              - rowcount: int
-              - error: str (only present on failure)
+
+                - status: str ("ok" or "error")
+                - rows: list[dict[str, Any]]
+                - truncated: bool
+                - rowcount: int
+                - error: str (only present on failure)
 
         Raises:
             RuntimeError: If resources were not initialized.

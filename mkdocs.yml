@@ -1,0 +1,109 @@
+site_name: Blue Horizon AI Concierge
+site_description: >-
+  An AI hotel concierge built with LangGraph and FastAPI: RAG-based
+  information retrieval, natural-language-to-SQL room search, and a
+  human-in-the-loop booking flow the model can propose but never commit.
+site_url: https://iannellis.github.io/Blue-Horizon-AI-Concierge/
+repo_url: https://github.com/iannellis/Blue-Horizon-AI-Concierge
+repo_name: iannellis/Blue-Horizon-AI-Concierge
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - content.code.copy
+    - content.action.edit
+    - toc.follow
+    - search.suggest
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: blue
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: blue
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+# Fail the build on a broken cross-reference rather than shipping a dead link.
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [.]
+          options:
+            docstring_style: google
+            docstring_section_style: table
+            show_source: true
+            show_root_heading: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            separate_signature: true
+            signature_crossrefs: true
+            merge_init_into_class: true
+            filters: ["!^_"]
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+
+nav:
+  - Home: index.md
+  - Architecture:
+      - architecture/index.md
+      - Orchestration: architecture/orchestration.md
+      - Information Agent: architecture/information-agent.md
+      - Booking Agent: architecture/booking-agent.md
+  - Design Goals and Decisions: design-decisions.md
+  - Guides:
+      - Running Locally: guides/running-locally.md
+      - Configuration: guides/configuration.md
+      - Testing: guides/testing.md
+      - Deployment and CI: guides/deployment.md
+  - API Reference: api.md
+  - Evaluation:
+      - evaluation/index.md
+      - Harness: evaluation/harness.md
+      - Datasets and Baselines: evaluation/datasets.md
+      - Stress Test: evaluation/stress-test.md
+  - Code Reference:
+      - reference/index.md
+      - Orchestration: reference/orchestration.md
+      - Information Agent: reference/information.md
+      - Booking Agent: reference/booking.md
+      - API and Config: reference/api.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/iannellis/Blue-Horizon-AI-Concierge

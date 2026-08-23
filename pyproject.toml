@@ -58,6 +58,13 @@ lint = [
     "pyright>=1.1.411",
     "ruff (>=0.14.5,<1.0.0)",
 ]
+docs = [
+    "mkdocs (>=1.6.0,<2.0.0)",
+    "mkdocs-material (>=9.5.0,<10.0.0)",
+    # Pulls in griffe, which reads the source statically rather than importing
+    # it -- so a docs build needs no runtime dependencies and no credentials.
+    "mkdocstrings[python] (>=0.27.0,<1.0.0)",
+]
 
 [build-system]
 # needed for notebooks

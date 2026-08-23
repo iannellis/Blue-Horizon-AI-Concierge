@@ -1,0 +1,71 @@
+# Build and publish the MkDocs documentation site to GitHub Pages.
+#
+# The Pages source must be set to "GitHub Actions" in the repository settings
+# (Settings -> Pages -> Build and deployment -> Source), not to a branch.
+#
+# mkdocstrings reads the Python source statically via griffe rather than
+# importing it, so this workflow installs only the docs dependency group --
+# no runtime dependencies, no API keys, no database.
+
+name: Documentation
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "blue_horizon/**"
+      - ".github/workflows/docs.yml"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let an in-progress deploy finish rather than cancelling it, so Pages is
+# never left mid-publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # mkdocs-material's git-based features and the edit_uri links read
+          # history; a shallow clone is enough for the current setup.
+          fetch-depth: 0
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install docs dependencies
+        run: pip install mkdocs mkdocs-material "mkdocstrings[python]"
+
+      - name: Build
+        run: mkdocs build --strict
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site/
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

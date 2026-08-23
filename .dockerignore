@@ -31,3 +31,6 @@ data/
 CLAUDE.md
 AGENTS.md
 todo.txt
+docs/
+site/
+mkdocs.yml

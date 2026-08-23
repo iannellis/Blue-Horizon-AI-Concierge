@@ -15,7 +15,7 @@
 #      against the pinned baseline. Reuses the same Development branch and
 #      resets it again first, since eval cases assume a clean baseline.
 #   5. If blue_horizon/, deploy/, assets/, ui/, Dockerfile, pyproject.toml,
-#      or poetry.lock changed, and unit tests, the DB-integration tests, and
+#      or uv.lock changed, and unit tests, the DB-integration tests, and
 #      the eval each either passed or were skipped: push the repo to the
 #      HuggingFace Docker Space so HF rebuilds the container automatically.
 #
@@ -66,7 +66,7 @@ on:
       - "tests/**"
       - "Dockerfile"
       - "pyproject.toml"
-      - "poetry.lock"
+      - "uv.lock"
 
 jobs:
   changes:
@@ -89,7 +89,7 @@ jobs:
               - 'ui/**'
               - 'tests/**'
               - 'pyproject.toml'
-              - 'poetry.lock'
+              - 'uv.lock'
             eval:
               - 'eval/**'
               - 'blue_horizon/**'
@@ -100,7 +100,7 @@ jobs:
               - 'ui/**'
               - 'Dockerfile'
               - 'pyproject.toml'
-              - 'poetry.lock'
+              - 'uv.lock'
 
   unit-tests:
     name: Unit tests

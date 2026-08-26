@@ -208,6 +208,7 @@ __marimo__/
 
 # Claude
 .claude/
+CLAUDE.local.md
 
 # MkDocs build output
 /site/

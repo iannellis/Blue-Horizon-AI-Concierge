@@ -116,7 +116,8 @@ CUSTOMERS_COLUMNS: Sequence[str] = [
 # There is no email/notification functionality in this project, so the
 # remaining source columns customers.pkl has (email, phone, address, ...)
 # are never loaded, for any customer. How many customers get the dense low
-# `customer_id` block reserved for the UI dropdown / eval-harness identities
+# `customer_id` block reserved for the UI's automated guest assignment /
+# eval-harness identities
 # is not hard-coded here -- see `AppConfig.load_data.booking_pgsql.
 # seeded_customer_count`'s docstring, and `prepare_customers_dataframe`
 # below, for why it must stay a single, shared value rather than a constant
@@ -468,7 +469,7 @@ def prepare_customers_dataframe(
     ``[1, seeded_customer_count]`` (assigned in ascending source-id order),
     and loaded first, because `eval/stress/workload.py` and
     `eval/langsmith_target/target.py` both pick a simulated guest identity by
-    assuming exactly that contiguous range, and the UI's dropdown identity
+    assuming exactly that contiguous range, and the UI's automated identity
     picker (`write_ops.list_customers`) should offer guests with real
     booking history to demo against. Every other customer is appended after
     them, remapped to a unique id starting at ``seeded_customer_count + 1``
@@ -1142,7 +1143,7 @@ def reload_sql_tables() -> None:
     `prepare_customers_dataframe`), with the
     `AppConfig.load_data.booking_pgsql.seeded_customer_count` richest by
     accepted pre-existing booking history remapped to a dense low id range
-    and loaded first, so the UI's dropdown identity picker and the
+    and loaded first, so the UI's automated identity picker and the
     eval/stress harnesses' simulated-guest selection keep working unchanged;
     `bookings` and `booking_rooms` get pre-existing
     reservations for every loaded customer (see `prepare_accepted_bookings`),

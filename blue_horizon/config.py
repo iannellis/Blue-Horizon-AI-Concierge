@@ -322,7 +322,7 @@ class LoadDataBookingConfig(BaseModel):
             `blue_horizon.load_data.booking_pgsql.prepare_customers_dataframe`).
             Every other source customer is still loaded, just with a higher
             id. This is the single source of truth for that count: the UI's
-            dropdown identity picker
+            automated identity picker
             (`blue_horizon.agents.booking.write_ops.list_customers`) and the
             `eval`/stress harnesses' simulated-guest selection both assume
             this exact range, so it must never drift out of sync between

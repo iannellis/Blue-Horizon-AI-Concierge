@@ -148,7 +148,7 @@ async def health() -> JSONResponse:
 
 @router.get("/customers")
 async def list_customers() -> list[dict[str, Any]]:
-    """List every guest available for the UI's identity dropdown.
+    """List every guest available for the UI's automated guest assignment.
 
     Returns:
         list[dict[str, Any]]: One `{customer_id, first_name, last_name}` per
@@ -183,9 +183,10 @@ async def list_bookings(customer_id: int) -> dict[str, Any]:
         dict[str, Any]: `{"bookings": [...]}`, most recent first.
 
     Note:
-        Unauthenticated: any `customer_id` 1-25 can be queried. Acceptable
-        for a demo where guests are a dropdown rather than real accounts,
-        but real accounts would need this gated.
+        Unauthenticated: any seeded `customer_id` (currently 1-15, see
+        `seeded_customer_count`) can be queried. Acceptable for a demo where
+        guests are assigned automatically rather than real accounts, but
+        real accounts would need this gated.
 
     """
     resources = orchestrator.get_booking_resources()

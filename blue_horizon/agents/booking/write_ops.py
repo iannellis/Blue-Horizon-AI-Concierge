@@ -206,7 +206,7 @@ class RoomStaySummary:
 
 @dataclass(frozen=True, slots=True)
 class CustomerSummary:
-    """One guest available for the identity dropdown.
+    """One guest available for automated assignment.
 
     Attributes:
         customer_id: Guest's primary key.
@@ -670,12 +670,12 @@ async def list_bookings(
 async def list_customers(
     pool: AsyncConnectionPool[Any], *, seeded_customer_count: int,
 ) -> list[CustomerSummary]:
-    """List the `seeded_customer_count` guests available for the identity dropdown.
+    """List the `seeded_customer_count` guests available for automated assignment.
 
     `customers` holds every source customer (see
     `blue_horizon.load_data.booking_pgsql.prepare_customers_dataframe`), not
-    just the dropdown identities, so this deliberately limits to the lowest
-    ids rather than selecting every row.
+    just the assignable identities, so this deliberately limits to the
+    lowest ids rather than selecting every row.
 
     Args:
         pool: Read-write booking database pool (`bh_agent_rw`).
@@ -685,7 +685,8 @@ async def list_customers(
             loaded (see that field's docstring).
 
     Returns:
-        list[CustomerSummary]: The seeded dropdown guests, ordered by id.
+        list[CustomerSummary]: The seeded guests available for assignment,
+            ordered by id.
 
     """
     async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:

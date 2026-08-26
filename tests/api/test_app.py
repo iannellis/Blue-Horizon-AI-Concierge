@@ -193,7 +193,7 @@ async def _find_available_room_request() -> write_ops.RoomRequest:
 
 
 class TestCustomers:
-    """`GET /v1/customers` -- backs the UI's identity dropdown."""
+    """`GET /v1/customers` -- backs the UI's automated guest assignment."""
 
     def test_returns_seeded_guests(self, client: TestClient) -> None:
         """The endpoint returns a non-empty list of guest summaries."""

@@ -116,7 +116,7 @@ def _check_health() -> bool:
 
 @st.cache_data(ttl=300)
 def _fetch_customers_uncached() -> list[dict[str, Any]]:
-    """Fetch the guest list for the identity dropdown.
+    """Fetch the guest list backing automated guest assignment.
 
     Cached for five minutes: the seeded customer list never changes between
     a demo database reload. Streamlit only caches on a successful return, so

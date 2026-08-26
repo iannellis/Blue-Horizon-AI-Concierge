@@ -927,13 +927,13 @@ class TestCommitBookingConstraintTranslation:
 
 
 class TestListCustomers:
-    """`list_customers` -- the read path the UI's identity dropdown relies on."""
+    """`list_customers` -- the read path the UI's guest assignment relies on."""
 
     def test_result_is_capped_at_seeded_customer_count(self, rw_db_url: str) -> None:
-        """`customers` may hold far more rows than the dropdown should offer.
+        """`customers` may hold far more rows than automated assignment should offer.
 
         `booking_pgsql.reload_sql_tables` loads every source customer, not
-        just the dropdown identities, so this asserts `list_customers` caps
+        just the assignable identities, so this asserts `list_customers` caps
         its result at the `seeded_customer_count` it is given, rather than
         trusting the table to already be small.
         """

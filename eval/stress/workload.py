@@ -59,8 +59,8 @@ async def _run_workload(
     semaphore = asyncio.Semaphore(cfg.max_concurrency)
     # Simulated users beyond this count wrap around and share a guest
     # identity with an earlier user -- acceptable here, since contention
-    # across users is the point of a stress run and the UI's own dropdown
-    # offers the same seeded guests.
+    # across users is the point of a stress run and the UI's own automated
+    # assignment offers the same seeded guests.
     seeded_customer_count = (
         load_app_config().load_data.booking_pgsql.seeded_customer_count
     )

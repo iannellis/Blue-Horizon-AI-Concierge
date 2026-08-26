@@ -229,10 +229,10 @@ its foreign key and was silently dropped: 14,535 of 14,617 accepted bookings nev
 it into the database. `room_availability` was left marked `Booked` across large ranges
 with no matching reservation anywhere.
 
-The load now inserts every source customer. The richest 25 still get a dense
-`customer_id` block of `[1, 25]` and are loaded first, so the UI picker and the eval
-harnesses' guest selection keep working unchanged; everyone else follows with arbitrary
-higher ids.
+The load now inserts every source customer. The richest `seeded_customer_count`
+still get a dense `customer_id` block of `[1, seeded_customer_count]` and are loaded
+first, so the UI picker and the eval harnesses' guest selection keep working unchanged;
+everyone else follows with arbitrary higher ids.
 
 That count had been duplicated as a hardcoded constant in four separate files with no
 mechanism keeping them in sync. It is now

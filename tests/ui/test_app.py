@@ -6,9 +6,13 @@ its `proposal` and `error` events), SSE line parsing, HTTP error translation,
 and the proposal-summary renderers that back the confirmation dialog.
 
 Not covered here: `st.dialog`-decorated flows, session-state-driven widgets
-(`_render_customer_picker`, `_render_reservations`, `_render_chat`), and
-button click handling -- these need a full Streamlit AppTest harness to
-exercise meaningfully, which is out of scope for this module.
+(`_render_customer_picker`, `_render_reservations`, `_render_chat`,
+`_render_guest_assignment` itself), and button click handling -- these need
+a full Streamlit AppTest harness to exercise meaningfully, which is out of
+scope for this module. The guest claim registry it calls into
+(`_try_claim_guest`, `_touch_claim`, `_release_claim`) is plain module
+state guarded by a lock, with no widget dependency, so it is covered here
+directly.
 
 The entire module is skipped if streamlit is not installed in the current
 environment (it lives in the optional ``ui`` dependency group).
@@ -16,6 +20,7 @@ environment (it lives in the optional ``ui`` dependency group).
 
 # ruff: noqa: S101
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -24,14 +29,22 @@ import pytest
 streamlit = pytest.importorskip("streamlit", reason="streamlit not installed")
 
 from ui.app import (  # noqa: E402
+    _GUEST_CLAIM_TTL_S,
     _check_health,
+    _guest_claims,
+    _GuestClaim,
     _handle_stream_event,
     _http_error_message,
+    _int_or_none,
     _parse_sse_line,
+    _persist_guest_identity,
+    _release_claim,
     _render_book_summary,
     _render_cancel_summary,
     _render_modify_summary,
     _stream_message,
+    _touch_claim,
+    _try_claim_guest,
 )
 
 # ---------------------------------------------------------------------------
@@ -518,3 +531,115 @@ class TestSummaryRenderers:
         assert "101" in written
         assert "202" in written
         assert "400.00" in mock_st.markdown.call_args[0][0]
+
+
+# ---------------------------------------------------------------------------
+# _int_or_none
+# ---------------------------------------------------------------------------
+
+
+class TestIntOrNone:
+    """_int_or_none parses a query-param string, tolerating garbage."""
+
+    def test_parses_valid_int(self) -> None:
+        """A numeric string parses to its int value."""
+        assert _int_or_none("7") == 7  # noqa: PLR2004
+
+    def test_none_input_returns_none(self) -> None:
+        """A missing query param (None) returns None."""
+        assert _int_or_none(None) is None
+
+    def test_non_numeric_string_returns_none(self) -> None:
+        """A malformed value (e.g. a hand-edited URL) returns None, not a raise."""
+        assert _int_or_none("not-a-number") is None
+
+
+# ---------------------------------------------------------------------------
+# Guest claim registry
+# ---------------------------------------------------------------------------
+
+
+class TestGuestClaimRegistry:
+    """_try_claim_guest / _touch_claim / _release_claim keep guests exclusive."""
+
+    def setup_method(self) -> None:
+        """Start each test with an empty claim registry."""
+        _guest_claims.clear()
+
+    def teardown_method(self) -> None:
+        """Leave no claims behind for the next test."""
+        _guest_claims.clear()
+
+    def test_claims_an_available_guest(self) -> None:
+        """An unclaimed candidate is assigned to the requesting session."""
+        customer_id = _try_claim_guest("session-a", [1, 2, 3])
+        assert customer_id in {1, 2, 3}
+        assert _guest_claims[customer_id].session_id == "session-a"
+
+    def test_returns_none_when_all_claimed(self) -> None:
+        """No candidate is left unclaimed → None, not a collision."""
+        _try_claim_guest("session-a", [1])
+        assert _try_claim_guest("session-b", [1]) is None
+
+    def test_expired_claim_is_swept_and_reclaimable(self) -> None:
+        """A claim idle past the TTL is dropped and its guest reassignable."""
+        _guest_claims[1] = _GuestClaim(
+            session_id="session-a",
+            last_seen=datetime.now(UTC) - timedelta(seconds=_GUEST_CLAIM_TTL_S + 1),
+        )
+        customer_id = _try_claim_guest("session-b", [1])
+        assert customer_id == 1
+        assert _guest_claims[1].session_id == "session-b"
+
+    def test_touch_refreshes_own_claim(self) -> None:
+        """Touching a claim this session holds refreshes it and returns its id."""
+        _try_claim_guest("session-a", [1])
+        before = _guest_claims[1].last_seen
+        result = _touch_claim(1, "session-a")
+        assert result == 1
+        assert _guest_claims[1].last_seen >= before
+
+    def test_touch_recreates_missing_claim(self) -> None:
+        """A claim missing entirely (e.g. after a process restart) is recreated."""
+        result = _touch_claim(1, "session-a")
+        assert result == 1
+        assert _guest_claims[1].session_id == "session-a"
+
+    def test_touch_refuses_to_steal_another_sessions_claim(self) -> None:
+        """A claim now held by a different session is left alone, not stolen.
+
+        This is what makes it safe to restore `customer_id` from the URL
+        after a refresh: if the guest was reassigned while this session was
+        away, touching it must not silently take it back.
+        """
+        _try_claim_guest("session-a", [1])
+        result = _touch_claim(1, "session-b")
+        assert result is None
+        assert _guest_claims[1].session_id == "session-a"
+
+    def test_release_drops_the_claim(self) -> None:
+        """Releasing a held claim removes it from the registry."""
+        _try_claim_guest("session-a", [1])
+        _release_claim(1)
+        assert 1 not in _guest_claims
+
+    def test_release_none_is_a_no_op(self) -> None:
+        """Releasing `None` (no claim ever held) does not raise."""
+        _release_claim(None)
+
+
+# ---------------------------------------------------------------------------
+# _persist_guest_identity
+# ---------------------------------------------------------------------------
+
+
+class TestPersistGuestIdentity:
+    """_persist_guest_identity writes sid/cid into the URL query params."""
+
+    def test_writes_session_and_customer_ids(self) -> None:
+        """Both ids land in `st.query_params`, customer_id as a string."""
+        with patch("ui.app.st") as mock_st:
+            mock_st.session_state.session_id = "session-a"
+            _persist_guest_identity(7)
+        mock_st.query_params.__setitem__.assert_any_call("sid", "session-a")
+        mock_st.query_params.__setitem__.assert_any_call("cid", "7")

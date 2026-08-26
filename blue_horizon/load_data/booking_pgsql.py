@@ -461,9 +461,8 @@ def prepare_customers_dataframe(
     Every customer in `customers.pkl` is loaded, not just
     `seeded_customer_count` of them: most accepted pre-existing bookings
     belong to a customer outside any small subset (see
-    `_select_richest_customer_ids`), so loading only a subset leaves the bulk
-    of `room_availability` marked `Booked` with no matching `booking_rooms`
-    reservation once `reconcile_room_availability_status` runs. The
+    `_select_richest_customer_ids`), so loading only a subset leaves too many
+    rooms marked `Available` once `reconcile_room_availability_status` runs. The
     `seeded_customer_count` customers with the richest booking history are
     still singled out, remapped to a dense id range
     ``[1, seeded_customer_count]`` (assigned in ascending source-id order),

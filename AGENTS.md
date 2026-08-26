@@ -142,7 +142,7 @@ Dependency groups are `ui`, `eval`, `notebook`, `lint`, and `docs`.
 
 ```bash
 ruff check --select ALL --no-cache <file>
-python -m pyright --pythonpath <project interpreter> <file>
+python -m pyright --pythonpath <python executable> <file>
 
 pytest -m "not db_integration"   # unit tests, no external services
 pytest -m db_integration         # needs a real Postgres

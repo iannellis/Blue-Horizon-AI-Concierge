@@ -65,7 +65,7 @@ Per the project conventions, after any Python change:
 
 ```bash
 ruff check --select ALL --no-cache <file>
-python -m pyright --pythonpath D:/uv_envs/blue_horizon_3.13/Scripts/python.exe <file>
+python -m pyright --pythonpath <python executable> <file>
 ```
 
 `--pythonpath` must be passed explicitly. Without it, `python -m pyright` resolves

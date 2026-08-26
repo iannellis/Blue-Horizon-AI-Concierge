@@ -78,8 +78,6 @@ def _init_session_state() -> None:
         st.session_state.customer_id = None
     if "messages" not in st.session_state:
         st.session_state.messages = []
-    if "pending_toast" not in st.session_state:
-        st.session_state.pending_toast = None
     if "pending_proposal" not in st.session_state:
         st.session_state.pending_proposal = None
 
@@ -114,26 +112,6 @@ def _check_health() -> bool:
         return response.status_code == _HTTP_OK  # noqa: TRY300
     except Exception:  # noqa: BLE001
         return False
-
-
-def _call_reset() -> str | None:
-    """Call the reset endpoint to restore the working database branch.
-
-    Returns:
-        ``None`` on success, or a user-facing error string on failure.
-
-    """
-    try:
-        response = httpx.post(f"{_API_BASE}/v1/reset", timeout=_CHAT_TIMEOUT_S)
-        response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code == _HTTP_SERVICE_UNAVAILABLE:
-            return "Reset is not configured on this deployment."
-        return f"Reset failed ({exc.response.status_code}). Please try again."
-    except Exception as exc:  # noqa: BLE001
-        return f"Could not reach the API: {exc}"
-    else:
-        return None
 
 
 @st.cache_data(ttl=300)
@@ -450,14 +428,17 @@ def _render_reservations() -> None:
 
     Built strictly from `GET /v1/bookings`, never from chat text -- the same
     rule the confirmation dialog follows, and for the same reason: a receipt
-    the guest cannot go back and check is barely a receipt.
+    the guest cannot go back and check is barely a receipt. Cancelled
+    bookings are left out; a guest can still ask the chat about those.
     """
     st.subheader("Your reservations")
     customer_id = st.session_state.customer_id
     if customer_id is None:
         return
 
-    bookings = _fetch_bookings(customer_id)
+    bookings = [
+        b for b in _fetch_bookings(customer_id) if b["status"] != "cancelled"
+    ]
     if not bookings:
         st.caption("No reservations yet.")
         return
@@ -513,16 +494,6 @@ def _render_sidebar() -> None:
         if st.button("New Conversation", use_container_width=True):
             _reset_session()
             st.rerun()
-
-        if st.button("Reset demo database", use_container_width=True):
-            with st.spinner("Resetting…"):
-                error = _call_reset()
-            if error:
-                st.error(error)
-            else:
-                _reset_session()
-                st.session_state.pending_toast = "Demo database reset."
-                st.rerun()
 
 
 def _md(text: str) -> None:
@@ -809,9 +780,6 @@ def main() -> None:
         st.stop()
 
     _init_session_state()
-    if msg := st.session_state.pending_toast:
-        st.toast(msg)
-        st.session_state.pending_toast = None
     _render_sidebar()
     _render_chat()
 

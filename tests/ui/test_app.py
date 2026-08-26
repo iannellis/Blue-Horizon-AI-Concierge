@@ -1,7 +1,7 @@
 """Tests for the Streamlit UI helper functions.
 
 Covers the pure/semi-pure functions in ui/app.py that do not require a live
-Streamlit runtime: health/reset polling, the unified chat stream (including
+Streamlit runtime: health polling, the unified chat stream (including
 its `proposal` and `error` events), SSE line parsing, HTTP error translation,
 and the proposal-summary renderers that back the confirmation dialog.
 
@@ -24,7 +24,6 @@ import pytest
 streamlit = pytest.importorskip("streamlit", reason="streamlit not installed")
 
 from ui.app import (  # noqa: E402
-    _call_reset,
     _check_health,
     _handle_stream_event,
     _http_error_message,
@@ -79,62 +78,6 @@ class TestCheckHealth:
             side_effect=httpx.TimeoutException("timeout"),
         ):
             assert _check_health() is False
-
-
-# ---------------------------------------------------------------------------
-# _call_reset
-# ---------------------------------------------------------------------------
-
-
-class TestCallReset:
-    """_call_reset posts to /v1/reset and returns None on success or an error string."""
-
-    def test_returns_none_on_200(self) -> None:
-        """HTTP 200 response → None (success)."""
-        mock_response = MagicMock()
-        mock_response.raise_for_status.return_value = None
-        with patch("ui.app.httpx.post", return_value=mock_response):
-            assert _call_reset() is None
-
-    def test_returns_error_on_503(self) -> None:
-        """HTTP 503 → user-facing 'not configured' message."""
-        mock_response = MagicMock()
-        mock_response.status_code = 503
-        error = httpx.HTTPStatusError(
-            "Service Unavailable",
-            request=MagicMock(),
-            response=mock_response,
-        )
-        mock_response.raise_for_status.side_effect = error
-        with patch("ui.app.httpx.post", return_value=mock_response):
-            result = _call_reset()
-        assert result is not None
-        assert "not configured" in result.lower()
-
-    def test_returns_error_on_500(self) -> None:
-        """Non-503 HTTP errors → error string containing the status code."""
-        mock_response = MagicMock()
-        mock_response.status_code = 500
-        error = httpx.HTTPStatusError(
-            "Internal Server Error",
-            request=MagicMock(),
-            response=mock_response,
-        )
-        mock_response.raise_for_status.side_effect = error
-        with patch("ui.app.httpx.post", return_value=mock_response):
-            result = _call_reset()
-        assert result is not None
-        assert "500" in result
-
-    def test_returns_error_on_connection_error(self) -> None:
-        """Network errors → error string mentioning the API."""
-        with patch(
-            "ui.app.httpx.post",
-            side_effect=httpx.ConnectError("connection refused"),
-        ):
-            result = _call_reset()
-        assert result is not None
-        assert "api" in result.lower() or "reach" in result.lower()
 
 
 # ---------------------------------------------------------------------------

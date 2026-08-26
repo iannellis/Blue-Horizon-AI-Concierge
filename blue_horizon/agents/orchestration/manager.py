@@ -207,18 +207,6 @@ class OrchestrationManager:
             {"messages": [AIMessage(content=[{"type": "text", "text": text}])]},
         )
 
-    def clear_conversation_state(self) -> None:
-        """Clear all in-process conversation state after a database reset.
-
-        Clears the thread/customer registry in addition to delegating to
-        `OrchestrationResources.clear_conversation_state()` (proposals and
-        checkpointer). See that method's docstring for why this is not the
-        same thing as the failed-init retry loop's `reset_runtime_state()`.
-
-        """
-        self._thread_customers.clear()
-        self._resources.clear_conversation_state()
-
     async def ainvoke(  # noqa: PLR0913
         self,
         *,

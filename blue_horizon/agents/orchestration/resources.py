@@ -8,11 +8,7 @@ from typing import TYPE_CHECKING, cast
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
 
-from blue_horizon.agents.booking import (
-    BookingAgentFactory,
-    BookingSqlResources,
-    ProposalStore,
-)
+from blue_horizon.agents.booking import BookingAgentFactory, BookingSqlResources
 from blue_horizon.agents.exceptions import OperationalError
 from blue_horizon.agents.information import InfoAgentFactory, InfoRagResources
 from blue_horizon.agents.orchestration.models import RouteDecision
@@ -212,37 +208,6 @@ class OrchestrationResources:
         self._system_prompt = None
         self._info_agent = None
         self._booking_agent = None
-
-    def clear_conversation_state(self) -> None:
-        """Clear all in-process conversation state after a database reset.
-
-        A ``POST /v1/reset`` restores the Neon branch, which invalidates every
-        `booking_id` and confirmation number the process is still holding.
-        This must be called alongside that restore -- it is *not* the same
-        thing as `reset_runtime_state()`, which only exists for the manager's
-        failed-initialization retry loop and never touches conversation data.
-
-        Clears:
-            - The `ProposalStore`, so no pending proposal can commit against
-              rooms that no longer exist.
-            - The `MemorySaver` checkpointer, so no thread can keep referring
-              to bookings -- or app-authored confirmation numbers -- that the
-              reset just wiped out.
-
-        Note:
-            The checkpointer instance is cleared in place (its internal
-            dicts, not the object itself) because `OrchestrationAgentFactory
-            .build()` bakes the `MemorySaver` instance into the compiled
-            graph at compile time -- replacing `self._checkpointer` here
-            would leave the already-compiled graph holding the stale one.
-
-        """
-        self._booking_resources.proposals = ProposalStore(
-            ttl_s=self._booking_config.proposals.ttl_s,
-        )
-        self._checkpointer.storage.clear()
-        self._checkpointer.writes.clear()
-        self._checkpointer.blobs.clear()
 
     def get_config(self) -> OrchestrationConfig:
         """Return the loaded orchestration configuration.

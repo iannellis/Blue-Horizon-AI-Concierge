@@ -208,7 +208,9 @@ __marimo__/
 
 # Claude
 .claude/
-CLAUDE.local.md
+
+# Machine-specific agent instructions (see AGENTS.md)
+AGENTS.local.md
 
 # MkDocs build output
 /site/

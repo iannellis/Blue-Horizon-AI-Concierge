@@ -1,8 +1,15 @@
+**Before running any command that needs the Python environment, read `AGENTS.local.md`
+at the repo root if it is present.** It holds this machine's interpreter path, which is
+deliberately not recorded in a tracked file. It is untracked, so it is absent in a fresh
+clone, and its absence is not an error. Claude Code loads it automatically through
+`CLAUDE.md`; other assistants should open it explicitly, since neither Codex nor most
+other tools support imports.
+
 ## Code conventions
 
 * All Python code should be well-structured, modular, follow PEP8, and have meaningful names.
 * For library modules, code should be written following the Clean Code guidelines. That is, if function A calls B then C, but B calls D, the they should be layed out in the order A,B,D,C. Same goes for methods inside classes. Pure dataclasses, classes inheriting from Protocol, and classes inheriting from the Pydantic BaseModel, can go near the top of the file. Do as you wish for scripts.
-* After completing each of the user's requests that involves a Python code change, using the project's Python environment (its path is machine-specific; see `CLAUDE.local.md`), run `ruff --select ALL --no-cache` on each Python file edited. Fix all listed problems. Then run pyright on each Python file edited. Fix all listed problems.
+* After completing each of the user's requests that involves a Python code change, using the project's Python environment (its path is machine-specific; see `AGENTS.local.md`), run `ruff --select ALL --no-cache` on each Python file edited. Fix all listed problems. Then run pyright on each Python file edited. Fix all listed problems.
 * Each Python function, method, class, and the module should have a complete Google docstring including descriptions of inputs, output, and any exceptions raised.
 * When writing free-form text (readme, documentation, or comments), do NOT use em-dashes.
 
@@ -129,7 +136,7 @@ split.
 ## Environment and tooling
 
 The project targets Python 3.13 in a uv-managed environment. That environment's path is
-machine-specific and is therefore not recorded here: it lives in `CLAUDE.local.md`,
+machine-specific and is therefore not recorded here: it lives in `AGENTS.local.md`,
 which is untracked. In a fresh clone, create one before running the commands below.
 Dependency groups are `ui`, `eval`, `notebook`, `lint`, and `docs`.
 

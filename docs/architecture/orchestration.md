@@ -68,10 +68,6 @@ state. A `thread_id` is additionally bound to whichever `customer_id` first used
 the API rejects a later request that replays the same `thread_id` under a different
 guest with `409 Conflict`.
 
-`POST /v1/reset` clears the checkpointer along with the proposal store and the
-thread-to-customer registry, because resetting the Neon branch invalidates every
-`booking_id` and confirmation number the process is still holding in memory.
-
 ## Streaming
 
 The manager translates LangGraph's internal event stream into the coarse, user-facing

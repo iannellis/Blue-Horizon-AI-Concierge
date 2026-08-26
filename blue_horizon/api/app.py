@@ -1,4 +1,4 @@
-"""FastAPI application exposing chat, booking, health, and reset endpoints.
+"""FastAPI application exposing chat, booking, and health endpoints.
 
 ``POST /v1/chat`` is a single, content-negotiated endpoint: an ``Accept:
 text/event-stream`` request streams stage/proposal/done events over SSE,
@@ -6,8 +6,7 @@ anything else gets one JSON response. ``POST /v1/booking/confirm`` and
 ``POST /v1/booking/dismiss`` are the only callers of the booking write
 functions -- the model can only *propose*, never commit. ``GET /v1/customers``
 and ``GET /v1/bookings`` back the UI's identity picker and reservations
-panel. ``POST /v1/reset`` resets the working Neon database branch and clears
-all in-process conversation state that would otherwise outlive it.
+panel.
 """
 
 from __future__ import annotations
@@ -33,7 +32,6 @@ from blue_horizon.agents.booking.receipts import receipt_message, serialize_writ
 from blue_horizon.agents.exceptions import ThreadCustomerMismatchError
 from blue_horizon.agents.orchestration import OrchestrationManager, format_chat_response
 from blue_horizon.config import load_app_config
-from blue_horizon.neon import reset_branch
 
 load_dotenv()
 
@@ -185,9 +183,9 @@ async def list_bookings(customer_id: int) -> dict[str, Any]:
         dict[str, Any]: `{"bookings": [...]}`, most recent first.
 
     Note:
-        Unauthenticated, like `/v1/reset`: any `customer_id` 1-25 can be
-        queried. Acceptable for a demo where guests are a dropdown rather
-        than real accounts, but real accounts would need this gated.
+        Unauthenticated: any `customer_id` 1-25 can be queried. Acceptable
+        for a demo where guests are a dropdown rather than real accounts,
+        but real accounts would need this gated.
 
     """
     resources = orchestrator.get_booking_resources()
@@ -371,36 +369,6 @@ async def dismiss_booking(payload: ProposalActionPayload) -> dict[str, Any]:
         thread_id=proposal.thread_id, text="No changes were made.",
     )
     return {"status": "dismissed"}
-
-
-@router.post("/reset")
-async def reset() -> JSONResponse:
-    """Reset the working Neon branch to its parent baseline.
-
-    Restores the configured Neon branch (typically ``"Working"``) to the
-    state of its parent branch, clearing all user-created bookings, then
-    clears every piece of in-process conversation state that would
-    otherwise keep referring to reservations the reset just wiped out: the
-    proposal store, the thread/customer registry, and the LangGraph
-    checkpointer.
-
-    Returns:
-        JSONResponse with ``{"status": "ok"}`` on success.
-
-    Raises:
-        HTTPException: 503 if Neon credentials are not configured; 500 if
-            the Neon API call fails.
-
-    """
-    cfg = load_app_config()
-    if not cfg.neon_api_key or not cfg.neon.project_id:
-        raise HTTPException(status_code=503, detail="Reset not configured.")
-    try:
-        await reset_branch(cfg.neon, api_key=cfg.neon_api_key)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    orchestrator.clear_conversation_state()
-    return JSONResponse({"status": "ok"})
 
 
 app.include_router(router)

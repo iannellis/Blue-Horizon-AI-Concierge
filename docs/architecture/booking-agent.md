@@ -123,7 +123,7 @@ already-claimed guest would defeat the point of exclusive assignment. See
 [Design Goals and Decisions](../design-decisions.md#guest-identity-is-a-claim-registry-not-a-dropdown).
 
 !!! warning "Demo-grade authorization"
-    `GET /v1/bookings` and `POST /v1/reset` are unauthenticated, consistent with the
-    rest of this demo's guest model. That is acceptable here because guests are
-    assigned rather than real accounts, but it is worth stating plainly rather than
-    leaving a reader to discover it.
+    `GET /v1/bookings` is unauthenticated, consistent with the rest of this demo's
+    guest model. That is acceptable here because guests are assigned rather than
+    real accounts, but it is worth stating plainly rather than leaving a reader to
+    discover it.

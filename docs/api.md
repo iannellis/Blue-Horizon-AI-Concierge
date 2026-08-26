@@ -11,7 +11,6 @@ The FastAPI backend runs on port `8000` and exposes the following endpoints unde
 | `POST` | `/v1/chat` | Send a message. Content-negotiated: `Accept: text/event-stream` streams SSE events, anything else returns one JSON response |
 | `POST` | `/v1/booking/confirm` | Commit a pending proposal. The only path that ever writes a booking, cancellation, or modification |
 | `POST` | `/v1/booking/dismiss` | Discard a pending proposal without writing anything |
-| `POST` | `/v1/reset` | Reset the working Neon database branch to its parent baseline; also clears the proposal store, the thread-to-customer registry, and the conversation checkpointer |
 
 `/v1/chat/stream` from earlier versions has been retired in favor of content negotiation
 on `/v1/chat`.

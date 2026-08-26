@@ -12,7 +12,7 @@ The file is structured into sections that map to the Pydantic models in
 | `[booking]` | Booking agent LLM, SQL guardrails, DB pool settings |
 | `[booking.proposals]` | `ttl_s`, how long an unconfirmed proposal stays in the in-process store before it is purged |
 | `[load_data]` | Paths to the source data pickles, and `seeded_customer_count` |
-| `[neon]` | Neon project ID and branch name for the `/v1/reset` endpoint |
+| `[neon]` | Neon project ID and branch name, required by `AppConfig` |
 
 ## Notable settings
 
@@ -75,7 +75,7 @@ covers both processes when running locally.
 | Variable | Description |
 |----------|-------------|
 | `PGSQL_ROOT_PARENT_DB_URL` | Schema-owner URL for the **Parent** branch specifically. Used only by the data-loading tooling; not read by the API or UI at runtime. Required to load data, not to start the app afterward. |
-| `NEON_API_KEY` | Neon management API key. Enables the `/v1/reset` endpoint; omit to disable |
+| `NEON_API_KEY` | Neon management API key. Read into `AppConfig` but currently unused by the app itself |
 | `LANGSMITH_API_KEY` | LangSmith API key, enabling tracing |
 | `LANGSMITH_TRACING` | Set to `true` to activate tracing (requires `LANGSMITH_API_KEY`) |
 | `LANGCHAIN_PROJECT` | LangSmith project name to log traces under |

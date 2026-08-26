@@ -141,4 +141,4 @@ for the environment variables and the role grant step.
 
 ## License
 
-[MIT](LICENSE)
+[BSD 3-Clause](LICENSE)

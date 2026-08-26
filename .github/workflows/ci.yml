@@ -59,6 +59,7 @@ on:
       - main
     paths:
       - "eval/**"
+      - "!eval/README.md"
       - "blue_horizon/**"
       - "deploy/**"
       - "assets/**"

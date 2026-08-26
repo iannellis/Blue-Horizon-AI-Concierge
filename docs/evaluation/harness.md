@@ -57,6 +57,26 @@ eval/
 
 ## Prerequisites
 
+!!! warning "Evaluation assumes a Neon-hosted PostgreSQL database"
+    This is a harder requirement than the application itself has. The app runs against
+    any PostgreSQL instance, but the eval and stress harnesses reset a database branch
+    to its parent baseline **before every run**, so that each run starts from identical
+    inventory and results are comparable across runs. That reset goes through the Neon
+    management API, driven by `eval/booking_db_manager.py` and the `[neon]` section of
+    the eval config, which names the project id and the branch to restore.
+
+    Consequences of pointing the harness at a plain PostgreSQL server:
+
+    - `NEON_API_KEY` has nothing to authenticate against and the reset step fails.
+    - Even with the reset stubbed out, results drift between runs, because bookings
+      committed by one run remain and change what the next run can book.
+
+    Running elsewhere means replacing `booking_db_manager.reset_branch` with an
+    equivalent restore-to-baseline step, not merely skipping it. Note also that the
+    branch named in the config is reset *in place*, which is why
+    `PGSQL_ROOT_PARENT_DB_URL` is a separate variable that must never point at it. See
+    [Configuration](../guides/configuration.md#the-three-root-urls).
+
 | Variable | Required | Description |
 |---|---|---|
 | `LANGSMITH_API_KEY` | Yes | LangSmith API key |

@@ -4,6 +4,28 @@ End-to-end evaluation suite for the Blue Horizon AI Concierge agent. Covers mult
 conversation quality, routing accuracy, injection resistance, database integrity, RAG
 retrieval quality, and concurrency stress testing.
 
+## Requirements
+
+These harnesses assume a **Neon-hosted PostgreSQL database**, which is a stricter
+requirement than the application itself has. The app runs against any PostgreSQL
+instance; the eval and stress runs additionally reset a Neon branch to its parent
+baseline before every run, via the Neon management API, so each run starts from
+identical room inventory and results stay comparable. That step needs `NEON_API_KEY`
+and the `[neon]` section of the eval config (project id and branch name), and it is
+driven by `booking_db_manager.py`.
+
+Pointing these harnesses at a plain PostgreSQL server does not work by simply omitting
+the key: without a restore-to-baseline step, bookings committed by one run persist and
+change what the next run can book, so scores drift for reasons unrelated to the agent.
+Running elsewhere means replacing `booking_db_manager.reset_branch` with an equivalent
+baseline restore.
+
+Also required: LangSmith (datasets and tracing), an OpenAI key for the agents and
+embeddings, a Gemini key for the judge and Ragas metrics, and Redis. Full table in the
+[harness prerequisites](https://iannellis.github.io/Blue-Horizon-AI-Concierge/evaluation/harness/#prerequisites).
+
+## Documentation
+
 **The documentation for this directory now lives in the project documentation site:**
 
 - [Evaluation results](https://iannellis.github.io/Blue-Horizon-AI-Concierge/evaluation/)

@@ -38,7 +38,7 @@ This requires `PGSQL_ROOT_PARENT_DB_URL` and runs against the **Parent** branch 
 Besides `rooms` and `room_availability`, this seeds `customers`, `bookings`, and
 `booking_rooms`.
 
-`customers` gets **every** source customer, not just the `seeded_customer_count` (25 by
+`customers` gets **every** source customer, not just the `seeded_customer_count` (15 by
 default) that the UI offers, because most pre-existing bookings belong to a customer
 outside any small subset. Loading only a subset leaves most of `room_availability`
 marked `Booked` with no matching reservation. See

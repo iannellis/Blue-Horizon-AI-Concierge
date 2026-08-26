@@ -32,7 +32,7 @@ fetches use a 20-second timeout rather than the health check's 3 seconds.
 proposal reserves no inventory, so expiry costs a guest nothing beyond having to ask
 again.
 
-**`[load_data.booking_pgsql].seeded_customer_count`** (default 25) sets how many source
+**`[load_data.booking_pgsql].seeded_customer_count`** (default 15) sets how many source
 customers get the dense low `customer_id` block that the UI's guest assignment and the
 eval and stress harnesses assume. It is the single source of truth that both
 `booking_pgsql.py` and `write_ops.list_customers` read, so the two cannot drift apart.

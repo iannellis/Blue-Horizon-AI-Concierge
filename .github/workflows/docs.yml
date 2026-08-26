@@ -36,25 +36,27 @@ jobs:
     name: Build site
     runs-on: ubuntu-latest
     steps:
+      # Default shallow clone is fine: no git-history-dependent plugins are
+      # enabled (edit_uri only builds URLs, it does not read history).
       - uses: actions/checkout@v5
-        with:
-          # mkdocs-material's git-based features and the edit_uri links read
-          # history; a shallow clone is enough for the current setup.
-          fetch-depth: 0
 
       - name: Set up Python 3.13
         uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
+      # Upper bounds mirror pyproject.toml's docs group. MkDocs 2.0 removes the
+      # plugin system outright, which would break mkdocstrings and the Material
+      # theme with no migration path, so an unpinned install here is a build
+      # that breaks on release day with no change on our side.
       - name: Install docs dependencies
-        run: pip install mkdocs mkdocs-material "mkdocstrings[python]"
+        run: pip install "mkdocs<2" "mkdocs-material<10" "mkdocstrings[python]<1"
 
       - name: Build
         run: mkdocs build --strict
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v4
+        uses: actions/upload-pages-artifact@v5
         with:
           path: site/
 
@@ -68,4 +70,4 @@ jobs:
     steps:
       - name: Deploy
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

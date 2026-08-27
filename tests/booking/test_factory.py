@@ -1,17 +1,18 @@
-"""Tests for `BookingAgentFactory.build()`.
+"""Tests for `build_booking_agent()`.
 
-These tests are deliberately DB-independent: `build()` never touches either
-connection pool, it only decorates and schema-builds the `@tool` closures and
-compiles the LangGraph agent around them. That schema-building step is where
-two real bugs lived undetected until manual verification caught them --
-`RunnableConfig` imported only under `TYPE_CHECKING` (raises `NameError` the
-first time a tool with a `config: RunnableConfig` parameter is built) and a
-missing `Args:` entry in a Google-style docstring (raises `ValueError: Found
-invalid Google-Style docstring.`) -- so simply calling `build()` without it
-raising is itself the regression test for both. The additional assertions
-below pin down exactly what a correct build looks like, so a future variant
-of either bug (e.g. on a newly added tool) fails loudly instead of silently
-shipping a broken tool schema.
+These tests are deliberately DB-independent: `build_booking_agent()` never
+touches either connection pool, it only decorates and schema-builds the
+`@tool` closures and compiles the LangGraph agent around them. That
+schema-building step is where two real bugs lived undetected until manual
+verification caught them -- `RunnableConfig` imported only under
+`TYPE_CHECKING` (raises `NameError` the first time a tool with a `config:
+RunnableConfig` parameter is built) and a missing `Args:` entry in a
+Google-style docstring (raises `ValueError: Found invalid Google-Style
+docstring.`) -- so simply calling `build_booking_agent()` without it raising
+is itself the regression test for both. The additional assertions below pin
+down exactly what a correct build looks like, so a future variant of either
+bug (e.g. on a newly added tool) fails loudly instead of silently shipping a
+broken tool schema.
 """
 # ruff: noqa: S101
 
@@ -22,7 +23,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 from langgraph.prebuilt import ToolNode
 
-from blue_horizon.agents.booking.factory import BookingAgentFactory
+from blue_horizon.agents.booking.factory import build_booking_agent
 from blue_horizon.config import BookingSqlConfig
 
 if TYPE_CHECKING:
@@ -71,8 +72,8 @@ _BOOKING_CONFIG_DICT: dict[str, Any] = {
 class _StubBookingSqlResources:
     """Stand-in for `BookingSqlResources` that never opens a DB connection.
 
-    `build()` only calls `get_system_prompt()` directly; every other
-    resource (`execute_sql`, `write_pool`, `proposals`) is captured by
+    `build_booking_agent()` only calls `get_system_prompt()` directly; every
+    other resource (`execute_sql`, `write_pool`, `proposals`) is captured by
     closures that run inside a tool body, never during the build itself, so
     this stub does not need to implement them for these tests.
 
@@ -123,21 +124,21 @@ def _build_graph(booking_config: BookingSqlConfig) -> CompiledStateGraph:
         The compiled LangGraph agent.
 
     """
-    # _StubBookingSqlResources implements only what build() actually calls
-    # (see its docstring); the cast documents that the substitution is safe
-    # despite not structurally matching the real BookingSqlResources.
-    factory = BookingAgentFactory(
+    # _StubBookingSqlResources implements only what build_booking_agent()
+    # actually calls (see its docstring); the cast documents that the
+    # substitution is safe despite not structurally matching the real
+    # BookingSqlResources.
+    return build_booking_agent(
         config=booking_config,
         resources=cast("BookingSqlResources", _StubBookingSqlResources()),
     )
-    return factory.build()
 
 
 def _tools_by_name(graph: CompiledStateGraph) -> dict[str, Any]:
     """Extract the built `@tool` objects, keyed by name, from a compiled graph.
 
     Args:
-        graph: A graph produced by `BookingAgentFactory.build()`.
+        graph: A graph produced by `build_booking_agent()`.
 
     Returns:
         Mapping of tool name to the LangChain tool object.

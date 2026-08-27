@@ -8,6 +8,27 @@ from typing import Final
 DEFAULT_PACKAGE: Final[str] = "blue_horizon"
 
 
+def prompt_resource_path(folder: str, filename: str) -> str:
+    """Join a prompts folder and filename into a packaged-resource path.
+
+    Every agent resource class resolves its prompt path this same way, and
+    `eval/run_experiment.py` mirrors it independently to fingerprint the
+    prompt text the agent actually reads -- both must join identically or a
+    fingerprint could silently point at the wrong file.
+
+    Args:
+        folder: Prompts folder from config, possibly empty or slash-wrapped.
+        filename: Prompt file name within that folder.
+
+    Returns:
+        str: ``f"{folder}/{filename}"`` with a stripped folder, or bare
+        `filename` if the folder is empty.
+
+    """
+    folder = folder.strip("/")
+    return f"{folder}/{filename}" if folder else filename
+
+
 def load_prompt_template(
     relative_path: str,
     *,

@@ -22,7 +22,7 @@ from langsmith import Client
 from langsmith import env as ls_env
 from langsmith.evaluation import aevaluate
 
-from blue_horizon.agents.prompt_utils import load_packaged_text
+from blue_horizon.agents.prompt_utils import load_packaged_text, prompt_resource_path
 from blue_horizon.config import app_config_source_text, load_app_config
 from eval._result_utils import (
     _build_error_summary,
@@ -367,7 +367,7 @@ def _prompt_fingerprint_metadata(app_cfg: AppConfig) -> dict[str, object]:
     return {
         "router_prompt_sha256": _hash_text(
             load_packaged_text(
-                _prompt_resource_path(
+                prompt_resource_path(
                     orchestration_prompts.folder,
                     orchestration_prompts.orchestration_prompt_filename,
                 ),
@@ -375,7 +375,7 @@ def _prompt_fingerprint_metadata(app_cfg: AppConfig) -> dict[str, object]:
         ),
         "info_system_prompt_sha256": _hash_text(
             load_packaged_text(
-                _prompt_resource_path(
+                prompt_resource_path(
                     info_prompts.folder,
                     info_prompts.system_prompt_filename,
                 ),
@@ -383,7 +383,7 @@ def _prompt_fingerprint_metadata(app_cfg: AppConfig) -> dict[str, object]:
         ),
         "info_parser_prompt_sha256": _hash_text(
             load_packaged_text(
-                _prompt_resource_path(
+                prompt_resource_path(
                     info_prompts.folder,
                     info_prompts.parser_prompt_filename,
                 ),
@@ -391,33 +391,13 @@ def _prompt_fingerprint_metadata(app_cfg: AppConfig) -> dict[str, object]:
         ),
         "booking_prompt_sha256": _hash_text(
             load_packaged_text(
-                _prompt_resource_path(
+                prompt_resource_path(
                     booking_prompts.folder,
                     booking_prompts.system_prompt_filename,
                 ),
             ),
         ),
     }
-
-
-def _prompt_resource_path(folder: str, filename: str) -> str:
-    """Build a packaged-resource path for a prompt file.
-
-    Mirrors the folder/filename join each agent's resource loader performs
-    internally, so the hashed text matches what the agent actually reads.
-
-    Args:
-        folder: Prompt folder relative to the ``blue_horizon`` package root.
-        filename: Prompt filename within that folder.
-
-    Returns:
-        The resource path, or bare ``filename`` when ``folder`` is empty.
-
-    """
-    stripped_folder = folder.strip("/")
-    if stripped_folder:
-        return f"{stripped_folder}/{filename}"
-    return filename
 
 
 def _hash_text(text: str) -> str:

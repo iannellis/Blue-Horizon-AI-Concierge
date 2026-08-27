@@ -48,10 +48,10 @@ def _make_manager(
     manager._llm_semaphore = asyncio.Semaphore(1)  # noqa: SLF001
     manager._thread_customers = {}  # noqa: SLF001
     mock_resources = MagicMock()
-    mock_resources.get_config.return_value.messages.unavailable = unavailable
+    mock_resources.config.messages.unavailable = unavailable
     # No proposal pending by default, so stage tests don't see a spurious
     # "proposal" event mixed into their stage/done assertions.
-    booking_resources = mock_resources.get_booking_resources.return_value
+    booking_resources = mock_resources.booking_resources
     booking_resources.proposals.get_pending_for_thread.return_value = None
     manager._resources = mock_resources  # noqa: SLF001
     return manager

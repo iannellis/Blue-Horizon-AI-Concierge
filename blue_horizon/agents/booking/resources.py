@@ -29,6 +29,7 @@ from tenacity import (
     wait_exponential,
 )
 
+from blue_horizon.agents._lifecycle import require
 from blue_horizon.agents.booking.config import render_system_prompt
 from blue_horizon.agents.booking.db_utils import (
     _is_transient_conn_error,
@@ -39,7 +40,7 @@ from blue_horizon.agents.booking.db_utils import (
 from blue_horizon.agents.booking.guardrails import validate_sql
 from blue_horizon.agents.booking.proposals import ProposalStore
 from blue_horizon.agents.exceptions import OperationalError
-from blue_horizon.agents.prompt_utils import load_prompt_template
+from blue_horizon.agents.prompt_utils import load_prompt_template, prompt_resource_path
 
 if TYPE_CHECKING:
     from blue_horizon.config import BookingSqlConfig
@@ -89,17 +90,6 @@ class BookingSqlResources:
 
     """
 
-    __slots__ = (
-        "_system_prompt_resource",
-        "config",
-        "pgsql_ro_db_url",
-        "pgsql_rw_db_url",
-        "pool",
-        "proposals",
-        "system_prompt",
-        "write_pool",
-    )
-
     config: BookingSqlConfig
     pgsql_ro_db_url: str
     pgsql_rw_db_url: str
@@ -143,13 +133,9 @@ class BookingSqlResources:
         self.proposals = ProposalStore(ttl_s=config.proposals.ttl_s)
         self.system_prompt = None
 
-        prompts_folder = self.config.prompts.folder.strip("/")
-        if prompts_folder:
-            self._system_prompt_resource = (
-                f"{prompts_folder}/{self.config.prompts.system_prompt_filename}"
-            )
-        else:
-            self._system_prompt_resource = self.config.prompts.system_prompt_filename
+        self._system_prompt_resource = prompt_resource_path(
+            self.config.prompts.folder, self.config.prompts.system_prompt_filename,
+        )
 
     async def startup_check(self) -> None:
         """Initialize resources and validate readiness.
@@ -187,12 +173,7 @@ class BookingSqlResources:
                 ``startup_check()`` has not been called or failed.
 
         """
-        if self.system_prompt is None:
-            msg = (
-                "BookingSqlResources not initialized; call await startup_check() first"
-            )
-            raise RuntimeError(msg)
-        return self.system_prompt
+        return require(self.system_prompt, "BookingSqlResources")
 
     def get_read_pool(self) -> AsyncConnectionPool[Any]:
         """Get the read-only connection pool, narrowed to non-optional.
@@ -211,12 +192,7 @@ class BookingSqlResources:
             RuntimeError: If `startup_check()` has not been called or failed.
 
         """
-        if self.pool is None:
-            msg = (
-                "BookingSqlResources not initialized; call await startup_check() first"
-            )
-            raise RuntimeError(msg)
-        return self.pool
+        return require(self.pool, "BookingSqlResources")
 
     def get_write_pool(self) -> AsyncConnectionPool[Any]:
         """Get the read-write connection pool, narrowed to non-optional.
@@ -235,12 +211,7 @@ class BookingSqlResources:
             RuntimeError: If `startup_check()` has not been called or failed.
 
         """
-        if self.write_pool is None:
-            msg = (
-                "BookingSqlResources not initialized; call await startup_check() first"
-            )
-            raise RuntimeError(msg)
-        return self.write_pool
+        return require(self.write_pool, "BookingSqlResources")
 
     async def aclose(self) -> None:
         """Close resources owned by this instance.
@@ -281,11 +252,7 @@ class BookingSqlResources:
             RuntimeError: If resources were not initialized.
 
         """
-        if self.pool is None:
-            msg = (
-                "BookingSqlResources not initialized; call await startup_check() first"
-            )
-            raise RuntimeError(msg)
+        require(self.pool, "BookingSqlResources")
 
         try:
             validate_sql(

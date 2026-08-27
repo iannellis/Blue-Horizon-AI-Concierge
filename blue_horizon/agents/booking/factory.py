@@ -24,9 +24,9 @@ from langchain.agents import create_agent
 # parameter is built.
 from langchain_core.runnables import RunnableConfig  # noqa: TC002
 from langchain_core.tools import tool
-from langchain_openai import ChatOpenAI
 from psycopg.rows import dict_row
 
+from blue_horizon.agents._llm import build_chat_model
 from blue_horizon.agents.booking import write_ops
 
 if TYPE_CHECKING:
@@ -113,255 +113,226 @@ def _identity_from_config(config: RunnableConfig) -> tuple[int, str]:
     return customer_id, thread_id
 
 
-class BookingAgentFactory:
-    """Build the booking agent using initialized resources.
+def build_booking_agent(
+    *,
+    config: BookingSqlConfig,
+    resources: BookingSqlResources,
+) -> CompiledStateGraph:
+    """Build and return a compiled booking agent.
 
-    Attributes:
-        config: Parsed configuration.
+    Args:
+        config: Parsed configuration loaded from TOML.
         resources: Initialized resources instance.
 
+    Returns:
+        Compiled LangGraph agent.
+
+    Raises:
+        RuntimeError: If resources were not initialized.
+
     """
+    system_prompt = resources.get_system_prompt()
+    llm = build_chat_model(config.llm)
 
-    __slots__ = ("config", "resources")
-
-    config: BookingSqlConfig
-    resources: BookingSqlResources
-
-    def __init__(
-        self,
-        *,
-        config: BookingSqlConfig,
-        resources: BookingSqlResources,
-    ) -> None:
-        """Construct the booking agent factory.
+    @tool(parse_docstring=True)
+    async def run_sql(query: str) -> dict[str, Any]:
+        """Execute a single read-only SQL statement and return rows.
 
         Args:
-            config: Parsed configuration loaded from TOML.
-            resources: Initialized resources instance.
-
-        """
-        self.config = config
-        self.resources = resources
-
-    def build(self) -> CompiledStateGraph:
-        """Build and return a compiled booking agent.
+            query: One SELECT statement (no semicolons).
 
         Returns:
-            Compiled LangGraph agent.
-
-        Raises:
-            RuntimeError: If resources were not initialized.
+            Dict with keys:
+              - status: str ("ok" or "error")
+              - rows: list[dict[str, Any]]
+              - truncated: bool
+              - rowcount: int
+              - error: str (only present on failure)
 
         """
-        system_prompt = self.resources.get_system_prompt()
-        resources = self.resources
+        return await resources.execute_sql(query)
 
-        llm = ChatOpenAI(
-            model=self.config.llm.model,
-            reasoning={"effort": self.config.llm.reasoning_effort},
-            timeout=self.config.llm.timeout_s,
-            max_retries=self.config.llm.max_retries,
+    @tool(parse_docstring=True)
+    async def list_my_bookings(config: RunnableConfig) -> dict[str, Any]:
+        """List the current guest's bookings, including cancelled ones.
+
+        Use this to find `booking_id` and `booking_room_id` values before
+        proposing a cancellation or modification.
+
+        Args:
+            config: Server-injected identity, hidden from the model.
+
+        Returns:
+            Dict with key `bookings`: a list of booking summaries, each
+            with `booking_id`, `status`, `confirmation_number`, `rooms`
+            (each with `booking_room_id`, `room_number`, `check_in`,
+            `check_out`, `total_amount`), and `total_amount`.
+
+        """
+        customer_id, _ = _identity_from_config(config)
+        bookings = await write_ops.list_bookings(
+            resources.get_write_pool(), customer_id=customer_id,
         )
+        return {"bookings": [write_ops.serialize_booking(b) for b in bookings]}
 
-        @tool(parse_docstring=True)
-        async def run_sql(query: str) -> dict[str, Any]:
-            """Execute a single read-only SQL statement and return rows.
+    @tool(parse_docstring=True)
+    async def propose_booking(
+        rooms: list[BookingRoomRequest],
+        config: RunnableConfig,
+    ) -> dict[str, Any]:
+        """Price a booking and store it for the guest to review and confirm.
 
-            Args:
-                query: One SELECT statement (no semicolons).
+        This does not book anything. The application shows the guest a
+        confirmation dialog built from the prices this call computes; the
+        booking only happens if they click Confirm.
 
-            Returns:
-                Dict with keys:
-                  - status: str ("ok" or "error")
-                  - rows: list[dict[str, Any]]
-                  - truncated: bool
-                  - rowcount: int
-                  - error: str (only present on failure)
+        Args:
+            rooms: Rooms and date ranges to book.
+            config: Server-injected identity, hidden from the model.
 
-            """
-            return await resources.execute_sql(query)
+        Returns:
+            Dict with `proposal_id` on success, or `status: "error"` and
+            `error` if any requested night is unavailable.
 
-        @tool(parse_docstring=True)
-        async def list_my_bookings(config: RunnableConfig) -> dict[str, Any]:
-            """List the current guest's bookings, including cancelled ones.
-
-            Use this to find `booking_id` and `booking_room_id` values before
-            proposing a cancellation or modification.
-
-            Args:
-                config: Server-injected identity, hidden from the model.
-
-            Returns:
-                Dict with key `bookings`: a list of booking summaries, each
-                with `booking_id`, `status`, `confirmation_number`, `rooms`
-                (each with `booking_room_id`, `room_number`, `check_in`,
-                `check_out`, `total_amount`), and `total_amount`.
-
-            """
-            customer_id, _ = _identity_from_config(config)
-            bookings = await write_ops.list_bookings(
-                resources.get_write_pool(), customer_id=customer_id,
+        """
+        customer_id, thread_id = _identity_from_config(config)
+        try:
+            requests = [
+                write_ops.RoomRequest(
+                    room_id=await _room_id_for_number(
+                        resources.get_write_pool(), r["room_number"],
+                    ),
+                    room_number=r["room_number"],
+                    check_in=dt.date.fromisoformat(r["check_in"]),
+                    check_out=dt.date.fromisoformat(r["check_out"]),
+                )
+                for r in rooms
+            ]
+            priced = await write_ops.price_rooms(
+                resources.get_write_pool(), requests,
             )
-            return {"bookings": [write_ops.serialize_booking(b) for b in bookings]}
+        except write_ops.BookingWriteError as exc:
+            return {"status": "error", "error": str(exc)}
 
-        @tool(parse_docstring=True)
-        async def propose_booking(
-            rooms: list[BookingRoomRequest],
-            config: RunnableConfig,
-        ) -> dict[str, Any]:
-            """Price a booking and store it for the guest to review and confirm.
-
-            This does not book anything. The application shows the guest a
-            confirmation dialog built from the prices this call computes; the
-            booking only happens if they click Confirm.
-
-            Args:
-                rooms: Rooms and date ranges to book.
-                config: Server-injected identity, hidden from the model.
-
-            Returns:
-                Dict with `proposal_id` on success, or `status: "error"` and
-                `error` if any requested night is unavailable.
-
-            """
-            customer_id, thread_id = _identity_from_config(config)
-            try:
-                requests = [
-                    write_ops.RoomRequest(
-                        room_id=await _room_id_for_number(
-                            resources.get_write_pool(), r["room_number"],
-                        ),
-                        room_number=r["room_number"],
-                        check_in=dt.date.fromisoformat(r["check_in"]),
-                        check_out=dt.date.fromisoformat(r["check_out"]),
-                    )
-                    for r in rooms
-                ]
-                priced = await write_ops.price_rooms(
-                    resources.get_write_pool(), requests,
-                )
-            except write_ops.BookingWriteError as exc:
-                return {"status": "error", "error": str(exc)}
-
-            total = sum((stay.total_amount for stay in priced), Decimal("0.00"))
-            summary = {
-                "rooms": [write_ops.serialize_priced_stay(stay) for stay in priced],
-                "total": write_ops.fmt_money(total),
-            }
-            proposal = resources.proposals.create(
-                thread_id=thread_id,
-                customer_id=customer_id,
-                action="book",
-                summary=summary,
-                details=requests,
-            )
-            return {"proposal_id": proposal.proposal_id, "status": "proposed"}
-
-        @tool(parse_docstring=True)
-        async def propose_cancellation(
-            booking_id: int,
-            config: RunnableConfig,
-            rooms: list[CancelRoomRequest] | None = None,
-        ) -> dict[str, Any]:
-            """Price a cancellation (or partial trim) and store it for review.
-
-            This does not cancel anything. A stay can be cancelled outright
-            (omit `rooms`) or shortened from either end. A gap in the middle
-            of a stay is not supported.
-
-            Args:
-                booking_id: Booking to cancel or shrink, from
-                    `list_my_bookings`.
-                config: Server-injected identity, hidden from the model.
-                rooms: Per-room-stay trim instructions. Omit to cancel every
-                    room-stay on the booking outright.
-
-            Returns:
-                Dict with `proposal_id` on success, or `status: "error"` and
-                `error` if the booking is not found or a trim is invalid.
-
-            """
-            customer_id, thread_id = _identity_from_config(config)
-            try:
-                booking = await _find_owned_booking(
-                    resources.get_write_pool(),
-                    customer_id=customer_id,
-                    booking_id=booking_id,
-                )
-                instructions, summary_rooms, total = await _price_cancellation(
-                    resources.get_write_pool(), booking=booking, rooms=rooms,
-                )
-            except write_ops.BookingWriteError as exc:
-                return {"status": "error", "error": str(exc)}
-
-            summary = {"rooms": summary_rooms, "total": write_ops.fmt_money(total)}
-            proposal = resources.proposals.create(
-                thread_id=thread_id,
-                customer_id=customer_id,
-                action="cancel",
-                summary=summary,
-                details=(booking_id, instructions),
-            )
-            return {"proposal_id": proposal.proposal_id, "status": "proposed"}
-
-        @tool(parse_docstring=True)
-        async def propose_modification(
-            booking_id: int,
-            changes: list[ModifyRoomRequest],
-            config: RunnableConfig,
-        ) -> dict[str, Any]:
-            """Price a room/date change and store it for the guest to review.
-
-            This does not change anything. Each room-stay is released and
-            reacquired together: nothing changes unless every replacement is
-            available.
-
-            Args:
-                booking_id: Booking to modify, from `list_my_bookings`.
-                changes: Replacement room and date range for each room-stay
-                    being changed.
-                config: Server-injected identity, hidden from the model.
-
-            Returns:
-                Dict with `proposal_id` on success, or `status: "error"` and
-                `error` if the booking is not found or a replacement is
-                unavailable.
-
-            """
-            customer_id, thread_id = _identity_from_config(config)
-            try:
-                booking = await _find_owned_booking(
-                    resources.get_write_pool(),
-                    customer_id=customer_id,
-                    booking_id=booking_id,
-                )
-                instructions, summary_changes, total = await _price_modification(
-                    resources.get_write_pool(), booking=booking, changes=changes,
-                )
-            except write_ops.BookingWriteError as exc:
-                return {"status": "error", "error": str(exc)}
-
-            summary = {"changes": summary_changes, "total": write_ops.fmt_money(total)}
-            proposal = resources.proposals.create(
-                thread_id=thread_id,
-                customer_id=customer_id,
-                action="modify",
-                summary=summary,
-                details=(booking_id, instructions),
-            )
-            return {"proposal_id": proposal.proposal_id, "status": "proposed"}
-
-        return create_agent(
-            model=llm,
-            tools=[
-                run_sql,
-                list_my_bookings,
-                propose_booking,
-                propose_cancellation,
-                propose_modification,
-            ],
-            system_prompt=system_prompt,
+        total = sum((stay.total_amount for stay in priced), Decimal("0.00"))
+        summary = {
+            "rooms": [write_ops.serialize_priced_stay(stay) for stay in priced],
+            "total": write_ops.fmt_money(total),
+        }
+        proposal = resources.proposals.create(
+            thread_id=thread_id,
+            customer_id=customer_id,
+            action="book",
+            summary=summary,
+            details=requests,
         )
+        return {"proposal_id": proposal.proposal_id, "status": "proposed"}
+
+    @tool(parse_docstring=True)
+    async def propose_cancellation(
+        booking_id: int,
+        config: RunnableConfig,
+        rooms: list[CancelRoomRequest] | None = None,
+    ) -> dict[str, Any]:
+        """Price a cancellation (or partial trim) and store it for review.
+
+        This does not cancel anything. A stay can be cancelled outright
+        (omit `rooms`) or shortened from either end. A gap in the middle
+        of a stay is not supported.
+
+        Args:
+            booking_id: Booking to cancel or shrink, from
+                `list_my_bookings`.
+            config: Server-injected identity, hidden from the model.
+            rooms: Per-room-stay trim instructions. Omit to cancel every
+                room-stay on the booking outright.
+
+        Returns:
+            Dict with `proposal_id` on success, or `status: "error"` and
+            `error` if the booking is not found or a trim is invalid.
+
+        """
+        customer_id, thread_id = _identity_from_config(config)
+        try:
+            booking = await _find_owned_booking(
+                resources.get_write_pool(),
+                customer_id=customer_id,
+                booking_id=booking_id,
+            )
+            instructions, summary_rooms, total = await _price_cancellation(
+                resources.get_write_pool(), booking=booking, rooms=rooms,
+            )
+        except write_ops.BookingWriteError as exc:
+            return {"status": "error", "error": str(exc)}
+
+        summary = {"rooms": summary_rooms, "total": write_ops.fmt_money(total)}
+        proposal = resources.proposals.create(
+            thread_id=thread_id,
+            customer_id=customer_id,
+            action="cancel",
+            summary=summary,
+            details=(booking_id, instructions),
+        )
+        return {"proposal_id": proposal.proposal_id, "status": "proposed"}
+
+    @tool(parse_docstring=True)
+    async def propose_modification(
+        booking_id: int,
+        changes: list[ModifyRoomRequest],
+        config: RunnableConfig,
+    ) -> dict[str, Any]:
+        """Price a room/date change and store it for the guest to review.
+
+        This does not change anything. Each room-stay is released and
+        reacquired together: nothing changes unless every replacement is
+        available.
+
+        Args:
+            booking_id: Booking to modify, from `list_my_bookings`.
+            changes: Replacement room and date range for each room-stay
+                being changed.
+            config: Server-injected identity, hidden from the model.
+
+        Returns:
+            Dict with `proposal_id` on success, or `status: "error"` and
+            `error` if the booking is not found or a replacement is
+            unavailable.
+
+        """
+        customer_id, thread_id = _identity_from_config(config)
+        try:
+            booking = await _find_owned_booking(
+                resources.get_write_pool(),
+                customer_id=customer_id,
+                booking_id=booking_id,
+            )
+            instructions, summary_changes, total = await _price_modification(
+                resources.get_write_pool(), booking=booking, changes=changes,
+            )
+        except write_ops.BookingWriteError as exc:
+            return {"status": "error", "error": str(exc)}
+
+        summary = {"changes": summary_changes, "total": write_ops.fmt_money(total)}
+        proposal = resources.proposals.create(
+            thread_id=thread_id,
+            customer_id=customer_id,
+            action="modify",
+            summary=summary,
+            details=(booking_id, instructions),
+        )
+        return {"proposal_id": proposal.proposal_id, "status": "proposed"}
+
+    return create_agent(
+        model=llm,
+        tools=[
+            run_sql,
+            list_my_bookings,
+            propose_booking,
+            propose_cancellation,
+            propose_modification,
+        ],
+        system_prompt=system_prompt,
+    )
 
 
 async def _room_id_for_number(pool: Any, room_number: int) -> int:  # noqa: ANN401

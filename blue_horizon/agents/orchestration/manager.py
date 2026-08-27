@@ -20,7 +20,7 @@ from tenacity import (
 )
 
 from blue_horizon.agents.exceptions import OperationalError, ThreadCustomerMismatchError
-from blue_horizon.agents.orchestration.factory import OrchestrationAgentFactory
+from blue_horizon.agents.orchestration.factory import build_orchestration_agent
 from blue_horizon.agents.orchestration.formatting import format_chat_response
 from blue_horizon.agents.orchestration.resources import OrchestrationResources
 
@@ -68,7 +68,6 @@ class OrchestrationManager:
 
     __slots__ = (
         "_agent",
-        "_factory",
         "_init_task",
         "_llm_semaphore",
         "_lock",
@@ -78,7 +77,6 @@ class OrchestrationManager:
     )
 
     _resources: OrchestrationResources
-    _factory: OrchestrationAgentFactory
     _agent: CompiledStateGraph | None
     _init_task: asyncio.Task[None] | None
     _llm_semaphore: asyncio.Semaphore
@@ -112,9 +110,8 @@ class OrchestrationManager:
             pgsql_rw_db_url=pgsql_rw_db_url,
             pgsql_ro_db_url=pgsql_ro_db_url,
         )
-        self._factory = OrchestrationAgentFactory(resources=self._resources)
 
-        llm_concurrency = self._resources.get_config().orchestration.llm_concurrency
+        llm_concurrency = self._resources.config.orchestration.llm_concurrency
         self._llm_semaphore = asyncio.Semaphore(llm_concurrency)
         self._agent = None
         self._init_task = None
@@ -186,7 +183,7 @@ class OrchestrationManager:
             BookingSqlResources: Shared proposal store and write pool.
 
         """
-        return self._resources.get_booking_resources()
+        return self._resources.booking_resources
 
     async def append_assistant_message(self, *, thread_id: str, text: str) -> None:
         """Append an app-authored assistant message to a thread's history.
@@ -379,7 +376,7 @@ class OrchestrationManager:
             User-facing message to return when the system is not initialized.
 
         """
-        return self._resources.get_config().messages.unavailable
+        return self._resources.config.messages.unavailable
 
     async def _init_loop(self) -> None:
         """Background loop that initializes and retries on failure.
@@ -391,7 +388,7 @@ class OrchestrationManager:
             - Backoff sleeps are interruptible: a stop signal exits immediately.
 
         """
-        cfg = self._resources.get_config().orchestration
+        cfg = self._resources.config.orchestration
 
         async def _interruptible_sleep(wait: float) -> None:
             """Sleep for *wait* seconds or until the stop event fires.
@@ -444,7 +441,9 @@ class OrchestrationManager:
                     if self._agent is None:
                         logger.info("Initializing orchestration resources...")
                         await self._resources.startup_check()
-                        self._agent = self._factory.build()
+                        self._agent = build_orchestration_agent(
+                            resources=self._resources,
+                        )
                         logger.info("Orchestration agent ready")
 
         await self._stop_event.wait()

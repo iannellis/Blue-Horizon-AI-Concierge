@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import math
-from collections import OrderedDict
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
 from llama_index.core import Settings, StorageContext, VectorStoreIndex
@@ -25,13 +25,16 @@ from redis.retry import Retry
 from redisvl.index import AsyncSearchIndex
 from redisvl.redis.connection import convert_index_info_to_schema
 
+from blue_horizon.agents._lifecycle import require
 from blue_horizon.agents.exceptions import OperationalError
 from blue_horizon.agents.information.config import build_system_prompt
 from blue_horizon.agents.information.models import RetrievalItem, Source
 from blue_horizon.agents.information.retrieval import build_information_index_schemas
-from blue_horizon.agents.prompt_utils import load_packaged_text
+from blue_horizon.agents.prompt_utils import load_packaged_text, prompt_resource_path
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from llama_index.core.vector_stores.types import MetadataFilters
     from redisvl.schema import IndexSchema
 
@@ -54,6 +57,94 @@ class VectorIndexes:
     services: VectorStoreIndex
 
 
+class _FiltersKey:
+    """Hashable stand-in for `MetadataFilters` used as an `lru_cache` key.
+
+    `MetadataFilters` is a plain (non-frozen) Pydantic model and therefore
+    unhashable, but `functools.lru_cache` hashes every argument it is called
+    with. Two `_FiltersKey` instances compare and hash equal whenever their
+    order-independent `signature` does, so a cache hit is driven entirely by
+    that signature -- the same key the retriever cache has always used --
+    while the real `filters` object is still available on a miss, to build
+    the retriever with.
+
+    Attributes:
+        filters: The actual filters object, read only on a cache miss.
+        signature: Order-independent signature; the actual hash/equality key.
+
+    """
+
+    __slots__ = ("filters", "signature")
+
+    def __init__(
+        self,
+        filters: MetadataFilters | None,
+        signature: tuple[tuple[str, str, str], ...],
+    ) -> None:
+        """Store the filters object and its cache signature.
+
+        Args:
+            filters: The actual filters object, read only on a cache miss.
+            signature: Order-independent signature for equality/hash.
+
+        """
+        self.filters = filters
+        self.signature = signature
+
+    def __hash__(self) -> int:
+        """Hash by signature only, ignoring the (possibly unhashable) filters.
+
+        Returns:
+            int: Hash of `signature`.
+
+        """
+        return hash(self.signature)
+
+    def __eq__(self, other: object) -> bool:
+        """Compare by signature only, ignoring the (possibly unhashable) filters.
+
+        Args:
+            other: Object to compare against.
+
+        Returns:
+            bool: True if `other` is a `_FiltersKey` with an equal signature.
+
+        """
+        if not isinstance(other, _FiltersKey):
+            return NotImplemented
+        return self.signature == other.signature
+
+
+def _build_catalog_retriever(
+    index: VectorStoreIndex,
+    top_k: int,
+    filters_key: _FiltersKey,
+) -> VectorIndexRetriever:
+    """Build a `VectorIndexRetriever` for one (index, top_k, filters) combination.
+
+    Args:
+        index: Vector index to retrieve against.
+        top_k: Number of results to retrieve.
+        filters_key: Hashable envelope carrying the actual filters to apply.
+
+    Returns:
+        VectorIndexRetriever: Newly-built retriever.
+
+    Raises:
+        OperationalError: If the retriever does not support async retrieval.
+
+    """
+    retriever = VectorIndexRetriever(
+        index=index,
+        similarity_top_k=top_k,
+        filters=filters_key.filters,
+    )
+    if not hasattr(retriever, "aretrieve"):
+        msg = "VectorIndexRetriever does not support aretrieve()"
+        raise OperationalError(msg)
+    return retriever
+
+
 class InfoRagResources:
     """Shared, async-first resources used by retrieval tools.
 
@@ -66,25 +157,8 @@ class InfoRagResources:
 
     """
 
-    __slots__ = (
-        "_catalog_retrievers",
-        "_config",
-        "_embed_batch_size",
-        "_faq_retriever",
-        "_index_schemas",
-        "_parser_prompt_resource",
-        "_retriever_cache_max",
-        "_system_prompt_resource",
-        "_top_k",
-        "_vector_dims",
-        "indexes",
-        "parser_prompt",
-        "redis_async",
-        "system_prompt",
-    )
-
     _config: InfoRagConfig
-    _top_k: int
+    top_k: int
     _vector_dims: int
     _embed_batch_size: int
     _retriever_cache_max: int
@@ -92,8 +166,8 @@ class InfoRagResources:
     redis_async: AsyncRedis
     indexes: VectorIndexes
     _faq_retriever: BaseRetriever
-    _catalog_retrievers: OrderedDict[
-        tuple[Source, tuple[tuple[str, str, str], ...]],
+    _get_catalog_retriever_cached: Callable[
+        [VectorStoreIndex, int, _FiltersKey],
         VectorIndexRetriever,
     ]
     _system_prompt_resource: str
@@ -118,7 +192,7 @@ class InfoRagResources:
 
         """
         self._config = config
-        self._top_k = config.retrieval.top_k
+        self.top_k = config.retrieval.top_k
         self._vector_dims = config.retrieval.vector_dims
         self._embed_batch_size = config.embeddings.batch_size
         self._retriever_cache_max = max(1, config.retrieval.retriever_cache_max)
@@ -144,25 +218,22 @@ class InfoRagResources:
         )
 
         self._faq_retriever = self.indexes.faq.as_retriever(
-            similarity_top_k=self._top_k,
+            similarity_top_k=self.top_k,
         )
 
-        self._catalog_retrievers: OrderedDict[
-            tuple[Source, tuple[tuple[str, str, str], ...]],
-            VectorIndexRetriever,
-        ] = OrderedDict()
+        # Bound per this instance's retriever_cache_max, not a module-wide
+        # constant -- a fresh cache per InfoRagResources instance, same as
+        # the OrderedDict it replaces.
+        self._get_catalog_retriever_cached = lru_cache(
+            maxsize=self._retriever_cache_max,
+        )(_build_catalog_retriever)
 
-        prompts_folder = config.prompts.folder.strip("/")
-        if prompts_folder:
-            self._system_prompt_resource = (
-                f"{prompts_folder}/{config.prompts.system_prompt_filename}"
-            )
-            self._parser_prompt_resource = (
-                f"{prompts_folder}/{config.prompts.parser_prompt_filename}"
-            )
-        else:
-            self._system_prompt_resource = config.prompts.system_prompt_filename
-            self._parser_prompt_resource = config.prompts.parser_prompt_filename
+        self._system_prompt_resource = prompt_resource_path(
+            config.prompts.folder, config.prompts.system_prompt_filename,
+        )
+        self._parser_prompt_resource = prompt_resource_path(
+            config.prompts.folder, config.prompts.parser_prompt_filename,
+        )
         self.system_prompt: str | None = None
         self.parser_prompt: str | None = None
 
@@ -248,7 +319,7 @@ class InfoRagResources:
 
         """
         return build_system_prompt(
-            top_k=self._top_k,
+            top_k=self.top_k,
             prompt_resource=self._system_prompt_resource,
         )
 
@@ -379,16 +450,6 @@ class InfoRagResources:
             services=built_indexes[Source.SERVICES],
         )
 
-    @property
-    def top_k(self) -> int:
-        """Return the configured retrieval top-k.
-
-        Returns:
-            int: Top-k value used for retrieval.
-
-        """
-        return self._top_k
-
     def get_system_prompt(self) -> str:
         """Return the rendered system prompt.
 
@@ -403,13 +464,7 @@ class InfoRagResources:
             RuntimeError: If the system prompt has not been rendered yet.
 
         """
-        if self.system_prompt is None:
-            msg = (
-                "System prompt is not initialized; call "
-                "await InfoRagResources.startup_check() first"
-            )
-            raise RuntimeError(msg)
-        return self.system_prompt
+        return require(self.system_prompt, "System prompt")
 
     def get_parser_prompt(self) -> str:
         """Return the parser system prompt.
@@ -425,13 +480,7 @@ class InfoRagResources:
             RuntimeError: If the parser prompt has not been loaded yet.
 
         """
-        if self.parser_prompt is None:
-            msg = (
-                "Parser prompt is not initialized; call "
-                "await InfoRagResources.startup_check() first"
-            )
-            raise RuntimeError(msg)
-        return self.parser_prompt
+        return require(self.parser_prompt, "Parser prompt")
 
     async def retrieve_faq(self, query: str) -> list[RetrievalItem]:
         """Retrieve FAQ nodes relevant to a query.
@@ -452,15 +501,7 @@ class InfoRagResources:
             msg = "FAQ retrieval failed"
             raise OperationalError(msg) from exc
 
-        return [
-            RetrievalItem(
-                source=Source.FAQ,
-                metadata=getattr(n.node, "metadata", None) or {},
-                text=getattr(n.node, "text", "") or "",
-                score=self._coerce_score(n),
-            )
-            for n in nodes
-        ]
+        return self._to_items(nodes, Source.FAQ)
 
     async def retrieve_filtered_catalog_items(
         self,
@@ -490,12 +531,26 @@ class InfoRagResources:
             msg = f"{source} retrieval failed"
             raise OperationalError(msg) from exc
 
+        return self._to_items(nodes, source)
+
+    @staticmethod
+    def _to_items(nodes: list[Any], source: Source) -> list[RetrievalItem]:
+        """Convert nodes returned by a LlamaIndex retriever into RetrievalItems.
+
+        Args:
+            nodes: Nodes returned by `BaseRetriever.aretrieve`.
+            source: Information source the nodes were retrieved from.
+
+        Returns:
+            list[RetrievalItem]: One item per node, with a safe float score.
+
+        """
         return [
             RetrievalItem(
                 source=source,
                 metadata=getattr(n.node, "metadata", None) or {},
                 text=getattr(n.node, "text", "") or "",
-                score=self._coerce_score(n),
+                score=InfoRagResources._coerce_score(n),
             )
             for n in nodes
         ]
@@ -519,31 +574,12 @@ class InfoRagResources:
             OperationalError: If the retriever does not support async retrieval.
 
         """
-        sig = self._filters_signature(filters)
-        cache_key = (source, sig)
-
-        existing = self._catalog_retrievers.get(cache_key)
-        if existing is not None:
-            self._catalog_retrievers.move_to_end(cache_key)
-            return existing
-
         index = {
             Source.AMENITIES: self.indexes.amenities,
             Source.SERVICES: self.indexes.services,
         }[source]
-
-        retriever = VectorIndexRetriever(
-            index=index,
-            similarity_top_k=self._top_k,
-            filters=filters,
-        )
-
-        if not hasattr(retriever, "aretrieve"):
-            msg = "VectorIndexRetriever does not support aretrieve()"
-            raise OperationalError(msg)
-
-        self._cache_retriever(cache_key, retriever)
-        return retriever
+        filters_key = _FiltersKey(filters, self._filters_signature(filters))
+        return self._get_catalog_retriever_cached(index, self.top_k, filters_key)
 
     @staticmethod
     def _filters_signature(
@@ -570,23 +606,6 @@ class InfoRagResources:
 
         signature.sort()
         return tuple(signature)
-
-    def _cache_retriever(
-        self,
-        cache_key: tuple[Source, tuple[tuple[str, str, str], ...]],
-        retriever: VectorIndexRetriever,
-    ) -> None:
-        """Insert a retriever into the bounded LRU cache.
-
-        Args:
-            cache_key: Cache key (source, filter signature).
-            retriever: Retriever instance to cache.
-
-        """
-        self._catalog_retrievers[cache_key] = retriever
-        self._catalog_retrievers.move_to_end(cache_key)
-        while len(self._catalog_retrievers) > self._retriever_cache_max:
-            self._catalog_retrievers.popitem(last=False)
 
     @staticmethod
     def _coerce_score(node: Any) -> float:  # noqa: ANN401

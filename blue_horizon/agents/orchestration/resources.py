@@ -5,14 +5,15 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, cast
 
-from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
 
-from blue_horizon.agents.booking import BookingAgentFactory, BookingSqlResources
+from blue_horizon.agents._lifecycle import require
+from blue_horizon.agents._llm import build_chat_model
+from blue_horizon.agents.booking import BookingSqlResources, build_booking_agent
 from blue_horizon.agents.exceptions import OperationalError
-from blue_horizon.agents.information import InfoAgentFactory, InfoRagResources
+from blue_horizon.agents.information import InfoRagResources, build_info_agent
 from blue_horizon.agents.orchestration.models import RouteDecision
-from blue_horizon.agents.prompt_utils import load_packaged_text
+from blue_horizon.agents.prompt_utils import load_packaged_text, prompt_resource_path
 from blue_horizon.config import load_app_config
 
 if TYPE_CHECKING:
@@ -51,34 +52,20 @@ class OrchestrationResources:
 
     """
 
-    __slots__ = (
-        "_booking_agent",
-        "_booking_config",
-        "_booking_resources",
-        "_checkpointer",
-        "_config",
-        "_info_agent",
-        "_info_config",
-        "_info_resources",
-        "_router",
-        "_system_prompt",
-        "_system_prompt_resource",
-    )
-
-    _config: OrchestrationConfig
+    config: OrchestrationConfig
     _system_prompt_resource: str
     _system_prompt: str | None
 
     _info_config: InfoRagConfig
-    _info_resources: InfoRagResources
+    info_resources: InfoRagResources
     _info_agent: CompiledStateGraph | None
 
     _booking_config: BookingSqlConfig
-    _booking_resources: BookingSqlResources
+    booking_resources: BookingSqlResources
     _booking_agent: CompiledStateGraph | None
 
-    _router: Runnable[list[BaseMessage], RouteDecision]
-    _checkpointer: MemorySaver
+    router: Runnable[list[BaseMessage], RouteDecision]
+    checkpointer: MemorySaver
 
     def __init__(
         self,
@@ -114,47 +101,36 @@ class OrchestrationResources:
 
         """
         app_config = load_app_config()
-        self._config = app_config.orchestration
+        self.config = app_config.orchestration
 
-        prompts_folder = self._config.prompts.folder.strip("/")
-        if prompts_folder:
-            self._system_prompt_resource = (
-                f"{prompts_folder}/{self._config.prompts.orchestration_prompt_filename}"
-            )
-        else:
-            self._system_prompt_resource = (
-                self._config.prompts.orchestration_prompt_filename
-            )
+        self._system_prompt_resource = prompt_resource_path(
+            self.config.prompts.folder,
+            self.config.prompts.orchestration_prompt_filename,
+        )
         self._system_prompt = None
 
         self._info_config = app_config.info
-        self._info_resources = InfoRagResources(
+        self.info_resources = InfoRagResources(
             redis_url=app_config.redis_url,
             config=self._info_config,
         )
         self._info_agent = None
 
         self._booking_config = app_config.booking
-        self._booking_resources = BookingSqlResources(
+        self.booking_resources = BookingSqlResources(
             pgsql_rw_db_url=pgsql_rw_db_url or app_config.pgsql_rw_db_url,
             pgsql_ro_db_url=pgsql_ro_db_url or app_config.pgsql_ro_db_url,
             config=self._booking_config,
         )
         self._booking_agent = None
 
-        llm_cfg = self._config.llm
-        llm = ChatOpenAI(
-            model=llm_cfg.model,
-            reasoning={"effort": llm_cfg.reasoning_effort},
-            timeout=llm_cfg.timeout_s,
-            max_retries=llm_cfg.max_retries,
-        )
-        self._router = cast(
+        llm = build_chat_model(self.config.llm)
+        self.router = cast(
             "Runnable[list[BaseMessage], RouteDecision]",
             llm.with_structured_output(RouteDecision, method="function_calling"),
         )
 
-        self._checkpointer = MemorySaver()
+        self.checkpointer = MemorySaver()
 
     async def startup_check(self) -> None:
         """Validate dependencies and build sub-agents.
@@ -171,17 +147,17 @@ class OrchestrationResources:
         try:
             self._system_prompt = load_packaged_text(self._system_prompt_resource)
 
-            await self._info_resources.startup_check()
-            self._info_agent = InfoAgentFactory(
-                resources=self._info_resources,
+            await self.info_resources.startup_check()
+            self._info_agent = build_info_agent(
+                resources=self.info_resources,
                 config=self._info_config,
-            ).build()
+            )
 
-            await self._booking_resources.startup_check()
-            self._booking_agent = BookingAgentFactory(
+            await self.booking_resources.startup_check()
+            self._booking_agent = build_booking_agent(
                 config=self._booking_config,
-                resources=self._booking_resources,
-            ).build()
+                resources=self.booking_resources,
+            )
 
         except OperationalError:
             raise
@@ -195,8 +171,8 @@ class OrchestrationResources:
         This should be called during FastAPI shutdown.
 
         """
-        await self._booking_resources.aclose()
-        await self._info_resources.aclose()
+        await self.booking_resources.aclose()
+        await self.info_resources.aclose()
 
     def reset_runtime_state(self) -> None:
         """Clear runtime fields after a failed initialization attempt.
@@ -209,15 +185,6 @@ class OrchestrationResources:
         self._info_agent = None
         self._booking_agent = None
 
-    def get_config(self) -> OrchestrationConfig:
-        """Return the loaded orchestration configuration.
-
-        Returns:
-            Loaded orchestration configuration.
-
-        """
-        return self._config
-
     def get_system_prompt(self) -> str:
         """Return the orchestration system prompt text.
 
@@ -228,28 +195,7 @@ class OrchestrationResources:
             RuntimeError: If startup_check() has not been called.
 
         """
-        if self._system_prompt is None:
-            msg = "System prompt not loaded. Call startup_check() first."
-            raise RuntimeError(msg)
-        return self._system_prompt
-
-    def get_router(self) -> Runnable[list[BaseMessage], RouteDecision]:
-        """Return the router runnable.
-
-        Returns:
-            Runnable that maps a list of messages to a RouteDecision.
-
-        """
-        return self._router
-
-    def get_checkpointer(self) -> MemorySaver:
-        """Return the MemorySaver checkpointer.
-
-        Returns:
-            In-memory checkpointer for message history.
-
-        """
-        return self._checkpointer
+        return require(self._system_prompt, "System prompt")
 
     def get_info_agent(self) -> CompiledStateGraph:
         """Return the compiled info agent.
@@ -261,10 +207,7 @@ class OrchestrationResources:
             RuntimeError: If startup_check() has not been called.
 
         """
-        if self._info_agent is None:
-            msg = "Info agent not initialized. Call startup_check() first."
-            raise RuntimeError(msg)
-        return self._info_agent
+        return require(self._info_agent, "Info agent")
 
     def get_booking_agent(self) -> CompiledStateGraph:
         """Return the compiled booking agent.
@@ -276,25 +219,4 @@ class OrchestrationResources:
             RuntimeError: If startup_check() has not been called.
 
         """
-        if self._booking_agent is None:
-            msg = "Booking agent not initialized. Call startup_check() first."
-            raise RuntimeError(msg)
-        return self._booking_agent
-
-    def get_info_resources(self) -> InfoRagResources:
-        """Return the info RAG resources instance.
-
-        Returns:
-            InfoRagResources: Shared retrieval resources.
-
-        """
-        return self._info_resources
-
-    def get_booking_resources(self) -> BookingSqlResources:
-        """Return the booking SQL resources instance.
-
-        Returns:
-            BookingSqlResources: Shared database resources.
-
-        """
-        return self._booking_resources
+        return require(self._booking_agent, "Booking agent")

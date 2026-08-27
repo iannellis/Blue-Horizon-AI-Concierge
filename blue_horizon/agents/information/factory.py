@@ -7,9 +7,9 @@ import logging
 from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 
+from blue_horizon.agents._llm import build_chat_model
 from blue_horizon.agents.exceptions import OperationalError
 from blue_horizon.agents.information.models import (
     InfoState,
@@ -89,104 +89,80 @@ def _best_by_text(batches: list[list[RetrievalItem]]) -> list[RetrievalItem]:
     return list(best.values())
 
 
-class InfoAgentFactory:
-    """Factory for constructing the info retrieval DAG.
+def build_info_agent(  # noqa: C901, PLR0915
+    *,
+    resources: InfoRagResources,
+    config: InfoRagConfig,
+) -> CompiledStateGraph:
+    """Build and return a compiled info retrieval agent graph.
 
-    This factory wires together:
-        - configuration
-        - shared async retrieval resources
-        - prompt templates
+    Wires together configuration, shared async retrieval resources, and
+    prompt templates. The resulting agent performs a single retrieval round
+    in a fixed DAG.
 
-    The resulting agent performs a single retrieval round in a fixed DAG.
+    Args:
+        resources: Shared async resources (Redis client, indexes, retrievers).
+        config: Parsed TOML configuration.
+
+    Returns:
+        CompiledStateGraph: A compiled LangGraph DAG for info retrieval.
 
     """
+    max_context_items = config.retrieval.max_context_items
 
-    __slots__ = ("_config", "_resources")
+    llm_cfg = config.llm
+    parser_llm = build_chat_model(llm_cfg).with_structured_output(
+        ParsedQuery, method="function_calling",
+    )
+    responder_llm = build_chat_model(llm_cfg)
 
-    _resources: InfoRagResources
-    _config: InfoRagConfig
-
-    def __init__(
-        self,
-        *,
-        resources: InfoRagResources,
-        config: InfoRagConfig,
-    ) -> None:
-        """Initialize the agent factory.
+    def _log_node_failure(node_name: str, exc: Exception) -> None:
+        """Log a node failure with traceback.
 
         Args:
-            resources: Shared async resources (Redis client, indexes, retrievers).
-            config: Parsed TOML configuration.
+            node_name: Name of the failing node.
+            exc: Exception that was raised.
 
         """
-        self._resources = resources
-        self._config = config
+        logger.exception("Info DAG node %s failed: %s", node_name, exc)
 
-    def build(self) -> CompiledStateGraph:  # noqa: C901, PLR0915
-        """Build and return a compiled agent graph.
+    def _make_retrieval_node(
+        source: Source,
+        state_key: str,
+    ) -> Callable[..., Awaitable[dict[str, Any]]]:
+        """Create a retrieval node for one information source.
+
+        FAQ has no metadata filters; amenities and services build filters
+        from the parsed query's constraints before retrieving.
+
+        Args:
+            source: Which source to query (FAQ, AMENITIES, or SERVICES).
+            state_key: State dict key for the results (e.g. "faq_results").
 
         Returns:
-            CompiledStateGraph: A compiled LangGraph DAG for info retrieval.
+            Async node function suitable for LangGraph.
 
         """
-        resources = self._resources
-        max_context_items = self._config.retrieval.max_context_items
+        tool_name = f"query_{source.value}"
 
-        llm_cfg = self._config.llm
-        parser_llm = ChatOpenAI(
-            model=llm_cfg.model,
-            timeout=llm_cfg.timeout_s,
-            max_retries=llm_cfg.max_retries,
-            reasoning={"effort": llm_cfg.reasoning_effort},
-        ).with_structured_output(ParsedQuery, method="function_calling")
-        responder_llm = ChatOpenAI(
-            model=llm_cfg.model,
-            timeout=llm_cfg.timeout_s,
-            max_retries=llm_cfg.max_retries,
-            reasoning={"effort": llm_cfg.reasoning_effort},
-        )
+        async def _node(state: ParsedState) -> dict[str, Any]:
+            """Retrieve `source` for all parsed queries, deduplicated by text.
 
-        def _log_node_failure(node_name: str, exc: Exception) -> None:
-            """Log a node failure with traceback.
+            Each query string is retrieved independently; results are merged,
+            keeping the highest-scoring item when the same text is returned
+            by multiple queries.
 
             Args:
-                node_name: Name of the failing node.
-                exc: Exception that was raised.
-
-            """
-            logger.exception("Info DAG node %s failed: %s", node_name, exc)
-
-        def _make_catalog_query_node(
-            source: Source,
-            state_key: str,
-        ) -> Callable[..., Awaitable[dict[str, Any]]]:
-            """Create a query node for a filtered catalog source.
-
-            Args:
-                source: Which catalog source to query (AMENITIES or SERVICES).
-                state_key: State dict key for the results (e.g. "amenities_results").
+                state: Parsed state containing the query strings and constraints.
 
             Returns:
-                Async node function suitable for LangGraph.
+                State patch with deduplicated results for the given source.
 
             """
-            tool_name = f"query_{source.value}"
-
-            async def _node(state: ParsedState) -> dict[str, Any]:
-                """Query a filtered catalog source for all parsed queries.
-
-                Each query string is retrieved independently against the same
-                filter set. Results are merged and deduplicated by text,
-                keeping the highest-scoring item for each unique text.
-
-                Args:
-                    state: Parsed state containing the query strings and constraints.
-
-                Returns:
-                    State patch with deduplicated results for the given source.
-
-                """
-                parsed = state["parsed"]
+            parsed = state["parsed"]
+            if source is Source.FAQ:
+                pending = [resources.retrieve_faq(q) for q in parsed.queries]
+            else:
                 filters = build_filters(
                     booking_required=parsed.booking_required,
                     min_price=parsed.min_price,
@@ -195,162 +171,128 @@ class InfoAgentFactory:
                     min_duration_minutes=parsed.min_duration_minutes,
                     max_duration_minutes=parsed.max_duration_minutes,
                 )
-                try:
-                    batches = cast(
-                        "list[list[RetrievalItem]]",
-                        await asyncio.gather(
-                            *[
-                                resources.retrieve_filtered_catalog_items(
-                                    source=source,
-                                    query=q,
-                                    filters=filters,
-                                )
-                                for q in parsed.queries
-                            ],
-                        ),
+                pending = [
+                    resources.retrieve_filtered_catalog_items(
+                        source=source,
+                        query=q,
+                        filters=filters,
                     )
-                except OperationalError as exc:
-                    logger.warning("%s operational failure: %s", tool_name, exc)
-                    return {state_key: []}
-                except Exception as exc:  # noqa: BLE001
-                    _log_node_failure(tool_name, exc)
-                    return {state_key: []}
-                return {state_key: _best_by_text(batches)}
-
-            _node.__name__ = _node.__qualname__ = tool_name + "_node"
-            _node.__doc__ = (
-                f"Retrieve {source.value} for the parsed query and constraints."
-            )
-            return _node
-
-        async def parse_node(state: InfoState) -> dict[str, Any]:
-            """Parse the user request into a structured query and constraints.
-
-            Args:
-                state: Current info state with conversation messages.
-
-            Returns:
-                State patch with the parsed query.
-
-            """
-            try:
-                parsed = cast(
-                    "ParsedQuery",
-                    await parser_llm.ainvoke(
-                        [
-                            SystemMessage(content=resources.get_parser_prompt()),
-                            *state["messages"],
-                        ],
-                    ),
-                )
-            except Exception as exc:  # noqa: BLE001
-                _log_node_failure("parse", exc)
-                parsed = ParsedQuery(queries=[_latest_user_text(state["messages"])])
-
-            return {"parsed": parsed}
-
-        async def query_faq_node(state: ParsedState) -> dict[str, Any]:
-            """Retrieve FAQ entries for all parsed queries, deduplicated by text.
-
-            Each query string is retrieved independently and results are merged,
-            keeping the highest-scoring item when the same text is returned by
-            multiple queries.
-
-            Args:
-                state: Parsed state containing the query strings.
-
-            Returns:
-                State patch with ``faq_results`` populated.
-
-            """
-            queries = state["parsed"].queries
+                    for q in parsed.queries
+                ]
             try:
                 batches = cast(
                     "list[list[RetrievalItem]]",
-                    await asyncio.gather(*[resources.retrieve_faq(q) for q in queries]),
+                    await asyncio.gather(*pending),
                 )
             except OperationalError as exc:
-                logger.warning("query_faq operational failure: %s", exc)
-                return {"faq_results": []}
+                logger.warning("%s operational failure: %s", tool_name, exc)
+                return {state_key: []}
             except Exception as exc:  # noqa: BLE001
-                _log_node_failure("query_faq", exc)
-                return {"faq_results": []}
-            return {"faq_results": _best_by_text(batches)}
+                _log_node_failure(tool_name, exc)
+                return {state_key: []}
+            return {state_key: _best_by_text(batches)}
 
-        query_amenities_node = _make_catalog_query_node(
-            Source.AMENITIES,
-            "amenities_results",
+        _node.__name__ = _node.__qualname__ = tool_name + "_node"
+        _node.__doc__ = (
+            f"Retrieve {source.value} for the parsed query and constraints."
         )
-        query_services_node = _make_catalog_query_node(
-            Source.SERVICES,
-            "services_results",
-        )
+        return _node
 
-        def merge_results_node(state: InfoState) -> dict[str, Any]:
-            """Merge results from all sources and sort by score descending.
+    async def parse_node(state: InfoState) -> dict[str, Any]:
+        """Parse the user request into a structured query and constraints.
 
-            All deduplicated results from FAQ, amenities, and services are passed
-            to the LLM in score order. The LLM is instructed via the system prompt
-            to present at most top_k cards, selecting the most relevant ones.
+        Args:
+            state: Current info state with conversation messages.
 
-            Args:
-                state: Current state with retrieval results.
+        Returns:
+            State patch with the parsed query.
 
-            Returns:
-                State patch with ``top_results`` populated, sorted by score.
-
-            """
-            all_results = [
-                *state.get("faq_results", []),
-                *state.get("amenities_results", []),
-                *state.get("services_results", []),
-            ]
-            ranked = sorted(all_results, key=lambda x: x.score, reverse=True)
-            return {"top_results": ranked[:max_context_items]}
-
-        async def respond_node(state: InfoState) -> dict[str, Any]:
-            """Generate the final response using retrieved context.
-
-            Args:
-                state: Current state with merged results.
-
-            Returns:
-                State patch with the LLM response appended to messages.
-
-            """
-            top_items = state.get("top_results", [])
-            context_block = _build_context_block(top_items)
-            system_prompt = resources.get_system_prompt()
-            try:
-                response = await responder_llm.ainvoke(
+        """
+        try:
+            parsed = cast(
+                "ParsedQuery",
+                await parser_llm.ainvoke(
                     [
-                        SystemMessage(
-                            content=(f"{system_prompt}{context_block}"),
-                        ),
+                        SystemMessage(content=resources.get_parser_prompt()),
                         *state["messages"],
                     ],
-                )
-            except Exception as exc:
-                _log_node_failure("respond", exc)
-                raise
-            return {"messages": [response]}
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            _log_node_failure("parse", exc)
+            parsed = ParsedQuery(queries=[_latest_user_text(state["messages"])])
 
-        graph = StateGraph(InfoState)
-        graph.add_node("parse", parse_node)
-        graph.add_node("query_faq", query_faq_node)
-        graph.add_node("query_amenities", query_amenities_node)
-        graph.add_node("query_services", query_services_node)
-        graph.add_node("merge", merge_results_node)
-        graph.add_node("respond", respond_node)
+        return {"parsed": parsed}
 
-        graph.add_edge(START, "parse")
-        graph.add_edge("parse", "query_faq")
-        graph.add_edge("parse", "query_amenities")
-        graph.add_edge("parse", "query_services")
-        graph.add_edge("query_faq", "merge")
-        graph.add_edge("query_amenities", "merge")
-        graph.add_edge("query_services", "merge")
-        graph.add_edge("merge", "respond")
-        graph.add_edge("respond", END)
+    query_faq_node = _make_retrieval_node(Source.FAQ, "faq_results")
+    query_amenities_node = _make_retrieval_node(Source.AMENITIES, "amenities_results")
+    query_services_node = _make_retrieval_node(Source.SERVICES, "services_results")
 
-        return graph.compile()
+    def merge_results_node(state: InfoState) -> dict[str, Any]:
+        """Merge results from all sources and sort by score descending.
+
+        All deduplicated results from FAQ, amenities, and services are passed
+        to the LLM in score order. The LLM is instructed via the system prompt
+        to present at most top_k cards, selecting the most relevant ones.
+
+        Args:
+            state: Current state with retrieval results.
+
+        Returns:
+            State patch with ``top_results`` populated, sorted by score.
+
+        """
+        all_results = [
+            *state.get("faq_results", []),
+            *state.get("amenities_results", []),
+            *state.get("services_results", []),
+        ]
+        ranked = sorted(all_results, key=lambda x: x.score, reverse=True)
+        return {"top_results": ranked[:max_context_items]}
+
+    async def respond_node(state: InfoState) -> dict[str, Any]:
+        """Generate the final response using retrieved context.
+
+        Args:
+            state: Current state with merged results.
+
+        Returns:
+            State patch with the LLM response appended to messages.
+
+        """
+        top_items = state.get("top_results", [])
+        context_block = _build_context_block(top_items)
+        system_prompt = resources.get_system_prompt()
+        try:
+            response = await responder_llm.ainvoke(
+                [
+                    SystemMessage(
+                        content=(f"{system_prompt}{context_block}"),
+                    ),
+                    *state["messages"],
+                ],
+            )
+        except Exception as exc:
+            _log_node_failure("respond", exc)
+            raise
+        return {"messages": [response]}
+
+    graph = StateGraph(InfoState)
+    graph.add_node("parse", parse_node)
+    graph.add_node("query_faq", query_faq_node)
+    graph.add_node("query_amenities", query_amenities_node)
+    graph.add_node("query_services", query_services_node)
+    graph.add_node("merge", merge_results_node)
+    graph.add_node("respond", respond_node)
+
+    graph.add_edge(START, "parse")
+    graph.add_edge("parse", "query_faq")
+    graph.add_edge("parse", "query_amenities")
+    graph.add_edge("parse", "query_services")
+    graph.add_edge("query_faq", "merge")
+    graph.add_edge("query_amenities", "merge")
+    graph.add_edge("query_services", "merge")
+    graph.add_edge("merge", "respond")
+    graph.add_edge("respond", END)
+
+    return graph.compile()

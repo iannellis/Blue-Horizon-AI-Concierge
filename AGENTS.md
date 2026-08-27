@@ -98,6 +98,8 @@ is dismantling a guarantee.
 
 | Path | Contents |
 |---|---|
+| `blue_horizon/agents/_lifecycle.py` | `require()`, the shared "not initialized yet" guard for resource classes |
+| `blue_horizon/agents/_llm.py` | `build_chat_model()`, shared `ChatOpenAI` construction from an agent's LLM config |
 | `blue_horizon/agents/orchestration/` | LangGraph router and manager, `MemorySaver` checkpointing per `thread_id` |
 | `blue_horizon/agents/information/` | Parse, three parallel retrievers, merge, respond |
 | `blue_horizon/agents/booking/factory.py` | Tool construction: `run_sql` (read-only) and the `propose_*` tools |

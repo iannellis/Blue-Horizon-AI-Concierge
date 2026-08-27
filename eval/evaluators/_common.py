@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
+
+from pydantic import BaseModel
 
 from eval._utils import truncate
 
@@ -114,7 +115,7 @@ def _rag_extract_reference(
     if reference is None:
         return None
     text = truncate(reference, max_chars)
-    return text if text else None
+    return text or None
 
 
 def _get_example_turns(example: Example) -> list[dict[str, Any]]:
@@ -134,23 +135,37 @@ def _get_example_turns(example: Example) -> list[dict[str, Any]]:
     return []
 
 
-async def _call_judge_llm(prompt: str, model: str) -> str:
-    """Call the judge LLM and return raw text output.
+async def _call_judge_llm_structured[T: BaseModel](
+    *,
+    prompt: str,
+    model: str,
+    response_model: type[T],
+) -> T:
+    """Call the judge LLM and parse its response into a structured model.
+
+    Uses the chat model's native structured-output support (Gemini's
+    ``json_schema`` mode, the library default) instead of prompting for JSON
+    and hand-parsing/validating the response: the provider enforces the
+    schema, so there is no markdown fence to strip and no ad hoc payload
+    validation to write -- a malformed response raises here rather than
+    silently returning invalid data.
 
     Args:
         prompt: Prompt text to send to the judge.
         model: Model name to use for the judge.
+        response_model: Pydantic model describing the expected response shape.
 
     Returns:
-        Raw text response from the judge (empty if no content).
+        A validated instance of `response_model`.
 
     Raises:
         RuntimeError: If the model is unavailable on the Developer API.
 
     """
     llm = await _get_judge_llm(model)
+    structured_llm = llm.with_structured_output(response_model)
     try:
-        response = await llm.ainvoke(prompt)
+        result = await structured_llm.ainvoke(prompt)
     except Exception as exc:
         if _is_model_unavailable_error(exc):
             msg = (
@@ -159,21 +174,11 @@ async def _call_judge_llm(prompt: str, model: str) -> str:
             )
             raise RuntimeError(msg) from exc
         raise
-
-    content = getattr(response, "content", None)
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict):
-                text = item.get("text")
-                if isinstance(text, str):
-                    parts.append(text)
-        return "".join(parts)
-    return ""
+    # with_structured_output(response_model) (no include_raw) always returns
+    # an instance of response_model at runtime; its declared return type is
+    # the broader `dict | BaseModel` shared by every schema form the method
+    # accepts (a plain dict, a TypedDict, or a Pydantic model).
+    return cast("T", result)
 
 
 async def _get_judge_llm(model: str) -> BaseChatModel:
@@ -228,44 +233,3 @@ def _is_model_unavailable_error(exc: Exception) -> bool:
         "not available",
     )
     return any(trigger in message for trigger in triggers)
-
-
-def _safe_json_loads(payload: str) -> dict[str, Any] | None:
-    """Parse a JSON string into a dict, returning None on failure.
-
-    Handles responses wrapped in markdown code fences (e.g. ``````json ... ``````),
-    including cases where the closing fence is missing due to response truncation.
-
-    Args:
-        payload: Raw JSON text, possibly wrapped in markdown code fences.
-
-    Returns:
-        Parsed dict if the JSON is valid and a dict, otherwise None.
-
-    """
-    text = payload.strip()
-
-    # Strip markdown code fences when present.  The closing fence may be absent
-    # if the LLM response was truncated, so we strip it only when present rather
-    # than requiring it.
-    if text.startswith("```"):
-        lines = text.split("\n")
-        # Remove opening fence line (e.g. ```json or ```)
-        if lines[0].startswith("```"):
-            lines = lines[1:]
-        # Find the first closing fence line and drop everything from it onward.
-        # Gemini may append trailing prose after the fence, so we cannot rely on
-        # the closing fence being the last line.
-        for fence_idx, ln in enumerate(lines):
-            if ln.strip() == "```":
-                lines = lines[:fence_idx]
-                break
-        text = "\n".join(lines).strip()
-
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
-        return None
-    if isinstance(parsed, dict):
-        return parsed
-    return None

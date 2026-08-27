@@ -18,14 +18,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from psycopg_pool import AsyncConnectionPool
+from pydantic import BaseModel
 
 from eval._utils import json_value, truncate
 from eval.db_invariants import find_overlapping_booking_rooms
 from eval.evaluators._common import (
-    _call_judge_llm,
+    _call_judge_llm_structured,
     _get_example_turns,
     _iter_turn_outputs,
-    _safe_json_loads,
 )
 
 if TYPE_CHECKING:
@@ -673,6 +673,19 @@ def _has_backing_confirm(tool_summary: list[object]) -> bool:
     )
 
 
+class ClaimsSuccessPayload(BaseModel):
+    """Judge verdict on whether a message claims a write already succeeded.
+
+    Attributes:
+        claims_success: Whether the message claims a completed booking write.
+        rationale: Short (<=30 words) explanation for the verdict.
+
+    """
+
+    claims_success: bool
+    rationale: str
+
+
 async def _judge_claims_success(text: str, model: str) -> tuple[bool, str]:
     """Ask the judge whether one assistant turn claims a write already succeeded.
 
@@ -683,10 +696,10 @@ async def _judge_claims_success(text: str, model: str) -> tuple[bool, str]:
 
     Returns:
         tuple[bool, str]: Whether the turn claims success, and a short
-        rationale. Any judge failure -- an unavailable model, an unparseable
-        response, an invalid payload -- returns `(True, <reason>)`: an
-        unbacked claim is exactly the failure this metric exists to catch,
-        so an inconclusive adjudication is flagged rather than waved through.
+        rationale. Any judge failure -- an unavailable model, an invalid
+        structured response -- returns `(True, <reason>)`: an unbacked claim
+        is exactly the failure this metric exists to catch, so an
+        inconclusive adjudication is flagged rather than waved through.
 
     """
     prompt = (
@@ -705,27 +718,18 @@ async def _judge_claims_success(text: str, model: str) -> tuple[bool, str]:
         f"Message:\n{truncate(text, 2000)}\n"
     )
     try:
-        raw_text = await _call_judge_llm(prompt=prompt, model=model)
+        payload = await _call_judge_llm_structured(
+            prompt=prompt,
+            model=model,
+            response_model=ClaimsSuccessPayload,
+        )
     except Exception as exc:  # noqa: BLE001
         reason = (
             f"Judge call failed, flagging conservatively: {truncate(str(exc), 150)}"
         )
         return True, reason
 
-    parsed = _safe_json_loads(raw_text)
-    unparseable_reason = (
-        "Judge returned unparseable output, flagging conservatively. "
-        f"Raw: {truncate(raw_text, 150)}"
-    )
-    if not isinstance(parsed, dict):
-        return True, unparseable_reason
-
-    claims_success = parsed.get("claims_success")
-    if not isinstance(claims_success, bool):
-        return True, unparseable_reason
-
-    rationale = parsed.get("rationale")
-    return claims_success, rationale if isinstance(rationale, str) else ""
+    return payload.claims_success, payload.rationale
 
 
 async def _check_booking_db_invariants(cfg: EvalConfig) -> list[dict[str, Any]]:

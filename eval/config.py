@@ -8,14 +8,19 @@ from __future__ import annotations
 import tomllib
 from datetime import date  # noqa: TC003
 from functools import lru_cache
-from importlib import resources as importlib_resources
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BeforeValidator, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from blue_horizon.config import NeonConfig  # noqa: TC001
+from blue_horizon.config import (
+    FrozenModel,
+    NeonConfig,
+    NonNegInt,
+    PositiveInt,
+    read_packaged_toml,
+)
 
 BASE_PACKAGE = "eval"
 _EVAL_CONFIG_RESOURCE = "eval_config.toml"
@@ -23,7 +28,73 @@ _STRESS_CONFIG_RESOURCE = "stress_config.toml"
 _BASE_DIR = Path(__file__).resolve().parents[1]
 
 
-class ExperimentConfig(BaseModel):
+def _resolve_output_paths(value: object) -> Path:
+    """Resolve a configured output/log path relative to the repository root.
+
+    Shared `field_validator` body for `ExperimentConfig` and
+    `StressOutputConfig`, both of which resolve `output_dir`/`log_dir`
+    the same way.
+
+    Args:
+        value: Raw config value representing a path.
+
+    Returns:
+        Resolved Path instance.
+
+    Raises:
+        TypeError: If the value cannot be interpreted as a path.
+
+    """
+    return _resolve_path(value, base_dir=_BASE_DIR)
+
+
+class _EvalDbSettings(BaseSettings):
+    """Shared read-write/read-only eval database URL overrides.
+
+    Both `EvalConfig` and `StressEvalConfig` declare the same pair of
+    optional Postgres URL overrides (plus the Neon API key), used to point
+    the booking agent's pools at an eval-specific database branch instead of
+    the application's default `PGSQL_RW_DB_URL`/`PGSQL_RO_DB_URL`.
+
+    Attributes:
+        pgsql_rw_eval_db_url: Read-write PostgreSQL database URL override
+            (`bh_agent_rw`). When set, takes precedence over
+            ``PGSQL_RW_DB_URL`` for the booking agent's write pool,
+            propose/write tools, and evaluator pool connections.
+        pgsql_ro_eval_db_url: Read-only PostgreSQL database URL override
+            (`bh_agent_ro`), used exclusively by `run_sql`. When set, takes
+            precedence over ``PGSQL_RO_DB_URL``. Must be set alongside
+            `pgsql_rw_eval_db_url` and point at the same database -- leaving
+            it unset while overriding the read-write URL runs the model's
+            searches against the write role, defeating the point of the
+            split.
+        neon_api_key: API key for authenticating with the Neon management
+            API, required when resetting a Neon branch before a run.
+
+    """
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        frozen=True,
+    )
+
+    pgsql_rw_eval_db_url: str | None = Field(
+        default=None,
+        validation_alias="PGSQL_RW_EVAL_DB_URL",
+    )
+    pgsql_ro_eval_db_url: str | None = Field(
+        default=None,
+        validation_alias="PGSQL_RO_EVAL_DB_URL",
+    )
+    neon_api_key: str | None = Field(
+        default=None,
+        validation_alias="NEON_API_KEY",
+    )
+
+
+class ExperimentConfig(FrozenModel):
     """Configuration for LangSmith experiment execution.
 
     Attributes:
@@ -38,12 +109,10 @@ class ExperimentConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     dataset_name: str
     experiment_prefix: str
     run_notes: str | None = None
-    max_concurrency: Annotated[int, Field(ge=1)]
+    max_concurrency: PositiveInt
     output_dir: Path
     log_dir: Path
     upload_results: bool
@@ -57,20 +126,12 @@ class ExperimentConfig(BaseModel):
             return None
         return value
 
-    @field_validator("max_concurrency", mode="before")
-    @classmethod
-    def _clamp_max_concurrency(cls, value: int) -> int:
-        """Ensure max_concurrency is at least 1."""
-        return max(1, value)
-
-    @field_validator("output_dir", "log_dir", mode="before")
-    @classmethod
-    def _resolve_paths(cls, value: object) -> Path:
-        """Resolve paths relative to repository root."""
-        return _resolve_path(value, base_dir=_BASE_DIR)
+    _normalize_output_paths = field_validator(
+        "output_dir", "log_dir", mode="before",
+    )(_resolve_output_paths)
 
 
-class EvaluatorLimitsConfig(BaseModel):
+class EvaluatorLimitsConfig(FrozenModel):
     """Limits controlling judge LLM inputs and stored evaluator output sizes.
 
     Attributes:
@@ -90,26 +151,18 @@ class EvaluatorLimitsConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
-    context_max_chars: Annotated[int, Field(ge=1)]
-    context_max_items: Annotated[int, Field(ge=1)]
-    assistant_max_chars: Annotated[int, Field(ge=1)]
-    user_max_chars: Annotated[int, Field(ge=1)]
-    info_filter_failures_max: Annotated[int, Field(ge=1)]
-    required_tool_failures_max: Annotated[int, Field(ge=1)]
-    json_value_max: Annotated[int, Field(ge=1)]
-    rag_per_turn_json_max: Annotated[int, Field(ge=1)]
-    tripwire_hits_max: Annotated[int, Field(ge=1)]
-
-    @field_validator("*", mode="before")
-    @classmethod
-    def _clamp_to_one(cls, value: int) -> int:
-        """Ensure all limit values are at least 1."""
-        return max(1, value)
+    context_max_chars: PositiveInt
+    context_max_items: PositiveInt
+    assistant_max_chars: PositiveInt
+    user_max_chars: PositiveInt
+    info_filter_failures_max: PositiveInt
+    required_tool_failures_max: PositiveInt
+    json_value_max: PositiveInt
+    rag_per_turn_json_max: PositiveInt
+    tripwire_hits_max: PositiveInt
 
 
-class OrchestrationConfig(BaseModel):
+class OrchestrationConfig(FrozenModel):
     """Configuration for orchestration startup timing.
 
     Attributes:
@@ -117,18 +170,12 @@ class OrchestrationConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
-    ready_timeout_s: Annotated[float, Field(ge=0.1)]
-
-    @field_validator("ready_timeout_s", mode="before")
-    @classmethod
-    def _clamp_timeout(cls, value: float) -> float:
-        """Ensure timeout is at least 0.1 seconds."""
-        return max(0.1, value)
+    ready_timeout_s: Annotated[
+        float, BeforeValidator(lambda v: max(0.1, v)), Field(ge=0.1),
+    ]
 
 
-class JudgeConfig(BaseModel):
+class JudgeConfig(FrozenModel):
     """Configuration for the LLM-as-judge evaluator.
 
     Attributes:
@@ -139,13 +186,11 @@ class JudgeConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     model: str
-    info_cards_max: Annotated[int, Field(ge=1)]
+    info_cards_max: PositiveInt
 
 
-class RagasConfig(BaseModel):
+class RagasConfig(FrozenModel):
     """Configuration for Ragas metrics evaluation.
 
     Attributes:
@@ -168,42 +213,20 @@ class RagasConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
-    turns_max: Annotated[int, Field(ge=0)]
-    contexts_max: Annotated[int, Field(ge=0)]
-    context_chars: Annotated[int, Field(ge=0)]
-    query_chars: Annotated[int, Field(ge=0)]
-    response_chars: Annotated[int, Field(ge=0)]
-    reference_chars: Annotated[int, Field(ge=0)]
+    turns_max: NonNegInt
+    contexts_max: NonNegInt
+    context_chars: NonNegInt
+    query_chars: NonNegInt
+    response_chars: NonNegInt
+    reference_chars: NonNegInt
     llm_model: str
-    llm_max_tokens: Annotated[int, Field(ge=1)]
+    llm_max_tokens: PositiveInt
     embedding_model: str
     custom_precision_prompt: bool = False
     no_match_reference: str = ""
 
-    @field_validator(
-        "turns_max",
-        "contexts_max",
-        "context_chars",
-        "query_chars",
-        "response_chars",
-        "reference_chars",
-        mode="before",
-    )
-    @classmethod
-    def _clamp_to_zero(cls, value: int) -> int:
-        """Ensure values are non-negative."""
-        return max(0, value)
 
-    @field_validator("llm_max_tokens", mode="before")
-    @classmethod
-    def _clamp_to_one(cls, value: int) -> int:
-        """Ensure max_tokens is at least 1."""
-        return max(1, value)
-
-
-class StressWorkloadConfig(BaseModel):
+class StressWorkloadConfig(FrozenModel):
     """Workload and operation-mix parameters for stress-test runs.
 
     Attributes:
@@ -216,23 +239,15 @@ class StressWorkloadConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
-    users: Annotated[int, Field(ge=1)]
-    ops_per_user: Annotated[int, Field(ge=1)]
-    max_concurrency: Annotated[int, Field(ge=1)]
+    users: PositiveInt
+    ops_per_user: PositiveInt
+    max_concurrency: PositiveInt
     book_weight: Annotated[float, Field(ge=0.0)] = 0.5
     modify_weight: Annotated[float, Field(ge=0.0)] = 0.25
     cancel_weight: Annotated[float, Field(ge=0.0)] = 0.25
 
-    @field_validator("users", "ops_per_user", "max_concurrency", mode="before")
-    @classmethod
-    def _clamp_to_one(cls, value: int) -> int:
-        """Ensure values are at least 1."""
-        return max(1, value)
 
-
-class StressTargetsConfig(BaseModel):
+class StressTargetsConfig(FrozenModel):
     """Availability target discovery parameters for stress-test runs.
 
     Attributes:
@@ -245,29 +260,15 @@ class StressTargetsConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
-    stay_nights: Annotated[int, Field(ge=1)]
-    num_targets: Annotated[int, Field(ge=1)]
-    hot_target_count: Annotated[int, Field(ge=0)]
+    stay_nights: PositiveInt
+    num_targets: PositiveInt
+    hot_target_count: NonNegInt
     hot_target_probability: Annotated[float, Field(ge=0.0, le=1.0)] = 0.8
     start_date: date
-    horizon_days: Annotated[int, Field(ge=1)]
-
-    @field_validator("stay_nights", "num_targets", "horizon_days", mode="before")
-    @classmethod
-    def _clamp_to_one(cls, value: int) -> int:
-        """Ensure values are at least 1."""
-        return max(1, value)
-
-    @field_validator("hot_target_count", mode="before")
-    @classmethod
-    def _clamp_to_zero(cls, value: int) -> int:
-        """Ensure hot_target_count is non-negative."""
-        return max(0, value)
+    horizon_days: PositiveInt
 
 
-class StressDbConfig(BaseModel):
+class StressDbConfig(FrozenModel):
     """Database connection and retry parameters for stress-test runs.
 
     Attributes:
@@ -278,23 +279,13 @@ class StressDbConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
-    pool_max: Annotated[int, Field(ge=1)]
-    db_retry_attempts: Annotated[int, Field(ge=1)] = 3
+    pool_max: PositiveInt
+    db_retry_attempts: PositiveInt = 3
     db_retry_delay_s: Annotated[float, Field(ge=0.0)] = 2.0
-    reconcile_max_detail: Annotated[int, Field(ge=1)] = 10
-
-    @field_validator(
-        "pool_max", "db_retry_attempts", "reconcile_max_detail", mode="before",
-    )
-    @classmethod
-    def _clamp_to_one(cls, value: int) -> int:
-        """Ensure values are at least 1."""
-        return max(1, value)
+    reconcile_max_detail: PositiveInt = 10
 
 
-class StressOutputConfig(BaseModel):
+class StressOutputConfig(FrozenModel):
     """Output path configuration for stress-test runs.
 
     Attributes:
@@ -303,19 +294,15 @@ class StressOutputConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     output_dir: Path
     log_dir: Path
 
-    @field_validator("output_dir", "log_dir", mode="before")
-    @classmethod
-    def _resolve_paths(cls, value: object) -> Path:
-        """Resolve paths relative to repository root."""
-        return _resolve_path(value, base_dir=_BASE_DIR)
+    _normalize_output_paths = field_validator(
+        "output_dir", "log_dir", mode="before",
+    )(_resolve_output_paths)
 
 
-class StressConfig(BaseModel):
+class StressConfig(FrozenModel):
     """Configuration for stress-test runs, composed from sub-sections.
 
     Attributes:
@@ -326,15 +313,13 @@ class StressConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     workload: StressWorkloadConfig
     targets: StressTargetsConfig
     db: StressDbConfig
     output: StressOutputConfig
 
 
-class EvalConfig(BaseSettings):
+class EvalConfig(_EvalDbSettings):
     """Parsed evaluation configuration container.
 
     TOML configuration is loaded via ``load_eval_config()``.  Environment
@@ -347,28 +332,8 @@ class EvalConfig(BaseSettings):
         orchestration: Orchestration readiness timing.
         judge: Judge model configuration.
         ragas: Ragas scoring configuration.
-        pgsql_rw_eval_db_url: Read-write PostgreSQL database URL override for
-            eval runs (`bh_agent_rw`). When set, takes precedence over
-            ``PGSQL_RW_DB_URL`` for the booking agent's write pool,
-            propose/write tools, and evaluator pool connections.
-        pgsql_ro_eval_db_url: Read-only PostgreSQL database URL override for
-            eval runs (`bh_agent_ro`), used exclusively by `run_sql`. When
-            set, takes precedence over ``PGSQL_RO_DB_URL``. Must be set
-            alongside `pgsql_rw_eval_db_url` and point at the same database --
-            leaving it unset while overriding the read-write URL runs the
-            model's searches against the write role, defeating the point of
-            the split.
-        neon_api_key: API key for authenticating with the Neon management API,
-            required when resetting a Neon branch before an eval run.
 
     """
-
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-        frozen=True,
-    )
 
     experiment: ExperimentConfig
     evaluator_limits: EvaluatorLimitsConfig
@@ -376,21 +341,9 @@ class EvalConfig(BaseSettings):
     orchestration: OrchestrationConfig
     judge: JudgeConfig
     ragas: RagasConfig
-    pgsql_rw_eval_db_url: str | None = Field(
-        default=None,
-        validation_alias="PGSQL_RW_EVAL_DB_URL",
-    )
-    pgsql_ro_eval_db_url: str | None = Field(
-        default=None,
-        validation_alias="PGSQL_RO_EVAL_DB_URL",
-    )
-    neon_api_key: str | None = Field(
-        default=None,
-        validation_alias="NEON_API_KEY",
-    )
 
 
-class StressEvalConfig(BaseSettings):
+class StressEvalConfig(_EvalDbSettings):
     """Parsed stress-test configuration container.
 
     TOML configuration is loaded via ``load_stress_config()``.  Environment
@@ -400,44 +353,12 @@ class StressEvalConfig(BaseSettings):
         neon: Neon branch reset configuration for stress runs.
         orchestration: Orchestration readiness timing.
         stress: Stress-test workload, target, and database parameters.
-        pgsql_rw_eval_db_url: Read-write PostgreSQL database URL override for
-            stress runs (`bh_agent_rw`). When set, takes precedence over
-            ``PGSQL_RW_DB_URL`` for the booking agent's write pool,
-            propose/write tools, and pool connections.
-        pgsql_ro_eval_db_url: Read-only PostgreSQL database URL override for
-            stress runs (`bh_agent_ro`), used exclusively by `run_sql`. When
-            set, takes precedence over ``PGSQL_RO_DB_URL``. Must be set
-            alongside `pgsql_rw_eval_db_url` and point at the same database --
-            leaving it unset while overriding the read-write URL runs the
-            model's searches against the write role, defeating the point of
-            the split.
-        neon_api_key: API key for authenticating with the Neon management API,
-            required when resetting a Neon branch before a stress run.
 
     """
-
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-        frozen=True,
-    )
 
     neon: NeonConfig
     orchestration: OrchestrationConfig
     stress: StressConfig
-    pgsql_rw_eval_db_url: str | None = Field(
-        default=None,
-        validation_alias="PGSQL_RW_EVAL_DB_URL",
-    )
-    pgsql_ro_eval_db_url: str | None = Field(
-        default=None,
-        validation_alias="PGSQL_RO_EVAL_DB_URL",
-    )
-    neon_api_key: str | None = Field(
-        default=None,
-        validation_alias="NEON_API_KEY",
-    )
 
 
 def _load_toml(path: Path | str | None, resource_name: str) -> dict[str, object]:
@@ -456,36 +377,9 @@ def _load_toml(path: Path | str | None, resource_name: str) -> dict[str, object]
         RuntimeError: If ``path`` points to a missing or non-file path.
 
     """
-    return tomllib.loads(_read_toml_text(path, resource_name))
-
-
-def _read_toml_text(path: Path | str | None, resource_name: str) -> str:
-    """Read the raw TOML source text from a path or packaged eval resource.
-
-    Args:
-        path: Explicit path to a TOML file, or ``None`` to read the named
-            packaged resource from the ``eval`` package.
-        resource_name: Filename of the packaged resource to use when
-            ``path`` is ``None``.
-
-    Returns:
-        The raw, unparsed TOML text.
-
-    Raises:
-        RuntimeError: If ``path`` points to a missing or non-file path.
-
-    """
-    if path is None:
-        return (
-            importlib_resources.files(BASE_PACKAGE)
-            .joinpath(resource_name)
-            .read_text(encoding="utf-8")
-        )
-    target_path = Path(path).expanduser().resolve()
-    if not target_path.exists() or not target_path.is_file():
-        msg = f"Config file not found: {target_path}"
-        raise RuntimeError(msg)
-    return target_path.read_text(encoding="utf-8")
+    return tomllib.loads(
+        read_packaged_toml(path, package=BASE_PACKAGE, resource=resource_name),
+    )
 
 
 def eval_config_source_text(path: Path | str | None = None) -> str:
@@ -507,7 +401,9 @@ def eval_config_source_text(path: Path | str | None = None) -> str:
             existing file.
 
     """
-    return _read_toml_text(path, _EVAL_CONFIG_RESOURCE)
+    return read_packaged_toml(
+        path, package=BASE_PACKAGE, resource=_EVAL_CONFIG_RESOURCE,
+    )
 
 
 @lru_cache(maxsize=1)

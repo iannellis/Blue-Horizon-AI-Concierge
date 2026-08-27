@@ -9,14 +9,50 @@ from importlib import resources as importlib_resources
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, BeforeValidator, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_PACKAGE = "blue_horizon"
 _APP_CONFIG_RESOURCE = "app_config.toml"
 
 
-class InfoRetrievalConfig(BaseModel):
+class FrozenModel(BaseModel):
+    """Base class for configuration sections that cannot be mutated after parsing."""
+
+    model_config = {"frozen": True}
+
+
+def clamp(minimum: float) -> BeforeValidator:
+    """Build a before-validator that raises a value up to `minimum`.
+
+    Used inline inside an ``Annotated[...]`` field type for the many
+    tunables that were previously enforced by a per-class
+    ``@field_validator(..., mode="before")`` calling ``max(minimum, value)``.
+    A plain function returning a dynamically-built ``Annotated[...]`` type
+    cannot be used as a field annotation itself -- pyright requires a type
+    alias's right-hand side to be a literal type expression, not a call --
+    so this returns only the validator, to be spliced into a literal
+    ``Annotated[...]`` at each call site (see `PositiveInt`/`NonNegInt`
+    below, and `eval.config.OrchestrationConfig.ready_timeout_s` for a
+    one-off minimum not worth its own named alias).
+
+    Args:
+        minimum: Smallest value the field may hold. Raw values below it are
+            raised to it before validation; values at or above it pass
+            through unchanged.
+
+    Returns:
+        BeforeValidator: Validator metadata for use inside ``Annotated[...]``.
+
+    """
+    return BeforeValidator(lambda v: max(minimum, v))
+
+
+PositiveInt = Annotated[int, clamp(1), Field(ge=1)]
+NonNegInt = Annotated[int, clamp(0), Field(ge=0)]
+
+
+class InfoRetrievalConfig(FrozenModel):
     """Retrieval configuration used by the information agent.
 
     Attributes:
@@ -29,15 +65,13 @@ class InfoRetrievalConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     top_k: int
     max_context_items: int
     vector_dims: int
     retriever_cache_max: int
 
 
-class InfoEmbeddingsConfig(BaseModel):
+class InfoEmbeddingsConfig(FrozenModel):
     """Embedding generation configuration.
 
     Attributes:
@@ -48,15 +82,13 @@ class InfoEmbeddingsConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     model: str
     batch_size: int
     timeout_s: float
     max_retries: int
 
 
-class InfoLlmConfig(BaseModel):
+class InfoLlmConfig(FrozenModel):
     """LLM configuration for the information response agent.
 
     Attributes:
@@ -67,15 +99,13 @@ class InfoLlmConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     model: str
     timeout_s: float
     max_retries: int
     reasoning_effort: str
 
 
-class InfoRedisConfig(BaseModel):
+class InfoRedisConfig(FrozenModel):
     """Redis connectivity configuration.
 
     Attributes:
@@ -88,8 +118,6 @@ class InfoRedisConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     connect_timeout_s: float
     socket_timeout_s: float
     health_check_interval_s: int
@@ -98,7 +126,7 @@ class InfoRedisConfig(BaseModel):
     retry_backoff_max_s: float
 
 
-class InfoPromptsConfig(BaseModel):
+class InfoPromptsConfig(FrozenModel):
     """Prompt template location configuration.
 
     Attributes:
@@ -108,14 +136,12 @@ class InfoPromptsConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     folder: str
     system_prompt_filename: str
     parser_prompt_filename: str
 
 
-class InfoRagConfig(BaseModel):
+class InfoRagConfig(FrozenModel):
     """Top-level configuration for the information RAG agent.
 
     Attributes:
@@ -127,8 +153,6 @@ class InfoRagConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     retrieval: InfoRetrievalConfig
     embeddings: InfoEmbeddingsConfig
     llm: InfoLlmConfig
@@ -136,7 +160,7 @@ class InfoRagConfig(BaseModel):
     prompts: InfoPromptsConfig
 
 
-class BookingLlmConfig(BaseModel):
+class BookingLlmConfig(FrozenModel):
     """LLM settings for the booking SQL agent.
 
     Attributes:
@@ -147,15 +171,13 @@ class BookingLlmConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     model: str
     reasoning_effort: str
     timeout_s: float
     max_retries: int
 
 
-class BookingAgentConfig(BaseModel):
+class BookingAgentConfig(FrozenModel):
     """Agent prompt settings for SQL generation.
 
     Attributes:
@@ -163,12 +185,10 @@ class BookingAgentConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     top_k: int
 
 
-class BookingPromptsConfig(BaseModel):
+class BookingPromptsConfig(FrozenModel):
     """Prompt template location for the booking agent.
 
     Attributes:
@@ -177,13 +197,11 @@ class BookingPromptsConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     folder: str
     system_prompt_filename: str
 
 
-class DbPoolConfig(BaseModel):
+class DbPoolConfig(FrozenModel):
     """Client-side connection pool tuning.
 
     Attributes:
@@ -200,15 +218,13 @@ class DbPoolConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     min_size: int
     max_size: int
     timeout_s: float
     max_idle_s: float
 
 
-class DbGuardrailsConfig(BaseModel):
+class DbGuardrailsConfig(FrozenModel):
     """SQL guardrail settings for the booking agent.
 
     Attributes:
@@ -217,13 +233,11 @@ class DbGuardrailsConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     max_rows: int
     allow_only_hotel_tables: bool
 
 
-class DbRetryConfig(BaseModel):
+class DbRetryConfig(FrozenModel):
     """Transient retry configuration for DB operations.
 
     Attributes:
@@ -232,13 +246,11 @@ class DbRetryConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     max_transient_retries: int
     transient_retry_backoff_s: float
 
 
-class BookingProposalsConfig(BaseModel):
+class BookingProposalsConfig(FrozenModel):
     """Configuration for the human-in-the-loop proposal store.
 
     Attributes:
@@ -248,17 +260,15 @@ class BookingProposalsConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     ttl_s: float
 
 
-class BookingDbConfig(BaseModel):
+class BookingDbConfig(FrozenModel):
     """Combined database configuration for the booking agent.
 
     Note:
         Statement timeout and search_path are set at the database role level
-        (``ALTER ROLE … SET …``) rather than in code, so they apply
+        (``ALTER ROLE ... SET ...``) rather than in code, so they apply
         consistently under connection pooling without any per-connection
         ``SET`` commands.
 
@@ -269,14 +279,12 @@ class BookingDbConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     pool: DbPoolConfig
     guardrails: DbGuardrailsConfig
     retry: DbRetryConfig
 
 
-class BookingSqlConfig(BaseModel):
+class BookingSqlConfig(FrozenModel):
     """Top-level configuration for the booking SQL agent.
 
     Attributes:
@@ -288,8 +296,6 @@ class BookingSqlConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     llm: BookingLlmConfig
     agent: BookingAgentConfig
     prompts: BookingPromptsConfig
@@ -297,7 +303,7 @@ class BookingSqlConfig(BaseModel):
     proposals: BookingProposalsConfig
 
 
-class LoadDataInfoConfig(BaseModel):
+class LoadDataInfoConfig(FrozenModel):
     """Data ingestion configuration for Redis loaders.
 
     Attributes:
@@ -305,12 +311,10 @@ class LoadDataInfoConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     data_path: Path
 
 
-class LoadDataBookingConfig(BaseModel):
+class LoadDataBookingConfig(FrozenModel):
     """Data ingestion configuration for PostgreSQL loaders.
 
     Attributes:
@@ -330,13 +334,11 @@ class LoadDataBookingConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     data_path: Path
     seeded_customer_count: int
 
 
-class LoadDataConfig(BaseModel):
+class LoadDataConfig(FrozenModel):
     """Grouped data ingestion configuration.
 
     Attributes:
@@ -345,13 +347,11 @@ class LoadDataConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     information_redis: LoadDataInfoConfig
     booking_pgsql: LoadDataBookingConfig
 
 
-class OrchestrationLlmConfig(BaseModel):
+class OrchestrationLlmConfig(FrozenModel):
     """LLM configuration for the router component.
 
     Attributes:
@@ -362,15 +362,13 @@ class OrchestrationLlmConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     model: str
     reasoning_effort: str
     timeout_s: float
     max_retries: int
 
 
-class OrchestrationRuntimeConfig(BaseModel):
+class OrchestrationRuntimeConfig(FrozenModel):
     """Runtime controls for orchestration retries and timeouts.
 
     Attributes:
@@ -385,8 +383,6 @@ class OrchestrationRuntimeConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     init_retry_base_s: float
     init_retry_max_s: float
     router_timeout_s: float
@@ -395,7 +391,7 @@ class OrchestrationRuntimeConfig(BaseModel):
     llm_concurrency: Annotated[int, Field(ge=1)] = 10
 
 
-class OrchestrationPromptsConfig(BaseModel):
+class OrchestrationPromptsConfig(FrozenModel):
     """Prompt template location for orchestration.
 
     Attributes:
@@ -404,13 +400,11 @@ class OrchestrationPromptsConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     folder: str
     orchestration_prompt_filename: str
 
 
-class MessagesConfig(BaseModel):
+class MessagesConfig(FrozenModel):
     """User-facing message strings for orchestration.
 
     Attributes:
@@ -420,14 +414,12 @@ class MessagesConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     refusal: str
     error: str
     unavailable: str
 
 
-class OrchestrationConfig(BaseModel):
+class OrchestrationConfig(FrozenModel):
     """Top-level orchestration configuration.
 
     Attributes:
@@ -438,15 +430,13 @@ class OrchestrationConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     llm: OrchestrationLlmConfig
     orchestration: OrchestrationRuntimeConfig
     prompts: OrchestrationPromptsConfig
     messages: MessagesConfig
 
 
-class NeonConfig(BaseModel):
+class NeonConfig(FrozenModel):
     """Neon branch configuration for the database reset feature.
 
     Attributes:
@@ -465,20 +455,12 @@ class NeonConfig(BaseModel):
 
     """
 
-    model_config = {"frozen": True}
-
     project_id: str
     branch_name: str
-    lock_retry_attempts: Annotated[int, Field(ge=1)] = 8
+    lock_retry_attempts: PositiveInt = 8
     lock_retry_delay_s: Annotated[float, Field(ge=0.0)] = 5.0
     operation_poll_interval_s: Annotated[float, Field(ge=0.0)] = 2.0
     operation_poll_timeout_s: Annotated[float, Field(gt=0.0)] = 120.0
-
-    @field_validator("lock_retry_attempts", mode="before")
-    @classmethod
-    def _clamp_to_one(cls, value: int) -> int:
-        """Ensure lock_retry_attempts is at least 1."""
-        return max(1, value)
 
 
 class AppConfig(BaseSettings):
@@ -555,8 +537,48 @@ def load_app_config(path: Path | str | None = None) -> AppConfig:
     return AppConfig.model_validate(toml_data)
 
 
+def read_packaged_toml(
+    path: Path | str | None,
+    *,
+    package: str,
+    resource: str,
+) -> str:
+    """Read raw TOML source text from an explicit path or a packaged resource.
+
+    Shared by `blue_horizon.config` and `eval.config`, whose TOML loaders were
+    previously identical copies of this function differing only in which
+    package/resource they defaulted to.
+
+    Args:
+        path: Optional explicit path to a TOML file; falls back to the named
+            packaged resource when ``None``.
+        package: Package to load the packaged resource from.
+        resource: Filename of the packaged resource, used when ``path`` is
+            ``None``.
+
+    Returns:
+        str: The raw, unparsed TOML text.
+
+    Raises:
+        RuntimeError: If ``path`` is provided but does not point to an
+            existing file.
+
+    """
+    if path is None:
+        return (
+            importlib_resources.files(package)
+            .joinpath(resource)
+            .read_text(encoding="utf-8")
+        )
+    target_path = Path(path).expanduser().resolve()
+    if not target_path.exists() or not target_path.is_file():
+        msg = f"Config file not found: {target_path}"
+        raise RuntimeError(msg)
+    return target_path.read_text(encoding="utf-8")
+
+
 def app_config_source_text(path: Path | str | None = None) -> str:
-    """Read the raw TOML source text backing the app configuration.
+    """Read the raw TOML source text backing the application configuration.
 
     Exposed separately from ``load_app_config`` so callers that need to
     fingerprint the exact configuration in effect (e.g. attaching a content
@@ -572,14 +594,4 @@ def app_config_source_text(path: Path | str | None = None) -> str:
         RuntimeError: If ``path`` is provided but does not point to an existing file.
 
     """
-    if path is None:
-        return (
-            importlib_resources.files(BASE_PACKAGE)
-            .joinpath(_APP_CONFIG_RESOURCE)
-            .read_text(encoding="utf-8")
-        )
-    target_path = Path(path).expanduser().resolve()
-    if not target_path.exists() or not target_path.is_file():
-        msg = f"Config file not found: {target_path}"
-        raise RuntimeError(msg)
-    return target_path.read_text(encoding="utf-8")
+    return read_packaged_toml(path, package=BASE_PACKAGE, resource=_APP_CONFIG_RESOURCE)

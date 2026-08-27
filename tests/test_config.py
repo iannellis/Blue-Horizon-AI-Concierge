@@ -5,7 +5,11 @@ import importlib.resources as importlib_resources
 import tomllib
 from pathlib import Path
 
-from blue_horizon.config import AppConfig
+import pytest
+from pydantic import ValidationError
+
+from blue_horizon.config import AppConfig, NeonConfig, NonNegInt, PositiveInt
+from blue_horizon.config import FrozenModel as _FrozenModel
 
 EXPECTED_BATCH_SIZE = 64
 EXPECTED_MAX_ROWS = 50
@@ -176,3 +180,65 @@ def test_load_packaged_app_config() -> None:
     assert cfg.neon.branch_name
     assert cfg.neon.lock_retry_attempts >= 1
     assert cfg.neon.lock_retry_delay_s >= 0
+
+
+class _PositiveModel(_FrozenModel):
+    """Minimal model exercising `PositiveInt` (clamp to 1) in isolation."""
+
+    a: PositiveInt
+
+
+class _NonNegModel(_FrozenModel):
+    """Minimal model exercising `NonNegInt` (clamp to 0) in isolation."""
+
+    a: NonNegInt
+
+
+class TestClampedTypes:
+    """`PositiveInt`/`NonNegInt` coerce out-of-range values instead of rejecting them.
+
+    This is the behaviour the former per-class ``@field_validator(...,
+    mode="before")`` methods provided; moving the clamp into a reusable
+    ``Annotated`` type must not silently turn coercion into rejection.
+    """
+
+    def test_positive_int_clamps_negative_to_one(self) -> None:
+        """A negative value is raised to 1, not rejected."""
+        assert _PositiveModel(a=-5).a == 1
+
+    def test_positive_int_clamps_zero_to_one(self) -> None:
+        """Zero is raised to 1, not rejected."""
+        assert _PositiveModel(a=0).a == 1
+
+    def test_positive_int_passes_through_in_range_value(self) -> None:
+        """A value already >= 1 is left unchanged."""
+        assert _PositiveModel(a=7).a == 7  # noqa: PLR2004
+
+    def test_non_neg_int_clamps_negative_to_zero(self) -> None:
+        """A negative value is raised to 0, not rejected."""
+        assert _NonNegModel(a=-5).a == 0
+
+    def test_non_neg_int_passes_through_zero(self) -> None:
+        """Zero is a valid value on its own and is left unchanged."""
+        assert _NonNegModel(a=0).a == 0
+
+
+class TestFrozenModel:
+    """`FrozenModel` subclasses reject attribute mutation after construction."""
+
+    def test_assignment_after_construction_raises(self) -> None:
+        """Mutating a field on an already-built instance raises."""
+        model = _PositiveModel(a=3)
+        with pytest.raises(ValidationError):
+            model.a = 9
+
+
+class TestNeonConfigClamping:
+    """`NeonConfig.lock_retry_attempts` still clamps via the shared `PositiveInt`."""
+
+    def test_lock_retry_attempts_clamps_below_one(self) -> None:
+        """A configured retry count below 1 is raised to 1, matching prior behaviour."""
+        cfg = NeonConfig(
+            project_id="p", branch_name="b", lock_retry_attempts=-3,
+        )
+        assert cfg.lock_retry_attempts == 1

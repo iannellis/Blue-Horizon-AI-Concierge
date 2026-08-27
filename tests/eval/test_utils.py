@@ -175,6 +175,26 @@ class TestCoerceFloat:
         """False returns None."""
         assert coerce_float(False) is None
 
+    def test_nan_float_returns_none(self) -> None:
+        """A NaN float is rejected, absorbing _coerce_score's finite check."""
+        assert coerce_float(float("nan")) is None
+
+    def test_positive_infinity_returns_none(self) -> None:
+        """Positive infinity is rejected."""
+        assert coerce_float(float("inf")) is None
+
+    def test_negative_infinity_returns_none(self) -> None:
+        """Negative infinity is rejected."""
+        assert coerce_float(float("-inf")) is None
+
+    def test_nan_string_returns_none(self) -> None:
+        """A string that parses to NaN is also rejected."""
+        assert coerce_float("nan") is None
+
+    def test_infinity_string_returns_none(self) -> None:
+        """A string that parses to infinity is also rejected."""
+        assert coerce_float("inf") is None
+
 
 # ---------------------------------------------------------------------------
 # coerce_strict_bool

@@ -712,9 +712,13 @@ def _build_aevaluate_kwargs(
 ) -> MutableMapping[str, Any]:
     """Build the keyword-argument dict for ``aevaluate``.
 
-    Inspects the ``aevaluate`` signature to choose between the
-    ``experiment_name`` and ``experiment_prefix`` parameter depending on the
-    installed LangSmith version.
+    ``langsmith`` 0.10.18's ``aevaluate`` takes ``experiment_prefix``, not
+    ``experiment_name`` (confirmed via ``inspect.signature`` against the
+    installed package -- there is no ``experiment_name`` parameter at all).
+    If a future ``langsmith`` upgrade renames or adds a parameter, this is
+    the one place to update; that's a smaller failure mode than silently
+    swallowing the resulting ``TypeError`` behind a signature check that
+    always took the same branch.
 
     Args:
         cfg: Loaded evaluation configuration.
@@ -729,18 +733,13 @@ def _build_aevaluate_kwargs(
         A mapping of keyword arguments ready to unpack into ``aevaluate``.
 
     """
-    kwargs: MutableMapping[str, Any] = {
+    return {
         "evaluators": evaluators,
         "max_concurrency": cfg.experiment.max_concurrency,
         "upload_results": upload_results,
         "metadata": metadata,
+        "experiment_prefix": experiment_name,
     }
-    signature = inspect.signature(aevaluate)
-    if "experiment_name" in signature.parameters:
-        kwargs["experiment_name"] = experiment_name
-    elif "experiment_prefix" in signature.parameters:
-        kwargs["experiment_prefix"] = experiment_name
-    return kwargs
 
 
 @dataclass(frozen=True)
@@ -887,17 +886,16 @@ async def _run_and_write_results(  # noqa: PLR0913
 
     Constructs ``SummaryContext`` with the actual ``finished_at`` timestamp in
     a ``finally`` block so the timestamp is always accurate regardless of
-    whether the run succeeded or failed.  The experiment name is read back
-    from ``aevaluate_kwargs`` (checking both the ``experiment_name`` and
-    ``experiment_prefix`` keys for LangSmith version compatibility).
+    whether the run succeeded or failed. The experiment name is read back
+    from ``aevaluate_kwargs["experiment_prefix"]``.
 
     Args:
         cfg: Loaded evaluation configuration (passed to ``run_example``).
         artifacts: Filesystem paths for the output files.
         examples: Dataset examples to evaluate.
         aevaluate_kwargs: Keyword arguments forwarded to ``aevaluate`` (also
-            supplies ``evaluators``/``experiment_name``/``metadata`` for the
-            local path, so the summary looks the same either way).
+            supplies ``evaluators``/``experiment_prefix``/``metadata`` for
+            the local path, so the summary looks the same either way).
         started_at: Timestamp when the experiment was started.
         local: When ``True``, bypass ``aevaluate`` entirely via
             ``_run_locally`` so no LangSmith trace requests are made.
@@ -924,11 +922,7 @@ async def _run_and_write_results(  # noqa: PLR0913
         caught_exc = exc
         raise
     finally:
-        exp_name = str(
-            aevaluate_kwargs.get("experiment_name")
-            or aevaluate_kwargs.get("experiment_prefix")
-            or "",
-        )
+        exp_name = str(aevaluate_kwargs.get("experiment_prefix") or "")
         run_metadata = aevaluate_kwargs.get("metadata") or {}
         context = SummaryContext(
             dataset_name=cfg.experiment.dataset_name,

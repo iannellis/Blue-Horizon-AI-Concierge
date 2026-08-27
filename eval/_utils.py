@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any
 
@@ -61,25 +62,38 @@ def coerce_int(value: object) -> int | None:
 
 
 def coerce_float(value: object) -> float | None:
-    """Coerce a value to float when possible.
+    """Coerce a value to a finite float when possible.
+
+    The single numeric coercer for the eval package: LangSmith feedback
+    scores, Ragas metric results (once unwrapped -- see
+    `eval.evaluators._rag._metric_result_to_float`), and result-aggregation
+    payloads all funnel through this.
 
     Args:
         value: Raw value to coerce.
 
     Returns:
-        Float value when coercible, otherwise None.
+        Float value when coercible and finite, otherwise None. Booleans are
+        rejected -- a score field holding True/False is a shape bug
+        upstream, not a 1.0/0.0 score. NaN and infinite values are also
+        rejected, since a judge or retrieval score that isn't a real number
+        cannot be averaged or compared against a threshold meaningfully.
 
     """
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
+        result = float(value)
+    elif isinstance(value, str):
         try:
-            return float(value.strip())
+            result = float(value.strip())
         except ValueError:
             return None
-    return None
+    else:
+        return None
+    if math.isnan(result) or math.isinf(result):
+        return None
+    return result
 
 
 def coerce_strict_bool(value: object) -> bool | None:

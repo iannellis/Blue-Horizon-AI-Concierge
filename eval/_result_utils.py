@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pandas as pd
 
-from eval._utils import json_safe
+from eval._utils import coerce_float, json_safe
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -550,7 +550,7 @@ def _update_case_metric_values(
         if summary_key is None:
             continue
 
-        score = _extract_numeric(payload.get("score"))
+        score = coerce_float(payload.get("score"))
         if score is None:
             continue
 
@@ -644,8 +644,8 @@ def _accumulate_weighted_turn_metric(
     ):
         return
 
-    score = _extract_numeric(score_payload.get("score"))
-    weight = _extract_numeric(weight_payload.get("score"))
+    score = coerce_float(score_payload.get("score"))
+    weight = coerce_float(weight_payload.get("score"))
     if score is None or weight is None or weight <= 0:
         return
 
@@ -668,7 +668,7 @@ def _extend_turn_scores_from_payload(
 
     """
     for record in _load_feedback_value_records(payload.get("value")):
-        score = _extract_numeric(record.get(score_field))
+        score = coerce_float(record.get(score_field))
         if score is not None:
             scores.append(score)
 
@@ -686,7 +686,7 @@ def _extend_rag_turn_scores(
     """
     for record in _load_feedback_value_records(payload.get("value")):
         for record_key, summary_key in _RAG_PER_TURN_SCORE_KEY_MAP.items():
-            score = _extract_numeric(record.get(record_key))
+            score = coerce_float(record.get(record_key))
             if score is not None:
                 per_turn_scores[summary_key].append(score)
 
@@ -713,28 +713,6 @@ def _build_turn_based_summary(
 
     summary.update(_mean_metrics(metric_values.per_turn_scores))
     return summary
-
-
-def _extract_numeric(value: object) -> float | None:
-    """Extract a float value from an arbitrary object.
-
-    Args:
-        value: Value to parse.
-
-    Returns:
-        Float value when possible, otherwise None.
-
-    """
-    if isinstance(value, bool):
-        return float(value)
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value)
-        except ValueError:
-            return None
-    return None
 
 
 def _build_summary_base(
@@ -780,7 +758,7 @@ def _mean_metrics(metric_values: Mapping[str, list[float]]) -> dict[str, object]
     for key, values in metric_values.items():
         if not values:
             continue
-        means[key] = statistics.mean(values)
+        means[key] = statistics.fmean(values)
     return means
 
 

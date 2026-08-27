@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
-from typing import TYPE_CHECKING, Any, cast
+from functools import cache
+from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel
 
@@ -33,13 +33,6 @@ _INFO_REQUIRED_TOOLS = (
 # Tool names used by rooms agent SQL generation
 _SQL_TOOL_NAMES = ("run_sql",)
 
-# Shared LLM client cache. A single client is reused across every evaluator
-# that calls an LLM judge (rubric grading, unbacked-success-claim
-# adjudication, ...), keyed by model name so a config change between runs
-# picks up a fresh client rather than reusing a stale one.
-_JUDGE_LLM_LOCK = asyncio.Lock()
-_JUDGE_LLM: Any | None = None
-_JUDGE_LLM_MODEL: str | None = None
 
 
 def _iter_turn_outputs(run: Run) -> list[TurnOutput]:
@@ -151,7 +144,7 @@ async def _call_judge_llm_structured[T: BaseModel](
         RuntimeError: If the model is unavailable on the Developer API.
 
     """
-    llm = await _get_judge_llm(model)
+    llm = _get_judge_llm(model)
     structured_llm = llm.with_structured_output(response_model)
     try:
         result = await structured_llm.ainvoke(prompt)
@@ -170,8 +163,17 @@ async def _call_judge_llm_structured[T: BaseModel](
     return cast("T", result)
 
 
-async def _get_judge_llm(model: str) -> BaseChatModel:
+@cache
+def _get_judge_llm(model: str) -> BaseChatModel:
     """Lazily initialize and return the shared LangChain judge model.
+
+    A single client is reused across every evaluator that calls an LLM judge
+    (rubric grading, unbacked-success-claim adjudication, ...), keyed by
+    model name so a config change between runs picks up a fresh client
+    rather than reusing a stale one. ``ChatGoogleGenerativeAI(...)`` is a
+    synchronous constructor, so caching needs no lock: `functools.cache` is
+    a single-threaded, GIL-protected dict lookup, and this module has no
+    thread pool crossing it.
 
     Args:
         model: Model name to use for the judge.
@@ -183,23 +185,13 @@ async def _get_judge_llm(model: str) -> BaseChatModel:
         RuntimeError: If the LangChain Gemini integration is unavailable.
 
     """
-    global _JUDGE_LLM  # noqa: PLW0603
-    global _JUDGE_LLM_MODEL  # noqa: PLW0603
-    if _JUDGE_LLM is not None and model == _JUDGE_LLM_MODEL:
-        return _JUDGE_LLM
-
-    async with _JUDGE_LLM_LOCK:
-        if _JUDGE_LLM is not None and model == _JUDGE_LLM_MODEL:
-            return _JUDGE_LLM
-        if _ChatGoogleGenerativeAI is None:
-            msg = "langchain-google-genai is required for judge evaluation."
-            raise RuntimeError(msg) from _LANGCHAIN_GEMINI_IMPORT_ERROR
-        _JUDGE_LLM = _ChatGoogleGenerativeAI(
-            model=model,
-            temperature=0,
-        )
-        _JUDGE_LLM_MODEL = model
-        return _JUDGE_LLM
+    if _ChatGoogleGenerativeAI is None:
+        msg = "langchain-google-genai is required for judge evaluation."
+        raise RuntimeError(msg) from _LANGCHAIN_GEMINI_IMPORT_ERROR
+    return _ChatGoogleGenerativeAI(
+        model=model,
+        temperature=0,
+    )
 
 
 def _is_model_unavailable_error(exc: Exception) -> bool:

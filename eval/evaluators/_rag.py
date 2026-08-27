@@ -10,6 +10,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import statistics
+from functools import cache
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar, runtime_checkable
 
 from pydantic import BaseModel
@@ -26,7 +28,7 @@ from ragas.metrics.collections import (
     Faithfulness,
 )
 
-from eval._utils import json_detail_metric, truncate
+from eval._utils import coerce_float, json_detail_metric, truncate
 from eval.evaluators._common import _rag_extract_reference, _rag_extract_turn_inputs
 from eval.evaluators._rag_prompts import PartialCoverageContextPrecisionPrompt
 
@@ -43,17 +45,6 @@ try:  # Optional dependency for Gemini clients used by Ragas.
 except Exception as _exc:  # noqa: BLE001
     _genai = None
     _GENAI_IMPORT_ERROR = _exc
-
-_RAGAS_LOCK = asyncio.Lock()
-_RAGAS_METRICS: (
-    tuple[
-        Faithfulness,
-        AnswerRelevancy,
-        ContextPrecision,
-        ContextRecall,
-    ]
-    | None
-) = None
 
 InstructorTypeVar = TypeVar("InstructorTypeVar", bound=BaseModel)
 
@@ -171,7 +162,11 @@ async def eval_rag_metrics_info_turns(
             },
         ]
 
-    metrics = await _get_ragas_metrics(ragas_cfg)
+    # pydantic's frozen=True models are hashable at runtime (verified:
+    # hash(ragas_cfg) succeeds), but pyright's bundled pydantic stub still
+    # declares BaseModel.__hash__ as None, so it sees RagasConfig as
+    # unhashable. False positive, not a real Hashable violation.
+    metrics = _get_ragas_metrics(ragas_cfg)  # pyright: ignore[reportArgumentType]
 
     per_turn: list[dict[str, Any]] = []
     faithfulness_scores: list[float] = []
@@ -281,10 +276,19 @@ async def eval_rag_metrics_info_turns(
     ]
 
 
-async def _get_ragas_metrics(
+@cache
+def _get_ragas_metrics(
     ragas_cfg: RagasConfig,
 ) -> tuple[Faithfulness, AnswerRelevancy, ContextPrecision, ContextRecall]:
     """Lazily initialize and return Ragas metrics with configured models.
+
+    Keyed by ``ragas_cfg`` itself (a frozen, hashable Pydantic model), so a
+    config change between runs picks up fresh metric instances rather than
+    reusing stale ones. Every constructor this calls (``Faithfulness``,
+    ``AnswerRelevancy``, ``ContextPrecision``, ``ContextRecall``,
+    ``llm_factory``, ``embedding_factory``) is synchronous, so caching needs
+    no lock: `functools.cache` is a single-threaded, GIL-protected dict lookup,
+    and this module has no thread pool crossing it.
 
     Args:
         ragas_cfg: Ragas configuration for model initialization.
@@ -294,28 +298,20 @@ async def _get_ragas_metrics(
         context_precision, context_recall).
 
     """
-    global _RAGAS_METRICS  # noqa: PLW0603
-    if _RAGAS_METRICS is not None:
-        return _RAGAS_METRICS
-
-    async with _RAGAS_LOCK:
-        if _RAGAS_METRICS is not None:
-            return _RAGAS_METRICS
-        _ensure_google_api_key_for_ragas()
-        ragas_llm = _build_ragas_llm(ragas_cfg)
-        ragas_embeddings = _ensure_base_embedding(_build_ragas_embeddings(ragas_cfg))
-        context_precision = ContextPrecision(llm=ragas_llm)
-        if ragas_cfg.custom_precision_prompt:
-            # Ragas reads the prompt off the instance at scoring time, so
-            # swapping it post-construction is enough to replace it.
-            context_precision.prompt = PartialCoverageContextPrecisionPrompt()
-        _RAGAS_METRICS = (
-            Faithfulness(llm=ragas_llm),
-            AnswerRelevancy(llm=ragas_llm, embeddings=ragas_embeddings),
-            context_precision,
-            ContextRecall(llm=ragas_llm),
-        )
-        return _RAGAS_METRICS
+    _ensure_google_api_key_for_ragas()
+    ragas_llm = _build_ragas_llm(ragas_cfg)
+    ragas_embeddings = _ensure_base_embedding(_build_ragas_embeddings(ragas_cfg))
+    context_precision = ContextPrecision(llm=ragas_llm)
+    if ragas_cfg.custom_precision_prompt:
+        # Ragas reads the prompt off the instance at scoring time, so
+        # swapping it post-construction is enough to replace it.
+        context_precision.prompt = PartialCoverageContextPrecisionPrompt()
+    return (
+        Faithfulness(llm=ragas_llm),
+        AnswerRelevancy(llm=ragas_llm, embeddings=ragas_embeddings),
+        context_precision,
+        ContextRecall(llm=ragas_llm),
+    )
 
 
 def _ensure_google_api_key_for_ragas() -> None:
@@ -553,51 +549,25 @@ def _rag_reference_is_no_match(reference: str, no_match_reference: str) -> bool:
 
 
 def _metric_result_to_float(value: object) -> float:
-    """Coerce a metric result to float.
+    """Coerce a Ragas metric result to a float, defaulting to 0.0.
+
+    Unwraps a `_MetricResultLike` object's `.value` (Ragas's own
+    `MetricResult` wrapper); the actual numeric parsing -- including the
+    finite check -- is `eval._utils.coerce_float`.
 
     Args:
         value: Metric result or numeric value returned by Ragas.
 
     Returns:
-        Float representation of the metric result.
+        Float representation of the metric result. Defaults to 0.0 rather
+        than None: a turn's per-metric score always needs a summable
+        number, and this caller never distinguishes "unscored" from
+        "scored zero" the way `coerce_float`'s callers elsewhere do.
 
     """
-    result: float
-    if isinstance(value, bool):
-        result = 1.0 if value else 0.0
-    elif isinstance(value, (int, float)):
-        result = float(value)
-    elif isinstance(value, _MetricResultLike):
-        try:
-            raw_value = value.value
-            if isinstance(raw_value, (int, float, str)):
-                result = float(raw_value)
-            else:
-                result = _fallback_float(value)
-        except (TypeError, ValueError):
-            result = _fallback_float(value)
-    else:
-        result = _fallback_float(value)
-    return result
-
-
-def _fallback_float(value: object) -> float:
-    """Coerce an arbitrary value into a float with string fallback.
-
-    Args:
-        value: Value to coerce.
-
-    Returns:
-        Float value, defaulting to 0.0 when coercion fails.
-
-    """
-    try:
-        return float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        try:
-            return float(str(value))
-        except (TypeError, ValueError):
-            return 0.0
+    if isinstance(value, _MetricResultLike):
+        value = value.value
+    return coerce_float(value) or 0.0
 
 
 def _rag_mean_or_comment(
@@ -629,6 +599,4 @@ def _rag_mean(values: list[float]) -> float:
         Mean of the values, or 0.0 when empty.
 
     """
-    if not values:
-        return 0.0
-    return sum(values) / len(values)
+    return statistics.fmean(values) if values else 0.0

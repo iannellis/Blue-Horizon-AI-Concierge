@@ -269,19 +269,33 @@ class TestJsonSafe:
         data = {"outer": [{"inner": 42}]}
         assert json_safe(data) == data
 
-    def test_pydantic_model_serialised_as_key_value_pairs(self) -> None:
-        """Pydantic v2 BaseModel is Iterable; json_safe yields key-value pair lists.
+    def test_pydantic_model_serialised_via_model_dump(self) -> None:
+        """Pydantic v2 BaseModel is Iterable, but model_dump() must win.
 
-        In Pydantic v2, BaseModel implements __iter__ yielding (key, value) tuples,
-        so json_safe hits the Iterable branch before the model_dump fallback,
-        producing a list of [key, value] pairs rather than a dict.
+        BaseModel implements __iter__ (yielding (key, value) tuples for each
+        field), so json_safe must check for a callable `model_dump` *before*
+        falling back to the Iterable branch -- otherwise a model serialises
+        as a flat list of [key, value] pairs instead of a proper dict. This
+        pins the fix directly: a regression here silently reintroduces that
+        defect for every LangSmith EvaluationResult written to results.jsonl.
         """
 
         class M(BaseModel):
             x: int = 1
 
         result = json_safe(M())
-        assert result == [["x", 1]]
+        assert result == {"x": 1}
+
+    def test_pydantic_model_field_order_preserved(self) -> None:
+        """Multiple fields serialise as a dict with every field present."""
+
+        class M(BaseModel):
+            key: str
+            score: float | None = None
+            comment: str | None = None
+
+        result = json_safe(M(key="route_accuracy", score=1.0))
+        assert result == {"key": "route_accuracy", "score": 1.0, "comment": None}
 
     def test_dataclass_uses_dict(self) -> None:
         """Dataclass instances are serialised via __dict__ (vars())."""

@@ -1,8 +1,8 @@
 """Result extraction and aggregation utilities for evaluation runs.
 
-Provides Protocol stubs for LangSmith result objects, helpers for extracting
-per-result data (case/example IDs, outputs, feedback), and functions for
-aggregating summary statistics across all results.
+Provides helpers for extracting per-result data (case/example IDs, outputs,
+feedback) from a LangSmith result row, and functions for aggregating summary
+statistics across all results.
 """
 
 from __future__ import annotations
@@ -12,21 +12,14 @@ import statistics
 from collections.abc import Iterable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pandas as pd
-from pydantic import TypeAdapter, ValidationError
 
 from eval._utils import json_safe
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-# ---------------------------------------------------------------------------
-# Structural protocols for LangSmith result objects
-# ---------------------------------------------------------------------------
-
-_FEEDBACK_PAIR_LIST_ADAPTER = TypeAdapter(list[tuple[str, Any]])
 
 _CASE_SUMMARY_SCORE_KEY_MAP: dict[str, str] = {
     "route_accuracy": "route_accuracy",
@@ -67,58 +60,6 @@ _RAG_PER_TURN_SCORE_KEY_MAP: dict[str, str] = {
 }
 
 
-class SupportsAttrs(Protocol):
-    """Structural protocol for objects exposing attributes."""
-
-    def __getattr__(self, name: str) -> object:
-        """Return an attribute by name."""
-
-
-class ExampleLike(SupportsAttrs, Protocol):
-    """Protocol for dataset example objects used by LangSmith."""
-
-    id: object | None
-    example_id: object | None
-    case_id: object | None
-    inputs: Mapping[str, object] | SupportsAttrs | None
-    tags: Iterable[object] | None
-
-
-class RunLike(SupportsAttrs, Protocol):
-    """Protocol for LangSmith run objects."""
-
-    id: object | None
-    run_id: object | None
-    outputs: Mapping[str, object] | None
-    tags: Iterable[object] | None
-
-
-class FeedbackItemLike(SupportsAttrs, Protocol):
-    """Protocol for evaluation feedback items."""
-
-    key: object | None
-    name: object | None
-    score: object | None
-    value: object | None
-    comment: object | None
-
-
-class ResultLike(SupportsAttrs, Protocol):
-    """Protocol for LangSmith evaluation result items."""
-
-    example: ExampleLike | Mapping[str, object] | None
-    dataset_item: ExampleLike | Mapping[str, object] | None
-    run: RunLike | Mapping[str, object] | None
-    parent_run: RunLike | Mapping[str, object] | None
-    tags: Iterable[object] | None
-    tag: Iterable[object] | None
-    feedback: Mapping[str, object] | Iterable[FeedbackItemLike] | None
-    evaluation_results: Mapping[str, object] | Iterable[FeedbackItemLike] | None
-    evaluations: Mapping[str, object] | Iterable[FeedbackItemLike] | None
-    error: object | None
-    exception: object | None
-
-
 @dataclass
 class TurnMetricAggregation:
     """Accumulates intermediate values for turn-based summary metrics.
@@ -138,14 +79,30 @@ class TurnMetricAggregation:
 
 # ---------------------------------------------------------------------------
 # Top-level result row builder
+#
+# `result` is either a real LangSmith `ExperimentResultRow` (a TypedDict --
+# a plain dict at runtime -- with `run`, `example`, `evaluation_results`
+# keys) from the `aevaluate` path, or the harness's own dict
+# (`{"example":..., "run":..., "feedback":..., "error":...}`, see
+# `eval.run_experiment._run_and_score_example_locally`) from the local,
+# no-upload path. Both are plain `Mapping`s at the top level; `result["run"]`
+# and `result["example"]` are always attribute-bearing objects (a real
+# LangSmith `Run`/`Example`, or `run_experiment._LocalRun`), never dicts.
+# `_get_attr` exists for that one Mapping-or-object split, not for an
+# open-ended variety of shapes: every key checked below is one actually
+# produced by one of these two call sites (verified against
+# `ExperimentResultRow.__annotations__` and both producers), so unlike the
+# version this replaced, there is exactly one key per field, not a chain of
+# alternates guessing at other SDKs' field names.
 # ---------------------------------------------------------------------------
 
 
-def _build_results_row(result: ResultLike | Mapping[str, object]) -> dict[str, object]:
+def _build_results_row(result: Mapping[str, object]) -> dict[str, object]:
     """Build a JSON row containing outputs and evaluator feedback.
 
     Args:
-        result: Evaluation result item from LangSmith.
+        result: Evaluation result item from LangSmith, or the local-run
+            equivalent (see module docstring).
 
     Returns:
         Serialized row for experiment results.
@@ -161,7 +118,7 @@ def _build_results_row(result: ResultLike | Mapping[str, object]) -> dict[str, o
     }
 
 
-def _extract_case_id(result: ResultLike | Mapping[str, object]) -> str | None:
+def _extract_case_id(result: Mapping[str, object]) -> str | None:
     """Extract a case identifier from an evaluation result.
 
     Args:
@@ -171,25 +128,14 @@ def _extract_case_id(result: ResultLike | Mapping[str, object]) -> str | None:
         Case identifier string if available.
 
     """
-    example = _as_attr_source(
-        _get_attr(result, "example") or _get_attr(result, "dataset_item"),
-    )
-    if example is None:
+    inputs = _get_attr(result.get("example"), "inputs")
+    value = _get_attr(inputs, "case_id")
+    if value is None:
         return None
-    value = _get_attr(_as_attr_source(_get_attr(example, "inputs")), "case_id")
-    if isinstance(value, str):
-        return value
-    if value is not None:
-        return str(value)
-    value = _get_attr(example, "case_id")
-    if isinstance(value, str):
-        return value
-    if value is not None:
-        return str(value)
-    return None
+    return value if isinstance(value, str) else str(value)
 
 
-def _extract_example_id(result: ResultLike | Mapping[str, object]) -> str | None:
+def _extract_example_id(result: Mapping[str, object]) -> str | None:
     """Extract the LangSmith example id from an evaluation result.
 
     Args:
@@ -199,60 +145,34 @@ def _extract_example_id(result: ResultLike | Mapping[str, object]) -> str | None
         Example identifier string if available.
 
     """
-    example = _as_attr_source(
-        _get_attr(result, "example") or _get_attr(result, "dataset_item"),
-    )
-    if example is None:
+    value = _get_attr(result.get("example"), "id")
+    if value is None:
         return None
-    for value in (_get_attr(example, "id"), _get_attr(example, "example_id")):
-        if isinstance(value, str):
-            return value
-        if value is not None:
-            return str(value)
-    return None
+    return value if isinstance(value, str) else str(value)
 
 
 def _summarize_outputs(outputs: Mapping[str, object]) -> dict[str, object]:
     """Summarize outputs without including full transcripts.
 
     Args:
-        outputs: Output payload from the target run.
+        outputs: Output payload from the target run (``run_example``'s
+            return value: ``{"turn_outputs": [...], "case_tags": [...]}``).
 
     Returns:
         Summary containing turn counts and final routes.
 
     """
-    turns: list[object] | None = None
-    for key in ("turn_outputs", "turns", "messages"):
-        candidate = outputs.get(key)
-        if isinstance(candidate, list):
-            turns = candidate
-            break
-    final_routes: list[object] = []
-    if turns:
-        for turn in turns:
-            if isinstance(turn, Mapping):
-                route = (
-                    turn.get("route_pred")
-                    or turn.get("final_route")
-                    or turn.get("route")
-                    or turn.get("routed_to")
-                )
-                response = turn.get("response")
-                if route is None and isinstance(response, Mapping):
-                    route = response.get("route")
-                final_routes.append(route)
-            else:
-                final_routes.append(None)
-    return {
-        "num_turns": len(turns) if turns is not None else None,
-        "final_routes": final_routes or None,
-    }
+    turns = outputs.get("turn_outputs")
+    if not isinstance(turns, list):
+        return {"num_turns": None, "final_routes": None}
+    final_routes = [
+        turn.get("route_pred") if isinstance(turn, Mapping) else None
+        for turn in turns
+    ]
+    return {"num_turns": len(turns), "final_routes": final_routes or None}
 
 
-def _collect_feedback(
-    result: ResultLike | Mapping[str, object],
-) -> dict[str, dict[str, object]]:
+def _collect_feedback(result: Mapping[str, object]) -> dict[str, dict[str, object]]:
     """Collect evaluator feedback keyed by evaluator name.
 
     Args:
@@ -263,11 +183,7 @@ def _collect_feedback(
 
     """
     feedback: dict[str, dict[str, object]] = {}
-    raw_feedback = (
-        _get_attr(result, "feedback")
-        or _get_attr(result, "evaluation_results")
-        or _get_attr(result, "evaluations")
-    )
+    raw_feedback = result.get("feedback") or result.get("evaluation_results")
     if not raw_feedback:
         return feedback
     if isinstance(raw_feedback, Mapping):
@@ -362,11 +278,18 @@ def _build_feedback_payload(payload: Mapping[str, object]) -> dict[str, object]:
 def _normalize_feedback_from_sequence(
     feedback: Iterable[object],
 ) -> dict[str, dict[str, object]]:
-    """Normalize a sequence of LangSmith feedback entries.
+    """Normalize a sequence of feedback entries into a flat metric map.
+
+    Every entry actually produced here -- by either `_collect_feedback`
+    (a plain list of harness-built dicts on the local path) or by this
+    module's own re-read of ``results.jsonl`` (where ``json_safe`` now
+    serializes each ``EvaluationResult`` straight to a dict; see
+    `eval._utils.json_safe`) -- is already a plain mapping. A non-mapping
+    entry is skipped rather than guessed at.
 
     Args:
-        feedback: Iterable of feedback entries, each represented as an object,
-            mapping, or persisted list-of-pairs structure.
+        feedback: Iterable of feedback entries, each a mapping with a
+            ``key`` (or ``name``) field.
 
     Returns:
         Flat metric map with normalized payloads.
@@ -375,64 +298,19 @@ def _normalize_feedback_from_sequence(
     normalized: dict[str, dict[str, object]] = {}
 
     for item in feedback:
-        payload = _coerce_feedback_entry(item)
-        if payload is None:
+        if not isinstance(item, Mapping):
             continue
 
-        key = payload.get("key") or payload.get("name")
+        key = item.get("key") or item.get("name")
         if not key:
             continue
 
-        normalized[str(key)] = _build_feedback_payload(payload)
+        normalized[str(key)] = _build_feedback_payload(item)
 
     return normalized
 
 
-def _coerce_feedback_entry(item: object) -> dict[str, object] | None:
-    """Coerce a feedback item into a plain dictionary.
-
-    Args:
-        item: Feedback entry represented as an object, mapping, or list of
-            ``(key, value)`` pairs.
-
-    Returns:
-        Plain dictionary representation of the feedback item, or ``None`` when
-        the entry cannot be interpreted.
-
-    """
-    if item is None:
-        return None
-
-    if isinstance(item, Mapping):
-        return dict(item)
-
-    try:
-        pairs = _FEEDBACK_PAIR_LIST_ADAPTER.validate_python(item)
-    except ValidationError:
-        pairs = None
-
-    if pairs is not None:
-        return {str(key): value for key, value in pairs}
-
-    attr_source = _as_attr_source(item)
-    if attr_source is None:
-        return None
-
-    key = _get_attr(attr_source, "key") or _get_attr(attr_source, "name")
-    if key is None:
-        return None
-
-    return {
-        "key": key,
-        "score": _get_attr(attr_source, "score"),
-        "value": _get_attr(attr_source, "value"),
-        "comment": _get_attr(attr_source, "comment"),
-    }
-
-
-def _extract_run_outputs(
-    result: ResultLike | Mapping[str, object],
-) -> dict[str, object]:
+def _extract_run_outputs(result: Mapping[str, object]) -> dict[str, object]:
     """Extract outputs produced by the target run.
 
     Args:
@@ -442,14 +320,13 @@ def _extract_run_outputs(
         Output dictionary for the run (may be empty).
 
     """
-    run = _get_attr(result, "run") or _get_attr(result, "parent_run")
-    outputs = _get_attr(_as_attr_source(run), "outputs")
+    outputs = _get_attr(result.get("run"), "outputs")
     if isinstance(outputs, Mapping):
         return dict(outputs)
     return {}
 
 
-def _extract_error(result: ResultLike | Mapping[str, object]) -> str | None:
+def _extract_error(result: Mapping[str, object]) -> str | None:
     """Extract error information from a result if present.
 
     Args:
@@ -459,17 +336,18 @@ def _extract_error(result: ResultLike | Mapping[str, object]) -> str | None:
         Error message string if present.
 
     """
-    error = _get_attr(result, "error") or _get_attr(result, "exception")
-    if error:
-        return str(error)
-    return None
+    error = result.get("error")
+    return str(error) if error else None
 
 
-def _get_attr(
-    mapping_or_obj: Mapping[str, object] | SupportsAttrs | None,
-    key: str,
-) -> object | None:
+def _get_attr(mapping_or_obj: object | None, key: str) -> object | None:
     """Read a key from a mapping or attribute from an object.
+
+    `result["example"]` and `result["run"]` are always attribute-bearing
+    objects (a real LangSmith `Run`/`Example`, or the harness's
+    `_LocalRun`), never dicts -- but a value read *off* one of them (e.g.
+    `example.inputs`) is a plain dict, so this single helper covers both
+    without callers needing to know which shape they are holding.
 
     Args:
         mapping_or_obj: Mapping or object to read from.
@@ -484,27 +362,6 @@ def _get_attr(
     if isinstance(mapping_or_obj, Mapping):
         return mapping_or_obj.get(key)
     return getattr(mapping_or_obj, key, None)
-
-
-def _as_attr_source(
-    value: object | None,
-) -> Mapping[str, object] | SupportsAttrs | None:
-    """Narrow a value to a supported attribute source if possible.
-
-    Args:
-        value: Value to narrow.
-
-    Returns:
-        The value if it supports mapping or attribute access; otherwise None.
-
-    """
-    if value is None:
-        return None
-    if isinstance(value, Mapping):
-        return value
-    if hasattr(value, "__getattr__"):
-        return value  # type: ignore[return-value]
-    return None
 
 
 # ---------------------------------------------------------------------------

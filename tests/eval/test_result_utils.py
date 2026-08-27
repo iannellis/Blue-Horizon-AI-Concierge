@@ -20,8 +20,13 @@ def _feedback_item(
     score: object | None = None,
     value: object | None = None,
     comment: str | None = None,
-) -> list[tuple[str, object]]:
-    """Build a persisted LangSmith feedback item as a list of pairs.
+) -> dict[str, object]:
+    """Build a persisted LangSmith feedback item.
+
+    Matches what a LangSmith ``EvaluationResult`` actually persists as: a
+    plain ``{"key": ..., "score": ..., "value": ..., "comment": ...}`` dict,
+    since ``json_safe`` now checks for ``model_dump()`` before treating the
+    model as a bare iterable (see ``eval._utils.json_safe``).
 
     Args:
         key: Metric key name.
@@ -30,19 +35,14 @@ def _feedback_item(
         comment: Optional comment.
 
     Returns:
-        Feedback item encoded as the list-of-pairs structure stored in
-        ``results.jsonl``.
+        Feedback item dict matching the on-disk ``results.jsonl`` shape.
 
     """
-    item: list[tuple[str, object]] = [("key", key)]
-    item.append(("score", score))
-    item.append(("value", value))
-    item.append(("comment", comment))
-    return item
+    return {"key": key, "score": score, "value": value, "comment": comment}
 
 
 def _persisted_evaluators(
-    *feedback_items: list[tuple[str, object]],
+    *feedback_items: dict[str, object],
 ) -> dict[str, object]:
     """Build a persisted ``evaluators`` payload for a result row.
 

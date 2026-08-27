@@ -109,6 +109,12 @@ def json_safe(value: object) -> object:
     Handles nested structures, pydantic models, dataclasses, and arbitrary
     objects by converting them to JSON-serializable types.
 
+    The `model_dump`/`dict` check must run before the `Iterable` check: a
+    Pydantic v2 `BaseModel` is itself iterable (yielding `(field_name,
+    value)` pairs), so checking `Iterable` first silently turns every model
+    -- e.g. a LangSmith `EvaluationResult` -- into a flat list of
+    `[name, value]` pairs instead of a proper `{field: value}` dict.
+
     Args:
         value: Value to serialize.
 
@@ -122,8 +128,6 @@ def json_safe(value: object) -> object:
         serialized = value
     elif isinstance(value, Mapping):
         serialized = {key: json_safe(val) for key, val in value.items()}
-    elif isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
-        serialized = [json_safe(item) for item in value]
     else:
         model_dump = getattr(value, "model_dump", None)
         dict_dump = getattr(value, "dict", None)
@@ -131,6 +135,8 @@ def json_safe(value: object) -> object:
             serialized = json_safe(model_dump())
         elif callable(dict_dump):
             serialized = json_safe(dict_dump())
+        elif isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
+            serialized = [json_safe(item) for item in value]
         elif hasattr(value, "__dict__"):
             serialized = json_safe(vars(value))
         else:

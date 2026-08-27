@@ -39,10 +39,13 @@ def fmt(v: object, decimals: int = 4) -> str:
 
 
 def parse_metrics(results: list) -> dict:
-    """Convert the nested results list into a flat ``{key: kv_dict}`` mapping.
+    """Convert the results list into a flat ``{key: kv_dict}`` mapping.
 
     Args:
-        results: The raw ``evaluators.results.value`` list from one case.
+        results: The raw ``evaluators.results.value`` list from one case --
+            each entry is already a ``{"key": ..., "score": ..., ...}`` dict
+            (see ``eval._utils.json_safe``, which serializes a LangSmith
+            ``EvaluationResult`` directly into this shape).
 
     Returns:
         A dict mapping each metric key to its full key-value pair dict.
@@ -50,10 +53,9 @@ def parse_metrics(results: list) -> dict:
     """
     metrics: dict = {}
     for item in results:
-        kv = {pair[0]: pair[1] for pair in item}
-        k = kv.get("key")
-        if k:
-            metrics[k] = kv
+        key = item.get("key")
+        if key:
+            metrics[key] = item
     return metrics
 
 

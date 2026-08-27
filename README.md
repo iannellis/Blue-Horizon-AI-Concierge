@@ -76,7 +76,8 @@ Mean of three consecutive full runs over the 206-case dataset:
 | Stress test: 250 concurrent booking ops | **0 errors** |
 | Latency p50 (info / booking) | **5.0 s** / **5.5 s** |
 
-The stress test reveals no double-bookings, which is enforced by the database schema.
+Double-bookings do not appear in the stress test because the schema makes them
+unstorable.
 
 Full metric tables, per-run ranges, methodology, and what grades what:
 [Evaluation](https://iannellis.github.io/Blue-Horizon-AI-Concierge/evaluation/).

@@ -73,8 +73,10 @@ Mean of three consecutive full runs over the 206-case dataset:
 | RAG faithfulness / context recall | **95.7%** / **99.3%** |
 | RAG context precision / answer relevancy | **90.1%** / **83.9%** |
 | Booking tool-call success rate | **100%** |
-| Stress test: 250 concurrent booking ops | **0 errors, 0 double-bookings** |
+| Stress test: 250 concurrent booking ops | **0 errors** |
 | Latency p50 (info / booking) | **5.0 s** / **5.5 s** |
+
+The stress test reveals no double-bookings, which is enforced by the database schema.
 
 Full metric tables, per-run ranges, methodology, and what grades what:
 [Evaluation](https://iannellis.github.io/Blue-Horizon-AI-Concierge/evaluation/).

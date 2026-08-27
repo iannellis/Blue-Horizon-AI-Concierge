@@ -106,7 +106,9 @@ Two `booking_rooms` rows for the same room with overlapping date ranges, meaning
 
 This is now a schema-level impossibility rather than something checked for after the
 fact. `booking_rooms` carries a GiST exclusion constraint, `booking_rooms_no_overlap`
-(see `setup_booking_rooms_schema` in
+(see
+[`schema.sql`](https://github.com/iannellis/Blue-Horizon-AI-Concierge/blob/main/blue_horizon/load_data/schema.sql),
+applied by `setup_schema` in
 [`booking_pgsql.py`](https://github.com/iannellis/Blue-Horizon-AI-Concierge/blob/main/blue_horizon/load_data/booking_pgsql.py)),
 that Postgres enforces on every insert and update, on top of the `FOR UPDATE` locking on
 `room_availability` that `commit_booking` and `modify_booking` already perform. If the

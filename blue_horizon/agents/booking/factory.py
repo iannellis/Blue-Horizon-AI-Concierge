@@ -466,9 +466,9 @@ async def _refund_preview(
 ) -> Decimal:
     """Preview the refund a cancel instruction would produce, without locking.
 
-    Mirrors `write_ops._apply_cancel_instruction`'s edge-validation and refund
-    math, but reads without `FOR UPDATE` since a proposal never writes. The
-    commit re-validates under lock; this is display-only.
+    Shares `write_ops.resolve_trim`'s edge-validation and refund-range math
+    with the commit path, but reads without `FOR UPDATE` since a proposal
+    never writes. The commit re-validates under lock; this is display-only.
 
     Args:
         pool: Read-write booking database pool (`bh_agent_rw`).
@@ -483,29 +483,11 @@ async def _refund_preview(
             mid-stay hole.
 
     """
-    instruction = write_ops.normalize_cancel_instruction(
+    trim = write_ops.resolve_trim(
         instruction, check_in=row.check_in, check_out=row.check_out,
     )
-
-    if instruction.new_check_in is None and instruction.new_check_out is None:
+    if trim is None:
         return row.total_amount
-
-    if instruction.new_check_in is not None and instruction.new_check_out is not None:
-        msg = "Cancelling a range from both ends at once is not supported."
-        raise write_ops.BookingWriteError(msg)
-
-    if instruction.new_check_in is not None:
-        new_in = instruction.new_check_in
-        if not (row.check_in < new_in < row.check_out):
-            msg = "Trim start must fall strictly within the existing stay."
-            raise write_ops.BookingWriteError(msg)
-        released_start, released_end = row.check_in, new_in
-    else:
-        new_out = instruction.new_check_out
-        if new_out is None or not (row.check_in < new_out < row.check_out):
-            msg = "Trim end must fall strictly within the existing stay."
-            raise write_ops.BookingWriteError(msg)
-        released_start, released_end = new_out, row.check_out
 
     async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         await cur.execute(
@@ -514,7 +496,7 @@ async def _refund_preview(
             FROM room_availability
             WHERE room_id = %s AND date >= %s AND date < %s
             """,
-            (row.room_id, released_start, released_end),
+            (row.room_id, trim.released_start, trim.released_end),
         )
         result = await cur.fetchone()
     return result["refund"]

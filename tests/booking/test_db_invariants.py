@@ -1,7 +1,7 @@
 """Tests for `booking_rooms`'s constraint and trigger backstops against a real DB.
 
 `booking_rooms` carries a GiST exclusion constraint (see
-`blue_horizon.load_data.booking_pgsql.setup_booking_rooms_schema`) that makes
+`blue_horizon.load_data.booking_pgsql.setup_schema`'s `schema.sql`) that makes
 two rows for the same room with overlapping `[check_in, check_out)` spans
 impossible to insert or update into existence -- a double-booking is now a
 schema-level impossibility, not merely something detected after the fact. It

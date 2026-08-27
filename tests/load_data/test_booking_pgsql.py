@@ -23,6 +23,8 @@ from blue_horizon.load_data.booking_pgsql import (
     prepare_room_availability_dataframe,
     prepare_rooms_dataframe,
     regrant_booking_agent_role,
+    setup_maintenance_booking_guard,
+    setup_schema,
 )
 
 if TYPE_CHECKING:
@@ -383,3 +385,75 @@ class TestRegrantBookingAgentRole:
         assert conn.executed_sql is not None
         assert "bh_agent_ro" in conn.executed_sql
         assert "bh_agent_rw" in conn.executed_sql
+
+
+class TestSetupSchema:
+    """setup_schema executes schema.sql with its enum placeholders filled in."""
+
+    def test_fills_in_enum_placeholders(self) -> None:
+        """Each of the four enum-label lists appears, quoted, in the executed SQL."""
+        conn = _FakeExecuteConnection()
+
+        # _FakeExecuteConnection implements only the .execute() surface
+        # setup_schema actually exercises, not the full psycopg.Connection
+        # interface.
+        setup_schema(
+            cast("psycopg.Connection[Any]", conn),
+            room_type_values=["Sky Villa"],
+            bed_type_values=["Murphy Bed"],
+            room_status_values=["Available"],
+            availability_status_values=["Booked"],
+        )
+
+        assert conn.executed_sql is not None
+        assert "'Sky Villa'" in conn.executed_sql
+        assert "'Murphy Bed'" in conn.executed_sql
+        assert "'Available'" in conn.executed_sql
+        assert "'Booked'" in conn.executed_sql
+        assert "CREATE TABLE rooms" in conn.executed_sql
+        assert "CREATE TABLE booking_rooms" in conn.executed_sql
+        # The maintenance-guard trigger is a separate, later step (see
+        # setup_maintenance_booking_guard) so it must not be in this file.
+        assert "booking_rooms_no_maintenance" not in conn.executed_sql
+
+    def test_placeholders_are_not_left_literally_in_the_sql(self) -> None:
+        """Every {..._values} placeholder is substituted, none survive verbatim."""
+        conn = _FakeExecuteConnection()
+
+        setup_schema(
+            cast("psycopg.Connection[Any]", conn),
+            room_type_values=["Sky Villa"],
+            bed_type_values=["Murphy Bed"],
+            room_status_values=["Available"],
+            availability_status_values=["Booked"],
+        )
+
+        assert conn.executed_sql is not None
+        assert "{room_type_values}" not in conn.executed_sql
+        assert "{bed_type_values}" not in conn.executed_sql
+        assert "{room_status_values}" not in conn.executed_sql
+        assert "{availability_status_values}" not in conn.executed_sql
+
+
+class TestSetupMaintenanceBookingGuard:
+    """setup_maintenance_booking_guard executes the checked-in trigger SQL file."""
+
+    def test_executes_the_sql_file_contents(self) -> None:
+        """The connection receives the full text of the .sql file, verbatim."""
+        conn = _FakeExecuteConnection()
+
+        # _FakeExecuteConnection implements only the .execute() surface
+        # setup_maintenance_booking_guard actually exercises, not the full
+        # psycopg.Connection interface.
+        setup_maintenance_booking_guard(cast("psycopg.Connection[Any]", conn))
+
+        sql_path = (
+            Path(__file__).parents[2]
+            / "blue_horizon"
+            / "load_data"
+            / "maintenance_booking_guard.sql"
+        )
+        assert conn.executed_sql == sql_path.read_text(encoding="utf-8")
+        assert conn.executed_sql is not None
+        assert "booking_rooms_no_maintenance" in conn.executed_sql
+        assert "prevent_maintenance_booking" in conn.executed_sql

@@ -107,7 +107,7 @@ is dismantling a guarantee.
 | `blue_horizon/agents/booking/proposals.py` | In-process `ProposalStore`, propose to confirm/dismiss lifecycle |
 | `blue_horizon/agents/booking/guardrails.py` | `sqlglot` AST allowlist |
 | `blue_horizon/api/app.py` | FastAPI app, SSE streaming, the confirm and dismiss endpoints |
-| `blue_horizon/load_data/` | Redis and PostgreSQL loaders, plus `regrant_booking_agent_role.sql` |
+| `blue_horizon/load_data/` | Redis and PostgreSQL loaders, plus `schema.sql`, `maintenance_booking_guard.sql`, and `regrant_booking_agent_role.sql` |
 | `blue_horizon/neon.py` | Neon branch reset utility |
 | `eval/` | LangSmith harness, evaluators, 206-case dataset, concurrency stress test |
 | `tests/` | Mirrors the package layout; `db_integration` marker for DB-backed tests |

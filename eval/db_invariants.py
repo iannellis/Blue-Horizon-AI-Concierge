@@ -8,7 +8,7 @@ drift out of sync with the other.
 
 `booking_rooms` carries a GiST exclusion constraint,
 `booking_rooms_no_overlap` (see
-`blue_horizon.load_data.booking_pgsql.setup_booking_rooms_schema`), that
+`blue_horizon.load_data.booking_pgsql.setup_schema`'s `schema.sql`), that
 makes the overlap this module looks for impossible to insert or update into
 existence in the first place. This query is therefore belt-and-suspenders
 against real agent-driven usage, not the primary line of defense: it would

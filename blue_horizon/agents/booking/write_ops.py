@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, LiteralString, cast
 
@@ -126,6 +126,27 @@ class CancelRoomInstruction:
     booking_room_id: int
     new_check_in: dt.date | None = None
     new_check_out: dt.date | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TrimRanges:
+    """The date ranges released and kept by trimming one edge of a room-stay.
+
+    Returned by `resolve_trim` for a partial trim; a full cancellation is
+    `None` instead, since nothing remains to describe.
+
+    Attributes:
+        released_start: First date returned to `Available` (inclusive).
+        released_end: End of the released range (exclusive).
+        remaining_in: New check-in date of the room-stay that remains.
+        remaining_out: New check-out date of the room-stay that remains.
+
+    """
+
+    released_start: dt.date
+    released_end: dt.date
+    remaining_in: dt.date
+    remaining_out: dt.date
 
 
 @dataclass(frozen=True, slots=True)
@@ -856,7 +877,7 @@ async def _price_one_room(
 def _refuse_on_overlap(room_number: int) -> Iterator[None]:
     """Translate a `booking_rooms` exclusion-constraint hit into `BookingWriteError`.
 
-    `booking_rooms_no_overlap` (see `setup_booking_rooms_schema`) is the
+    `booking_rooms_no_overlap` (see `setup_schema`'s `schema.sql`) is the
     database's own backstop against two rows for one room holding
     overlapping nights. `_price_one_room`'s `FOR UPDATE` lock on
     `room_availability` is expected to catch every real double-booking
@@ -1026,11 +1047,9 @@ async def _apply_cancel_instruction(
 
     """
     check_in, check_out = row["check_in"], row["check_out"]
-    instruction = normalize_cancel_instruction(
-        instruction, check_in=check_in, check_out=check_out,
-    )
+    trim = resolve_trim(instruction, check_in=check_in, check_out=check_out)
 
-    if instruction.new_check_in is None and instruction.new_check_out is None:
+    if trim is None:
         await _release_nights(
             cur, room_id=row["room_id"], check_in=check_in, check_out=check_out,
         )
@@ -1040,38 +1059,22 @@ async def _apply_cancel_instruction(
         )
         return cast("Decimal", row["total_amount"])
 
-    if instruction.new_check_in is not None and instruction.new_check_out is not None:
-        msg = "Cancelling a range from both ends at once is not supported."
-        raise BookingWriteError(msg)
-
-    if instruction.new_check_in is not None:
-        new_in = instruction.new_check_in
-        if not (check_in < new_in < check_out):
-            msg = "Trim start must fall strictly within the existing stay."
-            raise BookingWriteError(msg)
-        released_start, released_end = check_in, new_in
-        remaining_in, remaining_out = new_in, check_out
-    else:
-        new_out = cast("dt.date", instruction.new_check_out)
-        if not (check_in < new_out < check_out):
-            msg = "Trim end must fall strictly within the existing stay."
-            raise BookingWriteError(msg)
-        released_start, released_end = new_out, check_out
-        remaining_in, remaining_out = check_in, new_out
-
     await cur.execute(
         """
         SELECT COALESCE(SUM(price), 0) AS refund
         FROM room_availability
         WHERE room_id = %s AND date >= %s AND date < %s
         """,
-        (row["room_id"], released_start, released_end),
+        (row["room_id"], trim.released_start, trim.released_end),
     )
     refund_row = cast("dict[str, Any]", await cur.fetchone())
     refund = cast("Decimal", refund_row["refund"])
 
     await _release_nights(
-        cur, room_id=row["room_id"], check_in=released_start, check_out=released_end,
+        cur,
+        room_id=row["room_id"],
+        check_in=trim.released_start,
+        check_out=trim.released_end,
     )
     await cur.execute(
         """
@@ -1079,31 +1082,34 @@ async def _apply_cancel_instruction(
         SET check_in = %s, check_out = %s, total_amount = total_amount - %s
         WHERE booking_room_id = %s
         """,
-        (remaining_in, remaining_out, refund, row["booking_room_id"]),
+        (trim.remaining_in, trim.remaining_out, refund, row["booking_room_id"]),
     )
     return refund
 
 
-def normalize_cancel_instruction(
+def resolve_trim(
     instruction: CancelRoomInstruction,
     *,
     check_in: dt.date,
     check_out: dt.date,
-) -> CancelRoomInstruction:
-    """Drop a trim edge that merely echoes the stay's current value.
+) -> TrimRanges | None:
+    """Resolve a cancel-or-trim instruction into the ranges it releases and keeps.
 
-    A caller describing "shorten to <check-in> through <new check-out>" (or
-    the mirror case for a later check-in) naturally repeats the unchanged
-    edge alongside the edge that actually moved -- the instruction then
-    carries both `new_check_in` and `new_check_out`, even though only one
-    edge is a real change. Only two edges that both genuinely differ from
-    the stay's current dates describe an actual both-ends trim, which stays
-    rejected: the `booking_rooms` shape is one contiguous range per row, so
-    a mid-stay hole cannot be expressed without splitting it in two. This
-    normalization runs before that check on both the propose-time preview
-    (`factory._refund_preview`) and the commit path
-    (`_apply_cancel_instruction`), so a caller is never rejected merely for
-    restating a date it did not intend to change.
+    An edge that merely echoes the room-stay's current `check_in` or
+    `check_out` is dropped first: a caller describing "shorten to
+    <check-in> through <new check-out>" naturally repeats the unchanged edge
+    alongside the edge that actually moved, and should not be rejected for
+    restating a date it did not intend to change. What remains after that
+    determines the outcome: neither edge set means the whole stay is
+    released (`None`); exactly one edge set means a trim from that end; both
+    edges set is rejected, since the `booking_rooms` shape is one contiguous
+    range per row and a mid-stay hole cannot be expressed without splitting
+    it in two.
+
+    Shared by `_apply_cancel_instruction`, which locks and writes under
+    `FOR UPDATE`, and `factory._refund_preview`, which only reads for the
+    confirmation dialog -- so the two can never diverge on which nights a
+    trim releases.
 
     Args:
         instruction: The requested trim/cancel instruction, as supplied.
@@ -1111,8 +1117,12 @@ def normalize_cancel_instruction(
         check_out: The room-stay's current check-out date.
 
     Returns:
-        CancelRoomInstruction: `instruction`, or a copy with any edge equal
-        to its current value cleared.
+        TrimRanges | None: The released and remaining ranges for a partial
+        trim, or `None` when the whole stay is released.
+
+    Raises:
+        BookingWriteError: If both edges are changed at once, or a changed
+            edge does not fall strictly within the existing stay.
 
     """
     new_check_in = instruction.new_check_in
@@ -1121,8 +1131,31 @@ def normalize_cancel_instruction(
         new_check_in = None
     if new_check_out == check_out:
         new_check_out = None
-    if new_check_in == instruction.new_check_in and (
-        new_check_out == instruction.new_check_out
-    ):
-        return instruction
-    return replace(instruction, new_check_in=new_check_in, new_check_out=new_check_out)
+
+    if new_check_in is None and new_check_out is None:
+        return None
+    if new_check_in is not None and new_check_out is not None:
+        msg = "Cancelling a range from both ends at once is not supported."
+        raise BookingWriteError(msg)
+
+    if new_check_in is not None:
+        if not (check_in < new_check_in < check_out):
+            msg = "Trim start must fall strictly within the existing stay."
+            raise BookingWriteError(msg)
+        return TrimRanges(
+            released_start=check_in,
+            released_end=new_check_in,
+            remaining_in=new_check_in,
+            remaining_out=check_out,
+        )
+
+    new_out = cast("dt.date", new_check_out)
+    if not (check_in < new_out < check_out):
+        msg = "Trim end must fall strictly within the existing stay."
+        raise BookingWriteError(msg)
+    return TrimRanges(
+        released_start=new_out,
+        released_end=check_out,
+        remaining_in=check_in,
+        remaining_out=new_out,
+    )

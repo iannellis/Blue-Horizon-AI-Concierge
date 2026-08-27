@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -166,6 +166,34 @@ def json_value(obj: object, *, max_len: int | None = None) -> str:
     if max_len is not None and max_len > 0 and len(payload) > max_len:
         return f"{payload[:max_len]}..."
     return payload
+
+
+def json_detail_metric(*, key: str, data: object, max_len: int) -> dict[str, Any]:
+    """Build one JSON-value LangSmith metric, truncating if it exceeds max_len.
+
+    Shared by every evaluator that reports a details/failures list as a
+    single ``value`` metric (`_info_filters`, `_info_references`,
+    `_injection`, `_rag`, `_booking`): each used to repeat this same
+    serialize-then-check-length dance inline.
+
+    Args:
+        key: LangSmith metric key.
+        data: JSON-serializable detail payload (typically a list of records).
+        max_len: Maximum serialized length before truncation.
+
+    Returns:
+        A LangSmith value metric dict: `{"key": key, "value": <json>}`, with
+        `"comment": "JSON truncated"` added when the payload was cut down.
+
+    """
+    raw = json_value(data)
+    if len(raw) <= max_len:
+        return {"key": key, "value": raw}
+    return {
+        "key": key,
+        "value": json_value(data, max_len=max_len),
+        "comment": "JSON truncated",
+    }
 
 
 def configure_logging(run_name: str, log_dir: Path) -> None:

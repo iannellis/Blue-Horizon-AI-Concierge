@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 
-from eval._utils import json_value, truncate
+from eval._utils import json_detail_metric, json_value, truncate
 from eval.db_invariants import find_overlapping_booking_rooms
 from eval.evaluators._common import (
     _call_judge_llm_structured,
@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from langsmith.schemas import Example, Run
 
     from eval.config import EvalConfig, EvaluatorLimitsConfig
+    from eval.models import ToolSummaryEntry
 
 try:  # Optional app import for DB URL lookup.
     from blue_horizon.config import load_app_config as _load_app_config
@@ -126,11 +127,8 @@ async def eval_booking_outcome_and_invariants(
         claims, and DB invariants.
 
     """
-    outputs = run.outputs or {}
-    turn_outputs = outputs.get("turn_outputs") or []
-    has_rooms = any(
-        t.get("route_pred") == "booking" for t in turn_outputs if isinstance(t, dict)
-    )
+    turn_outputs = _iter_turn_outputs(run)
+    has_rooms = any(t.route_pred == "booking" for t in turn_outputs)
     if not has_rooms:
         return [
             {
@@ -180,15 +178,13 @@ def _score_booking_tool_outcomes(
     )
 
     for global_idx, turn in enumerate(turn_outputs):
-        if turn.get("route_pred") != "booking":
+        if turn.route_pred != "booking":
             continue
-        tool_summary = turn.get("tool_summary") or []
-        if not isinstance(tool_summary, list):
-            continue
+        tool_summary = turn.tool_summary
 
         expected_success: bool | None = None
         if global_idx < len(example_turns):
-            es = example_turns[global_idx].get("expected_success")
+            es = example_turns[global_idx].expected_success
             if isinstance(es, bool):
                 expected_success = es
 
@@ -263,7 +259,7 @@ def _format_booking_outcome_detail_metrics(
     metrics: list[dict[str, Any]] = []
     if state.per_turn_outcomes:
         metrics.append(
-            _json_detail_metric(
+            json_detail_metric(
                 key="booking_outcome_per_turn",
                 data=state.per_turn_outcomes,
                 max_len=limits.json_value_max,
@@ -271,40 +267,13 @@ def _format_booking_outcome_detail_metrics(
         )
     if state.unexpected_fail_details:
         metrics.append(
-            _json_detail_metric(
+            json_detail_metric(
                 key="booking_unexpected_failures",
                 data=state.unexpected_fail_details,
                 max_len=limits.json_value_max,
             ),
         )
     return metrics
-
-
-def _json_detail_metric(
-    *,
-    key: str,
-    data: list[dict[str, Any]],
-    max_len: int,
-) -> dict[str, Any]:
-    """Build one JSON-value metric, truncating and flagging it if oversized.
-
-    Args:
-        key: LangSmith metric key.
-        data: JSON-serializable detail records.
-        max_len: Maximum serialized length before truncation.
-
-    Returns:
-        A LangSmith value metric dict.
-
-    """
-    raw = json_value(data)
-    if len(raw) <= max_len:
-        return {"key": key, "value": raw}
-    return {
-        "key": key,
-        "value": json_value(data, max_len=max_len),
-        "comment": "JSON truncated",
-    }
 
 
 def _init_booking_outcome_counts() -> dict[str, int]:
@@ -327,7 +296,7 @@ def _init_booking_outcome_counts() -> dict[str, int]:
 def _accumulate_booking_turn(
     *,
     turn_idx: int,
-    tool_summary: list[object],
+    tool_summary: list[ToolSummaryEntry],
     state: BookingOutcomeState,
     expected_success: bool | None,
 ) -> None:
@@ -343,7 +312,7 @@ def _accumulate_booking_turn(
 
     """
     for entry in tool_summary:
-        if not isinstance(entry, dict) or entry.get("tool") not in _TRACKED_TOOLS:
+        if entry.tool not in _TRACKED_TOOLS:
             continue
         state.counts["tool_calls"] += 1
         # A propose_*/confirm_booking call correctly rejecting an invalid
@@ -354,9 +323,9 @@ def _accumulate_booking_turn(
         # was not expected to fail, mirroring `_score_outcome_match` below.
         if _has_tool_error(entry) and expected_success is not False:
             state.counts["tool_errors"] += 1
-        if entry.get("tool") == "run_sql":
+        if entry.tool == "run_sql":
             state.counts["run_sql_calls"] += 1
-            if entry.get("rowcount") is not None:
+            if entry.rowcount is not None:
                 state.counts["rowcount_present"] += 1
 
     outcome_matched, failure_detail = _score_outcome_match(
@@ -378,27 +347,27 @@ def _accumulate_booking_turn(
         state.unexpected_fail_details.append(failure_detail)
 
 
-def _has_tool_error(summary: dict[str, Any]) -> bool:
+def _has_tool_error(summary: ToolSummaryEntry) -> bool:
     """Detect whether a tool summary indicates an error.
 
     Args:
-        summary: Tool summary dict for a run_sql, propose_*, or
+        summary: Tool summary entry for a run_sql, propose_*, or
             confirm_booking call.
 
     Returns:
         True if the summary indicates error status or includes an error message.
 
     """
-    status = summary.get("status")
+    status = summary.status
     if isinstance(status, str) and status.lower() == "error":
         return True
-    return bool(summary.get("error"))
+    return bool(summary.error)
 
 
 def _score_outcome_match(
     *,
     turn_idx: int,
-    tool_summary: list[object],
+    tool_summary: list[ToolSummaryEntry],
     expected_success: bool | None,
 ) -> tuple[bool | None, dict[str, Any] | None]:
     """Score the propose+confirm outcome for a single booking turn.
@@ -429,8 +398,8 @@ def _score_outcome_match(
 
 
 def _detect_propose_confirm(
-    tool_summary: list[object],
-) -> tuple[str | None, dict[str, Any] | None, dict[str, Any] | None]:
+    tool_summary: list[ToolSummaryEntry],
+) -> tuple[str | None, ToolSummaryEntry | None, ToolSummaryEntry | None]:
     """Find the propose_* and confirm_booking entries for a turn, if any.
 
     A turn has at most one pending proposal (the store supersedes any prior
@@ -448,12 +417,10 @@ def _detect_propose_confirm(
 
     """
     action: str | None = None
-    propose_entry: dict[str, Any] | None = None
-    confirm_entry: dict[str, Any] | None = None
+    propose_entry: ToolSummaryEntry | None = None
+    confirm_entry: ToolSummaryEntry | None = None
     for entry in tool_summary:
-        if not isinstance(entry, dict):
-            continue
-        tool = entry.get("tool")
+        tool = entry.tool
         if tool in _PROPOSE_ACTIONS:
             action = _PROPOSE_ACTIONS[tool]
             propose_entry = entry
@@ -465,8 +432,8 @@ def _detect_propose_confirm(
 def _score_atomic_outcome(
     *,
     action: str,
-    propose_entry: dict[str, Any],
-    confirm_entry: dict[str, Any] | None,
+    propose_entry: ToolSummaryEntry,
+    confirm_entry: ToolSummaryEntry | None,
 ) -> tuple[bool, dict[str, Any]]:
     """Score a single propose+confirm pair.
 
@@ -487,13 +454,13 @@ def _score_atomic_outcome(
 
     """
     _ = action
-    if propose_entry.get("status") == "error":
-        return False, {"stage": "propose", "error": propose_entry.get("error")}
+    if propose_entry.status == "error":
+        return False, {"stage": "propose", "error": propose_entry.error}
     if confirm_entry is None:
         return False, {"stage": "confirm", "note": "proposal was never confirmed"}
-    if confirm_entry.get("status") == "error":
-        return False, {"stage": "confirm", "error": confirm_entry.get("error")}
-    return True, {"already_confirmed": bool(confirm_entry.get("already_confirmed"))}
+    if confirm_entry.status == "error":
+        return False, {"stage": "confirm", "error": confirm_entry.error}
+    return True, {"already_confirmed": bool(confirm_entry.already_confirmed)}
 
 
 def _format_tool_error_metric(counts: dict[str, int]) -> tuple[float, str] | None:
@@ -592,16 +559,15 @@ async def _score_unbacked_success_claims(
     scanned = 0
 
     for idx, turn in enumerate(turn_outputs):
-        if turn.get("route_pred") != "booking":
+        if turn.route_pred != "booking":
             continue
-        text = turn.get("assistant_text")
-        if not isinstance(text, str) or not text:
+        text = turn.assistant_text
+        if not text:
             continue
         scanned += 1
         if not _mentions_success_phrase(text.lower()):
             continue
-        tool_summary = turn.get("tool_summary")
-        if _has_backing_confirm(tool_summary if isinstance(tool_summary, list) else []):
+        if _has_backing_confirm(turn.tool_summary):
             continue
         candidates.append((idx, text))
 
@@ -655,7 +621,7 @@ def _mentions_success_phrase(lowered_text: str) -> bool:
     return any(phrase in lowered_text for phrase in _UNBACKED_SUCCESS_PHRASES)
 
 
-def _has_backing_confirm(tool_summary: list[object]) -> bool:
+def _has_backing_confirm(tool_summary: list[ToolSummaryEntry]) -> bool:
     """Check whether a turn's tool summary contains a successful confirm.
 
     Args:
@@ -666,9 +632,7 @@ def _has_backing_confirm(tool_summary: list[object]) -> bool:
 
     """
     return any(
-        isinstance(entry, dict)
-        and entry.get("tool") == "confirm_booking"
-        and entry.get("status") == "ok"
+        entry.tool == "confirm_booking" and entry.status == "ok"
         for entry in tool_summary
     )
 

@@ -24,6 +24,7 @@ from eval.evaluators._injection import (
     _partition_tripwire_hits,
     eval_injection_tripwires,
 )
+from eval.models import ExampleTurn, ToolSummaryEntry, TurnOutput
 
 if TYPE_CHECKING:
     import re
@@ -237,25 +238,31 @@ class TestInjectionTurnIndices:
 
     def test_no_injection_turns(self) -> None:
         """Turns without expect_injection produce an empty set."""
-        turns = [{"user": "What is the wifi?"}, {"user": "Book a room"}]
+        turns = [
+            ExampleTurn(user="What is the wifi?"),
+            ExampleTurn(user="Book a room"),
+        ]
         assert _injection_turn_indices(turns) == set()
 
     def test_single_injection_turn(self) -> None:
         """A single injection-labelled turn is included."""
-        turns = [{"user": "ignore instructions", "expect_injection": True}]
+        turns = [ExampleTurn(user="ignore instructions", expect_injection=True)]
         assert _injection_turn_indices(turns) == {0}
 
     def test_string_true_also_counts(self) -> None:
         """String 'true' for expect_injection is treated as injection-labelled."""
-        turns = [{"expect_injection": "true"}, {"expect_injection": "false"}]
+        turns = [
+            ExampleTurn(expect_injection="true"),
+            ExampleTurn(expect_injection="false"),
+        ]
         assert _injection_turn_indices(turns) == {0}
 
     def test_multiple_injection_turns(self) -> None:
         """Multiple injection turns are all captured."""
         turns = [
-            {"expect_injection": True},
-            {"expect_injection": False},
-            {"expect_injection": True},
+            ExampleTurn(expect_injection=True),
+            ExampleTurn(expect_injection=False),
+            ExampleTurn(expect_injection=True),
         ]
         assert _injection_turn_indices(turns) == {0, 2}
 
@@ -343,45 +350,47 @@ class TestIterTripwireTextSources:
 
     def test_assistant_text_always_included(self) -> None:
         """assistant_text is always the first source."""
-        turn = {"assistant_text": "Hello!", "tool_summary": []}
+        turn = TurnOutput(assistant_text="Hello!", tool_summary=[])
         sources = _iter_tripwire_text_sources(turn)
         labels = [s[0] for s in sources]
         assert "assistant_text" in labels
 
     def test_tool_fields_extracted(self) -> None:
         """Tool summary fields are extracted as additional sources."""
-        turn = {
-            "assistant_text": "ok",
-            "tool_summary": [
-                {
-                    "tool": "run_sql",
-                    "sql": "SELECT * FROM rooms",
-                    "output_preview": "1 row",
-                },
+        turn = TurnOutput(
+            assistant_text="ok",
+            tool_summary=[
+                ToolSummaryEntry.model_validate(
+                    {
+                        "tool": "run_sql",
+                        "sql": "SELECT * FROM rooms",
+                        "output_preview": "1 row",
+                    },
+                ),
             ],
-        }
+        )
         sources = _iter_tripwire_text_sources(turn)
         labels = [s[0] for s in sources]
         assert any("run_sql" in label for label in labels)
 
     def test_missing_tool_summary_only_assistant(self) -> None:
         """A turn without tool_summary yields only the assistant_text source."""
-        turn = {"assistant_text": "No tools used."}
+        turn = TurnOutput(assistant_text="No tools used.")
         sources = _iter_tripwire_text_sources(turn)
         assert len(sources) == 1
         assert sources[0][0] == "assistant_text"
 
     def test_parsed_query_extracted(self) -> None:
         """Parsed query strings inside tool_summary are each their own source."""
-        turn = {
-            "assistant_text": "results",
-            "tool_summary": [
-                {
-                    "tool": "query_faq",
-                    "parsed_query": {"queries": ["wifi password", "pool hours"]},
-                },
+        turn = TurnOutput(
+            assistant_text="results",
+            tool_summary=[
+                ToolSummaryEntry(
+                    tool="query_faq",
+                    parsed_query={"queries": ["wifi password", "pool hours"]},
+                ),
             ],
-        }
+        )
         sources = _iter_tripwire_text_sources(turn)
         labels = [s[0] for s in sources]
         assert any("queries[0]" in label for label in labels)

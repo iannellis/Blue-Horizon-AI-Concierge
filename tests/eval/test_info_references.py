@@ -19,6 +19,7 @@ from eval.evaluators._info_references import (
     _split_expected_reference,
     eval_info_reference_subset,
 )
+from eval.models import TurnOutput
 
 if TYPE_CHECKING:
     from langsmith.schemas import Example, Run
@@ -175,39 +176,39 @@ class TestBuildReferenceCandidateText:
 
     def test_no_contexts_no_assistant_returns_empty(self) -> None:
         """A turn with neither contexts nor assistant text returns ''."""
-        assert _build_reference_candidate_text({}) == ""
+        assert _build_reference_candidate_text(TurnOutput()) == ""
 
     def test_assistant_text_only(self) -> None:
         """Only assistant_text → that text is returned directly."""
-        turn = {"assistant_text": "The pool closes at 10pm."}
+        turn = TurnOutput(assistant_text="The pool closes at 10pm.")
         assert _build_reference_candidate_text(turn) == "The pool closes at 10pm."
 
     def test_contexts_only(self) -> None:
         """Only contexts_used → joined context string is returned."""
-        turn = {"contexts_used": ["context A", "context B"]}
+        turn = TurnOutput(contexts_used=["context A", "context B"])
         result = _build_reference_candidate_text(turn)
         assert "context A" in result
         assert "context B" in result
 
     def test_both_contexts_and_assistant(self) -> None:
         """Both contexts and assistant_text are combined."""
-        turn = {
-            "contexts_used": ["relevant context"],
-            "assistant_text": "Direct answer.",
-        }
+        turn = TurnOutput(
+            contexts_used=["relevant context"],
+            assistant_text="Direct answer.",
+        )
         result = _build_reference_candidate_text(turn)
         assert "relevant context" in result
         assert "Direct answer." in result
 
     def test_none_contexts_ignored(self) -> None:
         """None items in contexts_used are skipped."""
-        turn = {"contexts_used": [None, "good context", None]}
+        turn = TurnOutput(contexts_used=[None, "good context", None])  # type: ignore[list-item]
         result = _build_reference_candidate_text(turn)
         assert "good context" in result
 
     def test_non_list_contexts_ignored(self) -> None:
         """contexts_used that is not a list is treated as absent."""
-        turn = {"contexts_used": "not a list", "assistant_text": "answer"}
+        turn = TurnOutput(contexts_used="not a list", assistant_text="answer")  # type: ignore[arg-type]
         assert _build_reference_candidate_text(turn) == "answer"
 
 

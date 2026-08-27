@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 from pydantic import BaseModel
 
 from eval._utils import truncate
+from eval.models import ExampleTurn, TurnOutput, _validate_list
 
 if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
@@ -41,27 +42,40 @@ _JUDGE_LLM: Any | None = None
 _JUDGE_LLM_MODEL: str | None = None
 
 
-def _iter_turn_outputs(run: Run) -> list[dict[str, Any]]:
-    """Extract the turn_outputs list from a LangSmith run.
+def _iter_turn_outputs(run: Run) -> list[TurnOutput]:
+    """Extract and parse the turn_outputs list from a LangSmith run.
 
     Args:
         run: LangSmith run object.
 
     Returns:
-        List of turn output dicts (empty if missing or invalid).
+        List of parsed turn outputs (empty if missing or invalid; a
+        malformed entry is dropped individually rather than failing the
+        whole run -- see `eval.models._validate_list`).
 
     """
     outputs = run.outputs or {}
-    turn_outputs = outputs.get("turn_outputs") or []
-    if isinstance(turn_outputs, list):
-        return [t for t in turn_outputs if isinstance(t, dict)]
-    return []
+    return _validate_list(TurnOutput, outputs.get("turn_outputs"))
+
+
+def _get_example_turns(example: Example) -> list[ExampleTurn]:
+    """Extract and parse the turns list from a LangSmith example input.
+
+    Args:
+        example: LangSmith example object.
+
+    Returns:
+        List of parsed example turns (empty if missing or invalid).
+
+    """
+    inputs = example.inputs or {}
+    return _validate_list(ExampleTurn, inputs.get("turns"))
 
 
 def _rag_extract_turn_inputs(
     run: Run,
     example: Example,
-) -> tuple[list[dict[str, object]], list[dict[str, object]], list[object]]:
+) -> tuple[list[TurnOutput], list[ExampleTurn], list[object]]:
     """Extract turn data from run outputs and example inputs.
 
     Args:
@@ -72,14 +86,10 @@ def _rag_extract_turn_inputs(
         Tuple of (turn_outputs, example_turns, reference_answers).
 
     """
-    outputs = run.outputs or {}
-    turn_outputs_raw = outputs.get("turn_outputs") or []
-    turn_outputs = [t for t in turn_outputs_raw if isinstance(t, dict)]
+    turn_outputs = _iter_turn_outputs(run)
+    example_turns = _get_example_turns(example)
 
     inputs = example.inputs or {}
-    example_turns_raw = inputs.get("turns") or []
-    example_turns = [t for t in example_turns_raw if isinstance(t, dict)]
-
     reference_answers = inputs.get("reference_answers") or []
     if not isinstance(reference_answers, list):
         reference_answers = []
@@ -88,7 +98,7 @@ def _rag_extract_turn_inputs(
 
 
 def _rag_extract_reference(
-    example_turn: dict[str, object],
+    example_turn: ExampleTurn,
     reference_answers: list[object],
     index: int,
     max_chars: int,
@@ -96,7 +106,7 @@ def _rag_extract_reference(
     """Extract a reference answer for a turn if available.
 
     Args:
-        example_turn: Example turn dict containing potential reference fields.
+        example_turn: Parsed example turn, potentially carrying a reference.
         reference_answers: Optional list of reference answers from example inputs.
         index: Turn index used to lookup reference list entries.
         max_chars: Maximum length for the reference string.
@@ -105,34 +115,13 @@ def _rag_extract_reference(
         Truncated reference string if available, otherwise None.
 
     """
-    reference = example_turn.get("reference")
-    if reference is None:
-        reference = example_turn.get("expected_answer")
-    if reference is None:
-        reference = example_turn.get("ground_truth")
+    reference: object = example_turn.reference
     if reference is None and index < len(reference_answers):
         reference = reference_answers[index]
     if reference is None:
         return None
     text = truncate(reference, max_chars)
     return text or None
-
-
-def _get_example_turns(example: Example) -> list[dict[str, Any]]:
-    """Extract the turns list from a LangSmith example input.
-
-    Args:
-        example: LangSmith example object.
-
-    Returns:
-        List of example turn dicts (empty if missing or invalid).
-
-    """
-    inputs = example.inputs or {}
-    turns = inputs.get("turns") or []
-    if isinstance(turns, list):
-        return [t for t in turns if isinstance(t, dict)]
-    return []
 
 
 async def _call_judge_llm_structured[T: BaseModel](

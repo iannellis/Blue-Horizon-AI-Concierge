@@ -8,13 +8,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from eval._utils import json_value, truncate
+from eval._utils import json_detail_metric, truncate
 from eval.evaluators._common import _rag_extract_reference, _rag_extract_turn_inputs
 
 if TYPE_CHECKING:
     from langsmith.schemas import Example, Run
 
     from eval.config import EvalConfig
+    from eval.models import TurnOutput
 
 
 def eval_info_reference_subset(
@@ -58,7 +59,7 @@ def eval_info_reference_subset(
         expected_snippets = _split_expected_reference(reference)
         if not expected_snippets:
             continue
-        turn_output = turn_outputs[idx] if isinstance(turn_outputs[idx], dict) else {}
+        turn_output = turn_outputs[idx]
         candidate_text = _build_reference_candidate_text(turn_output)
         matched, missing_snippets = _reference_subset_match(
             expected_snippets,
@@ -72,10 +73,7 @@ def eval_info_reference_subset(
             failures.append(
                 {
                     "turn_index": idx,
-                    "user_snippet": truncate(
-                        str(example_turn.get("user", "")),
-                        160,
-                    ),
+                    "user_snippet": truncate(example_turn.user or "", 160),
                     "expected_snippets": expected_snippets,
                     "missing_snippets": missing_snippets,
                 },
@@ -91,18 +89,11 @@ def eval_info_reference_subset(
         ]
 
     pass_rate = passed_turns / scored_turns if scored_turns else 0.0
-    raw_failures = json_value(failures)
-    if len(raw_failures) > limits.json_value_max:
-        failures_entry = {
-            "key": "info_reference_subset_failures",
-            "value": json_value(failures, max_len=limits.json_value_max),
-            "comment": "JSON truncated",
-        }
-    else:
-        failures_entry = {
-            "key": "info_reference_subset_failures",
-            "value": raw_failures,
-        }
+    failures_entry = json_detail_metric(
+        key="info_reference_subset_failures",
+        data=failures,
+        max_len=limits.json_value_max,
+    )
 
     return [
         {
@@ -132,24 +123,22 @@ def _split_expected_reference(reference: str) -> list[str]:
     return [snippet.strip() for snippet in reference.split(" | ") if snippet.strip()]
 
 
-def _build_reference_candidate_text(turn_output: dict[str, Any]) -> str:
+def _build_reference_candidate_text(turn_output: TurnOutput) -> str:
     """Build a candidate text blob from retrieval contexts and the response.
 
     Args:
-        turn_output: Turn output dict containing contexts and assistant text.
+        turn_output: Parsed turn output containing contexts and assistant text.
 
     Returns:
         Combined candidate text used for subset matching.
 
     """
-    contexts = turn_output.get("contexts_used")
-    context_list = contexts if isinstance(contexts, list) else []
-    context_text = "\n".join([str(item) for item in context_list if item is not None])
-    assistant_text = turn_output.get("assistant_text")
+    context_text = "\n".join(turn_output.contexts_used)
+    assistant_text = turn_output.assistant_text
     if assistant_text:
         if context_text:
             return f"{context_text}\n{assistant_text}"
-        return str(assistant_text)
+        return assistant_text
     return context_text
 
 

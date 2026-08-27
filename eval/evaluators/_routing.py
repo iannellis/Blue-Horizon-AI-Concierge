@@ -49,12 +49,12 @@ def eval_routing_accuracy(run: Run, example: Example) -> list[dict[str, Any]]:
     for idx in range(total_turns):
         expected = None
         if idx < len(turns):
-            expected = turns[idx].get("expected_route")
+            expected = turns[idx].expected_route
         expected_str = str(expected) if expected is not None else "<missing>"
 
         pred = None
         if idx < len(turn_outputs):
-            pred = turn_outputs[idx].get("route_pred")
+            pred = turn_outputs[idx].route_pred
         pred_str = str(pred) if pred is not None else "<missing>"
 
         if expected_str == pred_str and expected is not None:

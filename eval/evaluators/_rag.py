@@ -26,7 +26,7 @@ from ragas.metrics.collections import (
     Faithfulness,
 )
 
-from eval._utils import json_value, truncate
+from eval._utils import json_detail_metric, truncate
 from eval.evaluators._common import _rag_extract_reference, _rag_extract_turn_inputs
 from eval.evaluators._rag_prompts import PartialCoverageContextPrecisionPrompt
 
@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from langsmith.schemas import Example, Run
 
     from eval.config import EvalConfig, RagasConfig
+    from eval.models import TurnOutput
 
 try:  # Optional dependency for Gemini clients used by Ragas.
     from google import genai as _genai
@@ -183,15 +184,15 @@ async def eval_rag_metrics_info_turns(
         if not _rag_is_eligible_turn(turn_output):
             continue
         question = truncate(
-            example_turns[idx].get("user"),
+            example_turns[idx].user,
             max_query_chars,
         )
         answer = truncate(
-            turn_output.get("assistant_text"),
+            turn_output.assistant_text,
             max_response_chars,
         )
         contexts = _rag_prepare_contexts(
-            turn_output.get("contexts_used"),
+            turn_output.contexts_used,
             max_contexts,
             max_context_chars,
         )
@@ -251,15 +252,11 @@ async def eval_rag_metrics_info_turns(
         "No references",
     )
 
-    raw_per_turn = json_value(per_turn)
-    if len(raw_per_turn) > limits.rag_per_turn_json_max:
-        per_turn_entry = {
-            "key": "rag_per_turn",
-            "value": json_value(per_turn, max_len=limits.rag_per_turn_json_max),
-            "comment": "JSON truncated",
-        }
-    else:
-        per_turn_entry = {"key": "rag_per_turn", "value": raw_per_turn}
+    per_turn_entry = json_detail_metric(
+        key="rag_per_turn",
+        data=per_turn,
+        max_len=limits.rag_per_turn_json_max,
+    )
 
     return [
         {
@@ -409,22 +406,21 @@ def _ensure_base_embedding(
     raise RuntimeError(msg)
 
 
-def _rag_is_eligible_turn(turn_output: dict[str, object]) -> bool:
+def _rag_is_eligible_turn(turn_output: TurnOutput) -> bool:
     """Determine whether a turn should be scored by Ragas.
 
     Args:
-        turn_output: Turn output dict from the run outputs.
+        turn_output: Parsed turn output from the run outputs.
 
     Returns:
         True only when the agent routed the turn to the info path.
 
     """
-    route_pred = turn_output.get("route_pred")
-    return isinstance(route_pred, str) and route_pred == "info"
+    return turn_output.route_pred == "info"
 
 
 def _rag_prepare_contexts(
-    contexts: object,
+    contexts: list[str],
     max_contexts: int,
     max_chars: int,
 ) -> list[str]:
@@ -439,12 +435,10 @@ def _rag_prepare_contexts(
         List of cleaned and truncated context strings.
 
     """
-    if not isinstance(contexts, list) or max_contexts <= 0:
+    if max_contexts <= 0:
         return []
     trimmed: list[str] = []
     for item in contexts[:max_contexts]:
-        if item is None:
-            continue
         text = truncate(item, max_chars)
         if text:
             trimmed.append(text)

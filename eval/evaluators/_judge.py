@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from langsmith.schemas import Example, Run
 
     from eval.config import EvalConfig, EvaluatorLimitsConfig
+    from eval.models import ExampleTurn, ToolSummaryEntry, TurnOutput
 
 
 class RubricScore(BaseModel):
@@ -209,16 +210,16 @@ def _judge_error_results(
 
 
 def _format_transcript(
-    example_turns: Iterable[dict[str, Any]],
-    run_turn_outputs: Iterable[dict[str, Any]],
+    example_turns: Iterable[ExampleTurn],
+    run_turn_outputs: Iterable[TurnOutput],
     limits: EvaluatorLimitsConfig,
 ) -> str:
     """Format a transcript for the judge prompt.
 
     Args:
-        example_turns: Iterable of dataset turn dicts with user messages.
-        run_turn_outputs: Iterable of run output dicts with assistant text,
-            route predictions, tool summaries, and contexts.
+        example_turns: Parsed dataset turns with user messages.
+        run_turn_outputs: Parsed run outputs with assistant text, route
+            predictions, tool summaries, and contexts.
         limits: Evaluator limits for text truncation.
 
     Returns:
@@ -236,24 +237,26 @@ def _format_transcript(
     for idx in range(total_turns):
         user_text = ""
         if idx < len(example_list):
-            user_text = str(example_list[idx].get("user", ""))
+            user_text = example_list[idx].user or ""
         assistant_text = ""
         route_pred = None
-        tool_summary: list[dict[str, Any]] = []
+        tool_summary: list[ToolSummaryEntry] = []
         contexts_used: list[str] = []
         if idx < len(output_list):
             output = output_list[idx]
-            if isinstance(output, dict):
-                assistant_text = str(output.get("assistant_text", ""))
-                route_pred = output.get("route_pred")
-                tool_summary = list(output.get("tool_summary") or [])
-                contexts_used = list(output.get("contexts_used") or [])
+            assistant_text = output.assistant_text or ""
+            route_pred = output.route_pred
+            tool_summary = output.tool_summary
+            contexts_used = output.contexts_used
 
         context_items = [
-            truncate(str(c), limits.context_max_chars) for c in contexts_used
+            truncate(c, limits.context_max_chars) for c in contexts_used
         ]
         context_items = context_items[: limits.context_max_items]
 
+        tool_summary_json = [
+            entry.model_dump(mode="json", exclude_none=True) for entry in tool_summary
+        ]
         assistant_line = (
             f"Assistant: {truncate(assistant_text, limits.assistant_max_chars)}"
         )
@@ -262,12 +265,12 @@ def _format_transcript(
             f"User: {truncate(user_text, limits.user_max_chars)}",
             assistant_line,
             f"Route: {route_pred}",
-            f"ToolSummary: {json.dumps(tool_summary, ensure_ascii=True)}",
+            f"ToolSummary: {json.dumps(tool_summary_json, ensure_ascii=True)}",
             f"ContextsUsed: {json.dumps(context_items, ensure_ascii=True)}",
         ]
         confirm_receipt_text = None
-        if idx < len(output_list) and isinstance(output_list[idx], dict):
-            confirm_receipt_text = output_list[idx].get("confirm_receipt_text")
+        if idx < len(output_list):
+            confirm_receipt_text = output_list[idx].confirm_receipt_text
         if isinstance(confirm_receipt_text, str) and confirm_receipt_text:
             turn_lines.append(
                 "AppReceiptAfterThisTurn (app-authored, sent to the guest only "

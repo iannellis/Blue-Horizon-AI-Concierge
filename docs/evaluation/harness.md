@@ -16,6 +16,7 @@ eval/
 ├── db_invariants.py            # Shared DB invariant queries
 ├── _result_utils.py            # Result aggregation and latency utilities
 ├── _utils.py                   # Shared helpers (json_safe, truncate, …)
+├── models.py                   # Typed eval wire format (TurnOutput, ExampleTurn, …)
 ├── analyze_results.py          # Ad-hoc results analysis script
 │
 ├── evaluators/                 # One module per evaluator

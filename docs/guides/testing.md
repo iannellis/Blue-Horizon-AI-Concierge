@@ -34,15 +34,21 @@ branch, because that is what running the app locally needs. Running `db_integrat
 tests in that environment would book and cancel real rows there.
 
 [`tests/conftest.py`](https://github.com/iannellis/Blue-Horizon-AI-Concierge/blob/main/tests/conftest.py)
-guards against this. Whenever `PGSQL_RW_EVAL_DB_URL`, `PGSQL_RO_EVAL_DB_URL`, and
-`PGSQL_ROOT_EVAL_DB_URL` are also set, its `pytest_configure` hook copies each onto its
-plain-named counterpart before any test runs, so a local `db_integration` run lands on
-the Development branch instead. CI's `db-integration-tests` job gets the same
-substitution from its own secrets.
+guards against this. Its `pytest_configure` hook calls `load_dotenv()` itself, first,
+then copies `PGSQL_RW_EVAL_DB_URL`/`PGSQL_RO_EVAL_DB_URL`/`PGSQL_ROOT_EVAL_DB_URL` onto
+their plain-named counterparts before any test runs, so a local `db_integration` run
+lands on the Development branch instead. CI's `db-integration-tests` job gets the same
+substitution from its own secrets, without a `.env` file in the picture.
 
-**Without those `_EVAL` variables set locally**, `db_integration` tests run against
-whatever the plain-named variables already point at, Production included. Setting the
-`_EVAL` variables locally is worth doing before running this suite by hand.
+**Having those `_EVAL` variables in your `.env` file is enough** - the hook loads `.env`
+itself, so no manual `$env:`/`export` is required in the shell running pytest. If a
+`_EVAL` variable is missing from `.env` entirely, its plain-named counterpart is left
+whatever the shell/`.env` already has it as, Production included for
+`PGSQL_RW_DB_URL`/`PGSQL_RO_DB_URL` - so a `db_integration` run that reports unexpected
+passes (rather than a clean skip) for a variable you believed was eval-only is worth
+double-checking against `.env` directly, not just the shell environment. See
+[The Production guard was a no-op on a plain local run](../design-decisions.md#the-production-guard-was-a-no-op-on-a-plain-local-run)
+for the incident that surfaced this.
 
 ## Test layout
 

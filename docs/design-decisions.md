@@ -262,6 +262,70 @@ data loader; `PGSQL_ROOT_DB_URL` addresses whatever branch a test run targets.
 `reload_sql_tables` must never run against a branch that gets reset in place, and two
 similar names are much harder to confuse than one name with two meanings.
 
+### The `json_safe` defect and its downstream cleanup code
+
+**Status:** fixed. Commit `f4b7568`.
+
+`eval/_utils.json_safe` checked `isinstance(value, Iterable)` before it checked for
+`model_dump`. Pydantic v2's `BaseModel` is itself iterable - it yields `(field_name,
+value)` pairs - so every model written to `results.jsonl` (every LangSmith
+`EvaluationResult`) was serialized as a list of `[name, value]` pairs, one pair per
+field including every unset field as `[name, None]`, instead of as a plain object.
+
+Roughly 600 lines of code existed solely to read that shape back: duck-typed `Protocol`
+shims, a dedicated pair-list adapter, and a dict-comprehension unwrap in
+`analyze_results.py`. Reordering `json_safe`'s branches - `model_dump` before
+`Iterable` - fixed the shape at the source, and most of that compensating code was
+deleted rather than kept as a second, now-redundant reader.
+
+`results.jsonl`'s on-disk shape for `evaluators.results.value` changed: a list of plain
+`{"key": ..., "score": ..., ...}` dicts instead of a list of `[[name, value], ...]`
+pair-lists. **The pinned baselines in `eval/baselines/` were deliberately left
+unregenerated.** The bug only ever affected the JSON envelope around each result - the
+`score` value for every metric was correctly present in both the buggy and fixed shapes,
+and `parse_metrics`/`ci_check.py` only ever read `key` and `score` off each entry, never
+the spurious `None` fields the bug added. A fresh run's baseline numbers would be
+statistically indistinguishable from the existing ones, so regenerating them would
+spend real API and Neon time to reproduce the same thresholds already pinned.
+
+*Generalisation:* `isinstance` branch order matters when a type checked earlier in the
+chain (`Iterable`) is a superset of a type checked later (has `model_dump`). Pydantic
+models being iterable is not obvious from reading `BaseModel` usage elsewhere in the
+codebase, which is exactly why this shipped unnoticed until the on-disk shape was
+inspected directly.
+
+### The Production guard was a no-op on a plain local run
+
+**Status:** fixed. Commit `162445d`.
+
+The override described in
+[Test databases are separated from production by construction](#test-databases-are-separated-from-production-by-construction)
+assumed the `_EVAL`-suffixed environment variables would already be present by the time
+`pytest_configure` ran. On a plain local `pytest` invocation nothing loads `.env` that
+early - `pytest_configure` fires before test collection, before any test module's own
+`load_dotenv()` call has had a chance to run - so it always found every `_EVAL` variable
+unset and overrode nothing.
+
+`PGSQL_RW_DB_URL`/`PGSQL_RO_DB_URL` still ended up populated, just later and by
+accident: whichever `db_integration` test happened to import a module with its own
+module-level `load_dotenv()` call first (`tests/api/test_app.py` importing
+`blue_horizon.api.app`) filled them in directly from `.env`'s literal values -
+Production, by design elsewhere in this same file - since `load_dotenv()` only fills in
+variables that are still unset and the override's one chance had already passed.
+`PGSQL_ROOT_DB_URL` has no literal entry in `.env` at all, so it just stayed unset and
+its one gated test skipped, every time, on every machine - the same visible symptom that
+led to noticing the invisible one.
+
+Root-caused by running `pytest -m db_integration` locally: the root-gated test skipped
+as expected, but the tests that "passed" turned out to have written real rows to
+Production. Fixed by having `pytest_configure` call `load_dotenv()` itself, first,
+closing the window entirely rather than depending on import order.
+
+*Generalisation:* a safety mechanism that depends on execution order it does not control
+is not a mechanism, it is a coincidence that held until something reordered it. The fix
+makes the guard's precondition (`.env` loaded) something it establishes itself rather
+than something it assumes.
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

@@ -110,6 +110,7 @@ is dismantling a guarantee.
 | `blue_horizon/load_data/` | Redis and PostgreSQL loaders, plus `schema.sql`, `maintenance_booking_guard.sql`, and `regrant_booking_agent_role.sql` |
 | `blue_horizon/neon.py` | Neon branch reset utility |
 | `eval/` | LangSmith harness, evaluators, 206-case dataset, concurrency stress test |
+| `eval/models.py` | Typed eval wire format (`TurnOutput`, `ToolSummaryEntry`, `ExampleTurn`), parsed once per evaluator |
 | `tests/` | Mirrors the package layout; `db_integration` marker for DB-backed tests |
 
 ## Read before changing

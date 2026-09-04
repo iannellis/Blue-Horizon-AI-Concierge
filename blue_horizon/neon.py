@@ -19,7 +19,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
-import httpx
+import httpx2
 
 if TYPE_CHECKING:
     from blue_horizon.config import NeonConfig
@@ -48,7 +48,7 @@ async def reset_branch(neon_cfg: NeonConfig, *, api_key: str | None) -> None:
             found, the branch has no parent to restore from, the restore
             operation fails, or it does not finish within
             ``neon_cfg.operation_poll_timeout_s``.
-        httpx.HTTPStatusError: If the Neon API returns a non-2xx response
+        httpx2.HTTPStatusError: If the Neon API returns a non-2xx response
             after all retry attempts are exhausted.
 
     """
@@ -56,7 +56,7 @@ async def reset_branch(neon_cfg: NeonConfig, *, api_key: str | None) -> None:
         msg = "api_key is required but was not provided (check NEON_API_KEY)."
         raise RuntimeError(msg)
     headers = {"Authorization": f"Bearer {api_key}"}
-    async with httpx.AsyncClient(headers=headers) as client:
+    async with httpx2.AsyncClient(headers=headers) as client:
         branch_id, parent_id = await _find_branch(
             client, neon_cfg.project_id, neon_cfg.branch_name,
         )
@@ -78,14 +78,14 @@ async def reset_branch(neon_cfg: NeonConfig, *, api_key: str | None) -> None:
 
 
 async def _find_branch(
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     project_id: str,
     branch_name: str,
 ) -> tuple[str, str]:
     """Resolve a branch name to its ID and parent branch ID.
 
     Args:
-        client: Authenticated ``httpx.AsyncClient`` for the Neon API.
+        client: Authenticated ``httpx2.AsyncClient`` for the Neon API.
         project_id: ID of the project that owns the branch.
         branch_name: Display name of the branch to locate.
 
@@ -94,7 +94,7 @@ async def _find_branch(
 
     Raises:
         RuntimeError: If the branch is not found or has no parent.
-        httpx.HTTPStatusError: If the Neon API returns a non-2xx response.
+        httpx2.HTTPStatusError: If the Neon API returns a non-2xx response.
 
     """
     response = await client.get(f"{_BASE_URL}/projects/{project_id}/branches")
@@ -113,7 +113,7 @@ async def _find_branch(
 
 
 async def _restore_branch(  # noqa: PLR0913
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     project_id: str,
     branch_id: str,
     parent_id: str,
@@ -132,7 +132,7 @@ async def _restore_branch(  # noqa: PLR0913
     restored yet at the moment the request is accepted.
 
     Args:
-        client: Authenticated ``httpx.AsyncClient`` for the Neon API.
+        client: Authenticated ``httpx2.AsyncClient`` for the Neon API.
         project_id: ID of the project that owns the branch.
         branch_id: ID of the branch to restore.
         parent_id: ID of the parent branch to restore from.
@@ -146,7 +146,7 @@ async def _restore_branch(  # noqa: PLR0913
     Raises:
         RuntimeError: If a restore operation fails or does not finish within
             ``operation_poll_timeout_s``.
-        httpx.HTTPStatusError: If the Neon API returns a non-2xx response
+        httpx2.HTTPStatusError: If the Neon API returns a non-2xx response
             after all retry attempts are exhausted.
 
     """
@@ -179,7 +179,7 @@ async def _restore_branch(  # noqa: PLR0913
 
 
 async def _wait_for_operations(
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     project_id: str,
     operations: list[dict[str, Any]],
     *,
@@ -189,7 +189,7 @@ async def _wait_for_operations(
     """Wait for every operation from a Neon API response to finish.
 
     Args:
-        client: Authenticated ``httpx.AsyncClient`` for the Neon API.
+        client: Authenticated ``httpx2.AsyncClient`` for the Neon API.
         project_id: ID of the project that owns the operations.
         operations: The ``operations`` list from a Neon API response, each a
             dict expected to have an ``id`` key. Entries without an ``id``
@@ -200,7 +200,7 @@ async def _wait_for_operations(
     Raises:
         RuntimeError: If an operation fails or does not finish within
             ``timeout_s``.
-        httpx.HTTPStatusError: If the Neon API returns a non-2xx response.
+        httpx2.HTTPStatusError: If the Neon API returns a non-2xx response.
 
     """
     for operation in operations:
@@ -217,7 +217,7 @@ async def _wait_for_operations(
 
 
 async def _wait_for_operation(
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     project_id: str,
     operation_id: str,
     *,
@@ -227,7 +227,7 @@ async def _wait_for_operation(
     """Poll a single Neon operation until it reaches a terminal status.
 
     Args:
-        client: Authenticated ``httpx.AsyncClient`` for the Neon API.
+        client: Authenticated ``httpx2.AsyncClient`` for the Neon API.
         project_id: ID of the project that owns the operation.
         operation_id: ID of the operation to poll.
         poll_interval_s: Seconds to wait between polls.
@@ -236,7 +236,7 @@ async def _wait_for_operation(
     Raises:
         RuntimeError: If the operation reaches a failed/cancelled status, or
             does not finish within ``timeout_s``.
-        httpx.HTTPStatusError: If the Neon API returns a non-2xx response.
+        httpx2.HTTPStatusError: If the Neon API returns a non-2xx response.
 
     """
     url = f"{_BASE_URL}/projects/{project_id}/operations/{operation_id}"

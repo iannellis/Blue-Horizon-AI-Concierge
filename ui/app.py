@@ -27,7 +27,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-import httpx
+import httpx2
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -136,7 +136,7 @@ def _check_health() -> bool:
 
     """
     try:
-        response = httpx.get(f"{_API_BASE}/v1/health", timeout=_HEALTH_TIMEOUT_S)
+        response = httpx2.get(f"{_API_BASE}/v1/health", timeout=_HEALTH_TIMEOUT_S)
         return response.status_code == _HTTP_OK  # noqa: TRY300
     except Exception:  # noqa: BLE001
         return False
@@ -156,11 +156,11 @@ def _fetch_customers_uncached() -> list[dict[str, Any]]:
         guest.
 
     Raises:
-        httpx.HTTPError: If the API could not be reached or returned an
+        httpx2.HTTPError: If the API could not be reached or returned an
             error status.
 
     """
-    response = httpx.get(f"{_API_BASE}/v1/customers", timeout=_DATA_TIMEOUT_S)
+    response = httpx2.get(f"{_API_BASE}/v1/customers", timeout=_DATA_TIMEOUT_S)
     response.raise_for_status()
     return response.json()
 
@@ -192,7 +192,7 @@ def _fetch_bookings(customer_id: int) -> list[dict[str, Any]]:
 
     """
     try:
-        response = httpx.get(
+        response = httpx2.get(
             f"{_API_BASE}/v1/bookings",
             params={"customer_id": customer_id},
             timeout=_DATA_TIMEOUT_S,
@@ -221,7 +221,7 @@ def _confirm_proposal(proposal_id: str, customer_id: int) -> dict[str, Any] | No
 
     """
     try:
-        response = httpx.post(
+        response = httpx2.post(
             f"{_API_BASE}/v1/booking/confirm",
             json={"proposal_id": proposal_id, "customer_id": customer_id},
             timeout=_CHAT_TIMEOUT_S,
@@ -245,7 +245,7 @@ def _dismiss_proposal(proposal_id: str, customer_id: int) -> None:
 
     """
     with contextlib.suppress(Exception):
-        httpx.post(
+        httpx2.post(
             f"{_API_BASE}/v1/booking/dismiss",
             json={"proposal_id": proposal_id, "customer_id": customer_id},
             timeout=_HEALTH_TIMEOUT_S,
@@ -658,7 +658,7 @@ def _stream_message(
     status = st.status("Routing your request…", state="running")
     pending_proposal: dict[str, Any] | None = None
     try:
-        with httpx.stream(
+        with httpx2.stream(
             "POST",
             f"{_API_BASE}/v1/chat",
             json={"thread_id": thread_id, "customer_id": customer_id, "text": text},
@@ -675,9 +675,9 @@ def _stream_message(
                 )
                 if result is not None:
                     return result
-    except httpx.HTTPStatusError as exc:
+    except httpx2.HTTPStatusError as exc:
         error_message = _http_error_message(exc)
-    except httpx.TimeoutException:
+    except httpx2.TimeoutException:
         error_message = (
             "The request timed out. The agent may be busy — please try again."
         )
@@ -690,7 +690,7 @@ def _stream_message(
     return error_message, None
 
 
-def _http_error_message(exc: httpx.HTTPStatusError) -> str:
+def _http_error_message(exc: httpx2.HTTPStatusError) -> str:
     """Translate a chat-endpoint HTTP error into user-facing copy.
 
     Args:

@@ -226,6 +226,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi", extra = ["standard"] },
+    { name = "httpx2" },
     { name = "langchain" },
     { name = "langchain-openai" },
     { name = "langgraph" },
@@ -248,7 +249,6 @@ docs = [
 ]
 eval = [
     { name = "google-genai" },
-    { name = "httpx2" },
     { name = "jsonref" },
     { name = "langchain-community" },
     { name = "langchain-google-genai" },
@@ -265,13 +265,13 @@ notebook = [
     { name = "openai" },
 ]
 ui = [
-    { name = "httpx" },
     { name = "streamlit", extra = ["auth"] },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "fastapi", extras = ["standard"], specifier = ">=0.129.0" },
+    { name = "httpx2", specifier = ">=2.0.0,<3.0.0" },
     { name = "langchain", specifier = ">=1.1.0,<2.0.0" },
     { name = "langchain-openai", specifier = ">=1.1.0,<2.0.0" },
     { name = "langgraph", specifier = ">=1.0.4,<2.0.0" },
@@ -294,7 +294,6 @@ docs = [
 ]
 eval = [
     { name = "google-genai", specifier = ">=1.65.0,<1.72.0" },
-    { name = "httpx2", specifier = ">=2.0.0,<3.0.0" },
     { name = "jsonref", specifier = ">=1.1.0,<2.0.0" },
     { name = "langchain-community", specifier = ">=0.4.1,<0.4.2" },
     { name = "langchain-google-genai", specifier = ">=4.2.0,<5.0.0" },
@@ -310,10 +309,7 @@ notebook = [
     { name = "llama-index-llms-openai", specifier = ">=0.6.6,<1.0.0" },
     { name = "openai", specifier = ">=2.7.2,<4.0.0" },
 ]
-ui = [
-    { name = "httpx", specifier = ">=0.27.0" },
-    { name = "streamlit", extras = ["auth"], specifier = ">=1.40.0" },
-]
+ui = [{ name = "streamlit", extras = ["auth"], specifier = ">=1.40.0" }]
 
 [[package]]
 name = "certifi"

@@ -59,7 +59,7 @@ async def reset_neon_branch(neon_cfg: NeonConfig, *, api_key: str | None) -> Non
     Raises:
         RuntimeError: If ``api_key`` is not set, or the branch cannot be
             found, or the branch has no parent to restore from.
-        httpx.HTTPStatusError: If the Neon API returns a non-2xx response.
+        httpx2.HTTPStatusError: If the Neon API returns a non-2xx response.
 
     """
     await _reset_branch(neon_cfg, api_key=api_key)

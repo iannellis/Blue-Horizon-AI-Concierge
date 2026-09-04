@@ -9,7 +9,7 @@ dependency is required.
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
+import httpx2
 import pytest
 
 from blue_horizon.config import NeonConfig
@@ -111,7 +111,7 @@ class TestRestoreBranch:
         Args:
             status_codes: HTTP status codes to return on successive POST calls.
                 A 423 response does not raise; a non-2xx non-423 response
-                raises httpx.HTTPStatusError via raise_for_status.
+                raises httpx2.HTTPStatusError via raise_for_status.
             operations: The ``operations`` list every successful response's
                 body reports. Defaults to a single already-finished operation
                 so tests that don't care about polling don't hang.
@@ -128,7 +128,7 @@ class TestRestoreBranch:
             mock_response.status_code = code
             mock_response.json.return_value = {"operations": operations}
             if code >= 400:  # noqa: PLR2004
-                mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+                mock_response.raise_for_status.side_effect = httpx2.HTTPStatusError(
                     f"HTTP {code}",
                     request=MagicMock(),
                     response=mock_response,
@@ -184,7 +184,7 @@ class TestRestoreBranch:
         client = self._make_client([423, 423])
         with (
             patch("blue_horizon.neon.asyncio.sleep", new_callable=AsyncMock),
-            pytest.raises(httpx.HTTPStatusError),
+            pytest.raises(httpx2.HTTPStatusError),
         ):
             asyncio.run(
                 _restore_branch(
@@ -349,7 +349,7 @@ class TestResetBranch:
         with (
             patch("blue_horizon.neon._find_branch", find_mock),
             patch("blue_horizon.neon._restore_branch", restore_mock),
-            patch("blue_horizon.neon.httpx.AsyncClient") as mock_client_cls,
+            patch("blue_horizon.neon.httpx2.AsyncClient") as mock_client_cls,
         ):
             mock_client_cls.return_value.__aenter__ = AsyncMock(
                 return_value=MagicMock(),

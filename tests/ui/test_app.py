@@ -23,7 +23,7 @@ environment (it lives in the optional ``ui`` dependency group).
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
-import httpx
+import httpx2
 import pytest
 
 streamlit = pytest.importorskip("streamlit", reason="streamlit not installed")
@@ -59,36 +59,36 @@ class TestCheckHealth:
         """HTTP 200 response → True."""
         mock_response = MagicMock()
         mock_response.status_code = 200
-        with patch("ui.app.httpx.get", return_value=mock_response):
+        with patch("ui.app.httpx2.get", return_value=mock_response):
             assert _check_health() is True
 
     def test_returns_false_on_503(self) -> None:
         """HTTP 503 response → False (agent still starting up)."""
         mock_response = MagicMock()
         mock_response.status_code = 503
-        with patch("ui.app.httpx.get", return_value=mock_response):
+        with patch("ui.app.httpx2.get", return_value=mock_response):
             assert _check_health() is False
 
     def test_returns_false_on_500(self) -> None:
         """Any non-200 status code → False."""
         mock_response = MagicMock()
         mock_response.status_code = 500
-        with patch("ui.app.httpx.get", return_value=mock_response):
+        with patch("ui.app.httpx2.get", return_value=mock_response):
             assert _check_health() is False
 
     def test_returns_false_on_connection_error(self) -> None:
         """Network errors (ConnectError) → False."""
         with patch(
-            "ui.app.httpx.get",
-            side_effect=httpx.ConnectError("refused"),
+            "ui.app.httpx2.get",
+            side_effect=httpx2.ConnectError("refused"),
         ):
             assert _check_health() is False
 
     def test_returns_false_on_timeout(self) -> None:
         """Request timeout → False."""
         with patch(
-            "ui.app.httpx.get",
-            side_effect=httpx.TimeoutException("timeout"),
+            "ui.app.httpx2.get",
+            side_effect=httpx2.TimeoutException("timeout"),
         ):
             assert _check_health() is False
 
@@ -201,7 +201,7 @@ class TestHttpErrorMessage:
         """HTTP 503 maps to the 'still starting up' message."""
         response = MagicMock()
         response.status_code = 503
-        exc = httpx.HTTPStatusError(
+        exc = httpx2.HTTPStatusError(
             "unavailable", request=MagicMock(), response=response,
         )
         assert "starting up" in _http_error_message(exc).lower()
@@ -210,7 +210,7 @@ class TestHttpErrorMessage:
         """Any other status code is echoed back in the message."""
         response = MagicMock()
         response.status_code = 500
-        exc = httpx.HTTPStatusError("error", request=MagicMock(), response=response)
+        exc = httpx2.HTTPStatusError("error", request=MagicMock(), response=response)
         assert "500" in _http_error_message(exc)
 
 
@@ -228,14 +228,14 @@ class TestStreamMessage:
         *,
         raise_for_status: Exception | None = None,
     ) -> MagicMock:
-        """Build a mock for ``httpx.stream`` used as a context manager.
+        """Build a mock for ``httpx2.stream`` used as a context manager.
 
         Args:
             lines: Lines returned by ``response.iter_lines()``.
             raise_for_status: If set, raised when ``raise_for_status()`` is called.
 
         Returns:
-            MagicMock suitable for use as the return value of ``httpx.stream``.
+            MagicMock suitable for use as the return value of ``httpx2.stream``.
 
         """
         mock_response = MagicMock()
@@ -256,7 +256,7 @@ class TestStreamMessage:
             'data: {"type": "done", "response": "Hello!"}',
         ])
         with (
-            patch("ui.app.httpx.stream", return_value=ctx),
+            patch("ui.app.httpx2.stream", return_value=ctx),
             patch("ui.app.st.status", return_value=MagicMock()),
         ):
             result = _stream_message("thread-1", 7, "hi")
@@ -272,7 +272,7 @@ class TestStreamMessage:
             'data: {"type": "done", "response": "Review below."}',
         ])
         with (
-            patch("ui.app.httpx.stream", return_value=ctx),
+            patch("ui.app.httpx2.stream", return_value=ctx),
             patch("ui.app.st.status", return_value=MagicMock()),
         ):
             result = _stream_message("thread-1", 7, "book it")
@@ -287,7 +287,7 @@ class TestStreamMessage:
             'data: {"type": "error", "message": "Something went wrong."}',
         ])
         with (
-            patch("ui.app.httpx.stream", return_value=ctx),
+            patch("ui.app.httpx2.stream", return_value=ctx),
             patch("ui.app.st.status", return_value=MagicMock()),
         ):
             result = _stream_message("thread-1", 7, "hi")
@@ -297,7 +297,7 @@ class TestStreamMessage:
         """The POST body carries thread_id, customer_id, and text."""
         ctx = self._make_stream_ctx(['data: {"type": "done", "response": "ok"}'])
         with (
-            patch("ui.app.httpx.stream", return_value=ctx) as mock_stream,
+            patch("ui.app.httpx2.stream", return_value=ctx) as mock_stream,
             patch("ui.app.st.status", return_value=MagicMock()),
         ):
             _stream_message("thread-1", 7, "hi")
@@ -318,7 +318,7 @@ class TestStreamMessage:
         ])
         mock_status = MagicMock()
         with (
-            patch("ui.app.httpx.stream", return_value=ctx),
+            patch("ui.app.httpx2.stream", return_value=ctx),
             patch("ui.app.st.status", return_value=mock_status),
         ):
             _stream_message("thread-1", 7, "hi")
@@ -337,7 +337,7 @@ class TestStreamMessage:
         ])
         mock_status = MagicMock()
         with (
-            patch("ui.app.httpx.stream", return_value=ctx),
+            patch("ui.app.httpx2.stream", return_value=ctx),
             patch("ui.app.st.status", return_value=mock_status),
         ):
             _stream_message("thread-1", 7, "hi")
@@ -351,7 +351,7 @@ class TestStreamMessage:
             'data: {"type": "done", "response": "ok"}',
         ])
         with (
-            patch("ui.app.httpx.stream", return_value=ctx),
+            patch("ui.app.httpx2.stream", return_value=ctx),
             patch("ui.app.st.status", return_value=MagicMock()),
         ):
             result = _stream_message("thread-1", 7, "hi")
@@ -364,7 +364,7 @@ class TestStreamMessage:
             'data: {"type": "done", "response": "ok"}',
         ])
         with (
-            patch("ui.app.httpx.stream", return_value=ctx),
+            patch("ui.app.httpx2.stream", return_value=ctx),
             patch("ui.app.st.status", return_value=MagicMock()),
         ):
             result = _stream_message("thread-1", 7, "hi")
@@ -376,7 +376,7 @@ class TestStreamMessage:
             'data: {"type": "stage", "label": "Step"}',
         ])
         with (
-            patch("ui.app.httpx.stream", return_value=ctx),
+            patch("ui.app.httpx2.stream", return_value=ctx),
             patch("ui.app.st.status", return_value=MagicMock()),
         ):
             result = _stream_message("thread-1", 7, "hi")
@@ -386,14 +386,14 @@ class TestStreamMessage:
         """HTTP 503 returns the 'still starting up' message."""
         mock_response = MagicMock()
         mock_response.status_code = 503
-        exc = httpx.HTTPStatusError(
+        exc = httpx2.HTTPStatusError(
             "Service Unavailable",
             request=MagicMock(),
             response=mock_response,
         )
         ctx = self._make_stream_ctx([], raise_for_status=exc)
         with (
-            patch("ui.app.httpx.stream", return_value=ctx),
+            patch("ui.app.httpx2.stream", return_value=ctx),
             patch("ui.app.st.status", return_value=MagicMock()),
         ):
             result = _stream_message("thread-1", 7, "hi")
@@ -404,14 +404,14 @@ class TestStreamMessage:
         """Non-503 HTTP errors return a generic message containing the status code."""
         mock_response = MagicMock()
         mock_response.status_code = 500
-        exc = httpx.HTTPStatusError(
+        exc = httpx2.HTTPStatusError(
             "Internal Server Error",
             request=MagicMock(),
             response=mock_response,
         )
         ctx = self._make_stream_ctx([], raise_for_status=exc)
         with (
-            patch("ui.app.httpx.stream", return_value=ctx),
+            patch("ui.app.httpx2.stream", return_value=ctx),
             patch("ui.app.st.status", return_value=MagicMock()),
         ):
             result = _stream_message("thread-1", 7, "hi")
@@ -420,10 +420,10 @@ class TestStreamMessage:
     def test_timeout_returns_timeout_message(self) -> None:
         """A TimeoutException returns the timeout user message."""
         ctx = MagicMock()
-        ctx.__enter__.side_effect = httpx.TimeoutException("timed out")
+        ctx.__enter__.side_effect = httpx2.TimeoutException("timed out")
         ctx.__exit__.return_value = False
         with (
-            patch("ui.app.httpx.stream", return_value=ctx),
+            patch("ui.app.httpx2.stream", return_value=ctx),
             patch("ui.app.st.status", return_value=MagicMock()),
         ):
             result = _stream_message("thread-1", 7, "hi")
@@ -432,10 +432,10 @@ class TestStreamMessage:
     def test_connection_error_returns_api_unreachable_message(self) -> None:
         """Network errors return the 'could not reach the API' message."""
         ctx = MagicMock()
-        ctx.__enter__.side_effect = httpx.ConnectError("refused")
+        ctx.__enter__.side_effect = httpx2.ConnectError("refused")
         ctx.__exit__.return_value = False
         with (
-            patch("ui.app.httpx.stream", return_value=ctx),
+            patch("ui.app.httpx2.stream", return_value=ctx),
             patch("ui.app.st.status", return_value=MagicMock()),
         ):
             result = _stream_message("thread-1", 7, "hi")
@@ -444,11 +444,11 @@ class TestStreamMessage:
     def test_error_branch_marks_status_error(self) -> None:
         """All error paths set the status widget to the error state."""
         ctx = MagicMock()
-        ctx.__enter__.side_effect = httpx.ConnectError("refused")
+        ctx.__enter__.side_effect = httpx2.ConnectError("refused")
         ctx.__exit__.return_value = False
         mock_status = MagicMock()
         with (
-            patch("ui.app.httpx.stream", return_value=ctx),
+            patch("ui.app.httpx2.stream", return_value=ctx),
             patch("ui.app.st.status", return_value=mock_status),
         ):
             _stream_message("thread-1", 7, "hi")

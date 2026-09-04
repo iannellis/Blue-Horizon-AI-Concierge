@@ -68,21 +68,23 @@ async def reset_neon_branch(neon_cfg: NeonConfig, *, api_key: str | None) -> Non
 async def _main() -> None:
     """Parse CLI args and reset the Neon branch for evaluation.
 
-    Accepts ``--project-id`` and ``--branch-name`` to identify the branch.
-    Retry settings use the ``NeonConfig`` defaults. Reads ``NEON_API_KEY``
-    from the environment or a ``.env`` file.
+    Requires ``--project-id`` and ``--branch-name`` to identify the branch;
+    argparse refuses to run and reports which one is missing rather than
+    silently falling back to a default. Retry settings use the
+    ``NeonConfig`` defaults. Reads ``NEON_API_KEY`` from the environment or
+    a ``.env`` file.
 
     """
     load_dotenv()
     parser = argparse.ArgumentParser(description="Reset a Neon branch for evaluation.")
     parser.add_argument(
         "--project-id",
-        default="",
+        required=True,
         help="Neon project ID (from the console URL).",
     )
     parser.add_argument(
         "--branch-name",
-        default="development",
+        required=True,
         help="Neon branch name to reset.",
     )
     args = parser.parse_args()

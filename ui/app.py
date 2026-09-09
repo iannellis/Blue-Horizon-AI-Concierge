@@ -554,12 +554,13 @@ def _render_sidebar() -> None:
             _render_recovery_poll()
 
         st.divider()
-        _render_reservations()
-        st.divider()
 
         if st.button("New Conversation", use_container_width=True):
             _reset_session()
             st.rerun()
+
+        st.divider()
+        _render_reservations()
 
 
 def _md(text: str) -> None:

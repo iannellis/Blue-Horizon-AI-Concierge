@@ -56,7 +56,9 @@ async def reset_branch(neon_cfg: NeonConfig, *, api_key: str | None) -> None:
         msg = "api_key is required but was not provided (check NEON_API_KEY)."
         raise RuntimeError(msg)
     headers = {"Authorization": f"Bearer {api_key}"}
-    async with httpx2.AsyncClient(headers=headers) as client:
+    async with httpx2.AsyncClient(
+        headers=headers, timeout=neon_cfg.http_timeout_s,
+    ) as client:
         branch_id, parent_id = await _find_branch(
             client, neon_cfg.project_id, neon_cfg.branch_name,
         )

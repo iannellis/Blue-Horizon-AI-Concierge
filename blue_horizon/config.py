@@ -452,6 +452,10 @@ class NeonConfig(FrozenModel):
             treating the branch as ready.
         operation_poll_timeout_s: Maximum seconds to wait for a restore
             operation to reach a terminal status before giving up.
+        http_timeout_s: Timeout in seconds for each HTTP request to the Neon
+            management API. An archived branch takes longer than the
+            client's default timeout to wake up and respond, so this must be
+            generous enough to cover that cold start.
 
     """
 
@@ -461,6 +465,7 @@ class NeonConfig(FrozenModel):
     lock_retry_delay_s: Annotated[float, Field(ge=0.0)] = 5.0
     operation_poll_interval_s: Annotated[float, Field(ge=0.0)] = 2.0
     operation_poll_timeout_s: Annotated[float, Field(gt=0.0)] = 120.0
+    http_timeout_s: Annotated[float, Field(gt=0.0)] = 30.0
 
 
 class AppConfig(BaseSettings):

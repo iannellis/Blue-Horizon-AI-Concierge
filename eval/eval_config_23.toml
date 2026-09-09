@@ -49,6 +49,9 @@ lock_retry_delay_s = 5.0
 operation_poll_interval_s = 2.0
 # Maximum seconds to wait for a restore operation to finish before giving up.
 operation_poll_timeout_s = 120.0
+# Timeout in seconds for each HTTP request to the Neon management API. An
+# archived branch takes longer than the default timeout to wake up.
+http_timeout_s = 30.0
 
 [orchestration]
 # Time in seconds to wait for OrchestrationManager readiness.

@@ -225,9 +225,16 @@ class ProposalStore:
     ) -> ConfirmOutcome:
         """Confirm a pending proposal, committing it through `write_ops`.
 
-        Single-use: a second confirm of the same `proposal_id` is a no-op
-        that replays the cached result rather than writing again, so a
-        double-click cannot double-book.
+        Single-use on the success path: a second confirm of the same
+        `proposal_id` after it has been committed is a no-op that replays
+        the cached result rather than writing again, so a double-click
+        cannot double-book. That guarantee does not extend to a confirm that
+        raised `write_ops.BookingUnavailableError`: the proposal is left
+        pending rather than retired (see below), specifically so the guest
+        can press Confirm again. Retention is still bounded -- by `ttl_s`
+        and by `invalidate_thread`, which `manager.ainvoke*` calls at the
+        start of every turn -- so a retained-pending proposal cannot outlive
+        the guest's next message.
 
         Args:
             proposal_id: Proposal to confirm.
@@ -242,6 +249,12 @@ class ProposalStore:
             ProposalOwnershipError: If `customer_id` does not own the proposal.
             write_ops.BookingWriteError: If the underlying write fails (for
                 example, the proposed nights were taken in the meantime).
+                Retires the proposal: this is a deterministic refusal, and a
+                retry would only re-evaluate the same now-known outcome.
+            write_ops.BookingUnavailableError: If the database could not be
+                reached at all. Leaves the proposal pending instead of
+                retiring it, so a subsequent confirm is a real retry rather
+                than a 404.
 
         """
         self._purge_expired()
@@ -256,9 +269,22 @@ class ProposalStore:
             )
 
         proposal = self._get_pending_and_validate(proposal_id, customer_id)
-        self._retire(proposal)
 
-        result = await _commit_proposal(write_pool, proposal)
+        # A retry lands here too, since the proposal above was left pending
+        # on the previous attempt's BookingUnavailableError. It calls
+        # write_ops.commit_booking (or cancel_/modify_) again, which
+        # re-prices every night under FOR UPDATE from scratch -- the same
+        # lock that makes double-booking structurally impossible in the
+        # first place (invariant 6). Do not "optimise" this by skipping the
+        # re-price on a retry: that lock is what makes retaining the
+        # proposal across a failed attempt safe at all.
+        try:
+            result = await _commit_proposal(write_pool, proposal)
+        except write_ops.BookingWriteError:
+            self._retire(proposal)
+            raise
+
+        self._retire(proposal)
         self._results[proposal_id] = result
         return ConfirmOutcome(proposal=proposal, result=result, already_confirmed=False)
 

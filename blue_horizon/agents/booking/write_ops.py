@@ -23,14 +23,15 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, LiteralString, cast
 
+import psycopg
 from psycopg import errors as psycopg_errors
 from psycopg.rows import dict_row
+from psycopg_pool import PoolTimeout
 
 if TYPE_CHECKING:
     import datetime as dt
     from collections.abc import Iterator, Sequence
 
-    import psycopg
     from psycopg_pool import AsyncConnectionPool
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,19 @@ class BookingWriteError(Exception):
     behind, because every write_ops function performs its work inside one
     transaction and this exception is only ever raised before that
     transaction commits.
+    """
+
+
+class BookingUnavailableError(Exception):
+    """Raised when a booking write cannot reach the database at all.
+
+    Distinct from `BookingWriteError` on purpose: this means the request was
+    never evaluated against `room_availability`, either because the pool
+    could not hand back a connection or because the connection died before
+    the transaction resolved. Nothing was decided either way, so retrying is
+    safe -- see `ProposalStore.confirm`, which relies on exactly this
+    distinction to decide whether a failed confirm should retire its
+    proposal or leave it pending for another attempt.
     """
 
 
@@ -393,46 +407,53 @@ async def commit_booking(
             `room_availability` and `booking_rooms` have drifted out of
             sync, since the `FOR UPDATE` lock above already re-validates
             availability). No partial writes are made either way.
+        BookingUnavailableError: If the database could not be reached at
+            all. No statement was necessarily sent, so a retry is a clean
+            first attempt (see `_reraise_operational_as_unavailable`).
 
     """
-    async with pool.connection() as conn:
-        async with conn.transaction(), conn.cursor(row_factory=dict_row) as cur:
-            priced = [
-                await _price_one_room(cur, room, lock=True) for room in rooms
-            ]
+    with _reraise_operational_as_unavailable():
+        async with pool.connection() as conn:
+            async with conn.transaction(), conn.cursor(row_factory=dict_row) as cur:
+                priced = [
+                    await _price_one_room(cur, room, lock=True) for room in rooms
+                ]
 
-            booking_id = await _insert_booking(cur, customer_id=customer_id)
-            for stay in priced:
-                await _lock_and_book_nights(cur, stay)
-                with _refuse_on_overlap(stay.room_number):
-                    await cur.execute(
-                        """
-                        INSERT INTO booking_rooms
-                            (booking_id, room_id, check_in, check_out, total_amount)
-                        VALUES (%s, %s, %s, %s, %s)
-                        """,
-                        (
-                            booking_id,
-                            stay.room_id,
-                            stay.check_in,
-                            stay.check_out,
-                            stay.total_amount,
-                        ),
-                    )
+                booking_id = await _insert_booking(cur, customer_id=customer_id)
+                for stay in priced:
+                    await _lock_and_book_nights(cur, stay)
+                    with _refuse_on_overlap(stay.room_number):
+                        await cur.execute(
+                            """
+                            INSERT INTO booking_rooms
+                                (booking_id, room_id, check_in, check_out, total_amount)
+                            VALUES (%s, %s, %s, %s, %s)
+                            """,
+                            (
+                                booking_id,
+                                stay.room_id,
+                                stay.check_in,
+                                stay.check_out,
+                                stay.total_amount,
+                            ),
+                        )
 
-            confirmation_number = _confirmation_number(booking_id)
-            await cur.execute(
-                "UPDATE bookings SET confirmation_number = %s WHERE booking_id = %s",
-                (confirmation_number, booking_id),
+                confirmation_number = _confirmation_number(booking_id)
+                await cur.execute(
+                    "UPDATE bookings SET confirmation_number = %s "
+                    "WHERE booking_id = %s",
+                    (confirmation_number, booking_id),
+                )
+
+            total_amount = sum(
+                (stay.total_amount for stay in priced), Decimal("0.00"),
             )
-
-        total_amount = sum((stay.total_amount for stay in priced), Decimal("0.00"))
-        return CommitResult(
-            booking_id=booking_id,
-            confirmation_number=confirmation_number,
-            rooms=tuple(priced),
-            total_amount=total_amount,
-        )
+            return CommitResult(
+                booking_id=booking_id,
+                confirmation_number=confirmation_number,
+                rooms=tuple(priced),
+                total_amount=total_amount,
+            )
 
 
 async def cancel_booking(
@@ -460,51 +481,52 @@ async def cancel_booking(
             is already cancelled, references an unknown `booking_room_id`, or
             any instruction would leave a mid-stay hole. No partial writes
             are made.
+        BookingUnavailableError: If the database could not be reached at
+            all. No statement was necessarily sent, so a retry is a clean
+            first attempt (see `_reraise_operational_as_unavailable`).
 
     """
-    async with pool.connection() as conn, conn.transaction(), conn.cursor(
-        row_factory=dict_row,
-    ) as cur:
-        existing = await _lock_booking_rooms(
-            cur, booking_id=booking_id, customer_id=customer_id,
-        )
-
-        instructions = rooms if rooms is not None else [
-            CancelRoomInstruction(booking_room_id=row["booking_room_id"])
-            for row in existing.values()
-        ]
-
-        refunded = Decimal("0.00")
-        for instruction in instructions:
-            row = existing.get(instruction.booking_room_id)
-            if row is None:
-                msg = (
-                    f"booking_room_id {instruction.booking_room_id} "
-                    "is not on this booking."
-                )
-                raise BookingWriteError(msg)
-            refunded += await _apply_cancel_instruction(cur, row, instruction)
-
-        await cur.execute(
-            "SELECT COUNT(*) AS remaining FROM booking_rooms WHERE booking_id = %s",
-            (booking_id,),
-        )
-        remaining = cast("dict[str, Any]", await cur.fetchone())["remaining"]
-        fully_cancelled = remaining == 0
-        if fully_cancelled:
-            await cur.execute(
-                """
-                UPDATE bookings SET status = 'cancelled', cancelled_at = now()
-                WHERE booking_id = %s
-                """,
-                (booking_id,),
+    with _reraise_operational_as_unavailable():
+        async with pool.connection() as conn, conn.transaction(), conn.cursor(
+            row_factory=dict_row,
+        ) as cur:
+            existing = await _lock_booking_rooms(
+                cur, booking_id=booking_id, customer_id=customer_id,
             )
 
-    return CancelResult(
-        booking_id=booking_id,
-        refunded_amount=refunded,
-        fully_cancelled=fully_cancelled,
-    )
+            instructions = rooms if rooms is not None else [
+                CancelRoomInstruction(booking_room_id=row["booking_room_id"])
+                for row in existing.values()
+            ]
+
+            refunded = Decimal("0.00")
+            for instruction in instructions:
+                row = existing.get(instruction.booking_room_id)
+                if row is None:
+                    msg = "That room-stay is not on this booking."
+                    raise BookingWriteError(msg)
+                refunded += await _apply_cancel_instruction(cur, row, instruction)
+
+            await cur.execute(
+                "SELECT COUNT(*) AS remaining FROM booking_rooms WHERE booking_id = %s",
+                (booking_id,),
+            )
+            remaining = cast("dict[str, Any]", await cur.fetchone())["remaining"]
+            fully_cancelled = remaining == 0
+            if fully_cancelled:
+                await cur.execute(
+                    """
+                    UPDATE bookings SET status = 'cancelled', cancelled_at = now()
+                    WHERE booking_id = %s
+                    """,
+                    (booking_id,),
+                )
+
+        return CancelResult(
+            booking_id=booking_id,
+            refunded_amount=refunded,
+            fully_cancelled=fully_cancelled,
+        )
 
 
 async def modify_booking(
@@ -535,83 +557,85 @@ async def modify_booking(
             drifted out of sync, since the `FOR UPDATE` lock above already
             re-validates availability). No partial writes are made either
             way.
+        BookingUnavailableError: If the database could not be reached at
+            all. No statement was necessarily sent, so a retry is a clean
+            first attempt (see `_reraise_operational_as_unavailable`).
 
     """
-    async with pool.connection() as conn, conn.transaction(), conn.cursor(
-        row_factory=dict_row,
-    ) as cur:
-        existing = await _lock_booking_rooms(
-            cur, booking_id=booking_id, customer_id=customer_id,
-        )
+    with _reraise_operational_as_unavailable():
+        async with pool.connection() as conn, conn.transaction(), conn.cursor(
+            row_factory=dict_row,
+        ) as cur:
+            existing = await _lock_booking_rooms(
+                cur, booking_id=booking_id, customer_id=customer_id,
+            )
 
-        for change in changes:
-            row = existing.get(change.booking_room_id)
-            if row is None:
-                msg = (
-                    f"booking_room_id {change.booking_room_id} "
-                    "is not on this booking."
+            for change in changes:
+                row = existing.get(change.booking_room_id)
+                if row is None:
+                    msg = "That room-stay is not on this booking."
+                    raise BookingWriteError(msg)
+                await _release_nights(
+                    cur,
+                    room_id=row["room_id"],
+                    check_in=row["check_in"],
+                    check_out=row["check_out"],
                 )
-                raise BookingWriteError(msg)
-            await _release_nights(
-                cur,
+
+            for change in changes:
+                request = RoomRequest(
+                    room_id=change.new_room_id,
+                    room_number=change.new_room_number,
+                    check_in=change.new_check_in,
+                    check_out=change.new_check_out,
+                )
+                stay = await _price_one_room(cur, request, lock=True)
+                await _lock_and_book_nights(cur, stay)
+                with _refuse_on_overlap(stay.room_number):
+                    await cur.execute(
+                        """
+                        UPDATE booking_rooms
+                        SET room_id = %s, check_in = %s, check_out = %s,
+                            total_amount = %s
+                        WHERE booking_room_id = %s
+                        """,
+                        (
+                            stay.room_id,
+                            stay.check_in,
+                            stay.check_out,
+                            stay.total_amount,
+                            change.booking_room_id,
+                        ),
+                    )
+
+            await cur.execute(
+                """
+                SELECT br.booking_room_id, br.room_id, r.room_number,
+                       br.check_in, br.check_out, br.total_amount
+                FROM booking_rooms br
+                JOIN rooms r ON r.room_id = br.room_id
+                WHERE br.booking_id = %s
+                ORDER BY br.booking_room_id
+                """,
+                (booking_id,),
+            )
+            rows = cast("list[dict[str, Any]]", await cur.fetchall())
+
+        rooms_out = tuple(
+            PricedRoomStay(
+                booking_room_id=row["booking_room_id"],
                 room_id=row["room_id"],
+                room_number=row["room_number"],
                 check_in=row["check_in"],
                 check_out=row["check_out"],
+                total_amount=row["total_amount"],
             )
-
-        for change in changes:
-            request = RoomRequest(
-                room_id=change.new_room_id,
-                room_number=change.new_room_number,
-                check_in=change.new_check_in,
-                check_out=change.new_check_out,
-            )
-            stay = await _price_one_room(cur, request, lock=True)
-            await _lock_and_book_nights(cur, stay)
-            with _refuse_on_overlap(stay.room_number):
-                await cur.execute(
-                    """
-                    UPDATE booking_rooms
-                    SET room_id = %s, check_in = %s, check_out = %s, total_amount = %s
-                    WHERE booking_room_id = %s
-                    """,
-                    (
-                        stay.room_id,
-                        stay.check_in,
-                        stay.check_out,
-                        stay.total_amount,
-                        change.booking_room_id,
-                    ),
-                )
-
-        await cur.execute(
-            """
-            SELECT br.booking_room_id, br.room_id, r.room_number,
-                   br.check_in, br.check_out, br.total_amount
-            FROM booking_rooms br
-            JOIN rooms r ON r.room_id = br.room_id
-            WHERE br.booking_id = %s
-            ORDER BY br.booking_room_id
-            """,
-            (booking_id,),
+            for row in rows
         )
-        rows = cast("list[dict[str, Any]]", await cur.fetchall())
-
-    rooms_out = tuple(
-        PricedRoomStay(
-            booking_room_id=row["booking_room_id"],
-            room_id=row["room_id"],
-            room_number=row["room_number"],
-            check_in=row["check_in"],
-            check_out=row["check_out"],
-            total_amount=row["total_amount"],
+        total_amount = sum((stay.total_amount for stay in rooms_out), Decimal("0.00"))
+        return ModifyResult(
+            booking_id=booking_id, rooms=rooms_out, total_amount=total_amount,
         )
-        for row in rows
-    )
-    total_amount = sum((stay.total_amount for stay in rooms_out), Decimal("0.00"))
-    return ModifyResult(
-        booking_id=booking_id, rooms=rooms_out, total_amount=total_amount,
-    )
 
 
 async def list_bookings(
@@ -874,6 +898,39 @@ async def _price_one_room(
 
 
 @contextmanager
+def _reraise_operational_as_unavailable() -> Iterator[None]:
+    """Translate a pool/driver-level failure into `BookingUnavailableError`.
+
+    Wraps the pool-acquisition boundary of every write function
+    (`commit_booking`, `cancel_booking`, `modify_booking`). Before this, a
+    Neon compute suspend/resume, an exhausted pool, or a connection that
+    died mid-transaction escaped uncaught all the way to the API layer as a
+    500. `BookingWriteError` is deliberately not among the caught types: it
+    means the write was evaluated and refused, which is a different,
+    non-retryable outcome that must keep propagating as itself.
+
+    Yields:
+        None. Wrap exactly one `pool.connection()` block.
+
+    Raises:
+        BookingUnavailableError: If the wrapped block raises a
+            `psycopg.OperationalError`, `psycopg.InterfaceError`,
+            `PoolTimeout`, or `TimeoutError`.
+
+    """
+    try:
+        yield
+    except (
+        psycopg.OperationalError,
+        psycopg.InterfaceError,
+        PoolTimeout,
+        TimeoutError,
+    ) as exc:
+        msg = "Could not reach the database to complete this request."
+        raise BookingUnavailableError(msg) from exc
+
+
+@contextmanager
 def _refuse_on_overlap(room_number: int) -> Iterator[None]:
     """Translate a `booking_rooms` exclusion-constraint hit into `BookingWriteError`.
 
@@ -993,22 +1050,31 @@ async def _lock_booking_rooms(
 
     Raises:
         BookingWriteError: If the booking does not exist, belongs to a
-            different guest, or is already cancelled.
+            different guest, or is already cancelled. None of these messages
+            names `booking_id`: it is an internal primary key, and a guest
+            who reaches this error has no row to attach it to anyway. The
+            "already cancelled" case does have a stable reference worth
+            giving back -- its `confirmation_number` -- since that is the
+            same identifier the guest was already shown on the receipt.
 
     """
     await cur.execute(
-        "SELECT customer_id, status FROM bookings WHERE booking_id = %s FOR UPDATE",
+        """
+        SELECT customer_id, status, confirmation_number
+        FROM bookings WHERE booking_id = %s FOR UPDATE
+        """,
         (booking_id,),
     )
     booking_row = await cur.fetchone()
     if booking_row is None:
-        msg = f"Booking {booking_id} does not exist."
+        msg = "That booking does not exist."
         raise BookingWriteError(msg)
     if booking_row["customer_id"] != customer_id:
         msg = "This booking does not belong to this guest."
         raise BookingWriteError(msg)
     if booking_row["status"] == "cancelled":
-        msg = f"Booking {booking_id} is already cancelled."
+        confirmation_number = booking_row["confirmation_number"]
+        msg = f"Booking {confirmation_number} is already cancelled."
         raise BookingWriteError(msg)
 
     await cur.execute(

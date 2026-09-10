@@ -390,6 +390,123 @@ class TestBookingConfirmDismiss:
         )
         assert confirm_response.status_code == 404  # noqa: PLR2004
 
+    def test_confirm_unavailable_returns_503_with_retry_after(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A dead pool at confirm time returns 503, not an uncaught 500.
+
+        `BookingUnavailableError` also leaves the proposal pending rather
+        than retiring it, so the guest can retry the same proposal instead
+        of seeing "That request has expired."
+        """
+        from blue_horizon.api.app import orchestrator  # noqa: PLC0415
+
+        customer_id = asyncio.run(_first_customer_id())
+        proposal = orchestrator.get_booking_resources().proposals.create(
+            thread_id=_unique_thread_id(),
+            customer_id=customer_id,
+            action="book",
+            summary={"rooms": [], "total": "0.00"},
+            details=[],
+        )
+
+        async def _dead_pool(
+            *_args: object, **_kwargs: object,
+        ) -> write_ops.CommitResult:
+            """Simulate a connection pool that cannot be reached."""
+            msg = "Could not reach the database to complete this request."
+            raise write_ops.BookingUnavailableError(msg)
+
+        monkeypatch.setattr(write_ops, "commit_booking", _dead_pool)
+        try:
+            response = client.post(
+                "/v1/booking/confirm",
+                json={
+                    "proposal_id": proposal.proposal_id,
+                    "customer_id": customer_id,
+                },
+            )
+        finally:
+            monkeypatch.undo()
+
+        assert response.status_code == 503  # noqa: PLR2004
+        assert response.headers.get("retry-after")
+
+        resources = orchestrator.get_booking_resources()
+        still_pending = resources.proposals.get_pending_for_thread(proposal.thread_id)
+        assert still_pending is not None
+        assert still_pending.proposal_id == proposal.proposal_id
+
+        dismiss_response = client.post(
+            "/v1/booking/dismiss",
+            json={"proposal_id": proposal.proposal_id, "customer_id": customer_id},
+        )
+        assert dismiss_response.status_code == 200  # noqa: PLR2004
+
+    def test_confirm_conflict_returns_409_with_refusal_detail(
+        self, client: TestClient,
+    ) -> None:
+        """A second confirm for the same nights returns 409 with the real reason.
+
+        Also exercises step 5's identifier cleanup: the `detail` refuses by
+        room number, never by raw `booking_id`.
+        """
+        from blue_horizon.api.app import orchestrator  # noqa: PLC0415
+
+        customer_id = asyncio.run(_first_customer_id())
+        request = asyncio.run(_find_available_room_request())
+
+        async def _price() -> write_ops.PricedRoomStay:
+            async with _rw_pool() as pool:
+                return (await write_ops.price_rooms(pool, [request]))[0]
+
+        priced = asyncio.run(_price())
+        summary = {
+            "rooms": [write_ops.serialize_priced_stay(priced)],
+            "total": write_ops.fmt_money(priced.total_amount),
+        }
+
+        proposals = orchestrator.get_booking_resources().proposals
+        first_proposal = proposals.create(
+            thread_id=_unique_thread_id(),
+            customer_id=customer_id,
+            action="book",
+            summary=summary,
+            details=[request],
+        )
+        second_proposal = proposals.create(
+            thread_id=_unique_thread_id(),
+            customer_id=customer_id,
+            action="book",
+            summary=summary,
+            details=[request],
+        )
+
+        first_response = client.post(
+            "/v1/booking/confirm",
+            json={
+                "proposal_id": first_proposal.proposal_id,
+                "customer_id": customer_id,
+            },
+        )
+        assert first_response.status_code == 200  # noqa: PLR2004
+        booking_id = first_response.json()["booking_id"]
+
+        try:
+            second_response = client.post(
+                "/v1/booking/confirm",
+                json={
+                    "proposal_id": second_proposal.proposal_id,
+                    "customer_id": customer_id,
+                },
+            )
+            assert second_response.status_code == 409  # noqa: PLR2004
+            detail = second_response.json()["detail"]
+            assert "not available" in detail
+            assert str(booking_id) not in detail
+        finally:
+            asyncio.run(_cancel_booking(customer_id, booking_id))
+
     def test_confirm_success_commits_and_returns_receipt_fields(
         self, client: TestClient,
     ) -> None:

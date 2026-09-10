@@ -39,6 +39,10 @@ logger = logging.getLogger(__name__)
 
 _SSE_MEDIA_TYPE = "text/event-stream"
 _KEEPALIVE_INTERVAL_S = 15.0
+# How long a client should wait before retrying a confirm that failed with
+# BookingUnavailableError. Deliberately short: the dominant cause is a Neon
+# compute resume, normally a few hundred milliseconds, not a lengthy outage.
+_CONFIRM_RETRY_AFTER_S = 5
 
 
 class ChatPayload(BaseModel):
@@ -312,7 +316,10 @@ async def confirm_booking(payload: ProposalActionPayload) -> dict[str, Any]:
     Raises:
         HTTPException: 404 if the proposal is unknown or expired; 403 if it
             belongs to a different guest; 409 if the underlying write fails
-            (e.g. the nights were taken in the meantime).
+            (e.g. the nights were taken in the meantime); 503 with a
+            `Retry-After` header if the database could not be reached at
+            all, in which case the proposal was left pending and confirming
+            again is safe.
 
     """
     resources = orchestrator.get_booking_resources()
@@ -326,6 +333,12 @@ async def confirm_booking(payload: ProposalActionPayload) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except proposals_module.ProposalOwnershipError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except write_ops.BookingUnavailableError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc),
+            headers={"Retry-After": str(_CONFIRM_RETRY_AFTER_S)},
+        ) from exc
     except write_ops.BookingWriteError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

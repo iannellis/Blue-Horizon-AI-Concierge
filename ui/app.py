@@ -48,6 +48,9 @@ _HEALTH_TIMEOUT_S: float = 3.0
 # compute cold-start on top of the query itself.
 _DATA_TIMEOUT_S: float = 20.0
 _HTTP_OK: int = 200
+_HTTP_FORBIDDEN: int = 403
+_HTTP_NOT_FOUND: int = 404
+_HTTP_CONFLICT: int = 409
 _HTTP_SERVICE_UNAVAILABLE: int = 503
 _HEALTH_POLL_ONLINE_INTERVAL_S: int = 30
 _HEALTH_POLL_OFFLINE_INTERVAL_S: int = 5
@@ -208,7 +211,64 @@ def _fetch_bookings(customer_id: int) -> list[dict[str, Any]]:
         return []
 
 
-def _confirm_proposal(proposal_id: str, customer_id: int) -> dict[str, Any] | None:
+@dataclasses.dataclass(frozen=True, slots=True)
+class ConfirmOutcome:
+    """Structured result of a `_confirm_proposal` call.
+
+    Attributes:
+        status: One of ``confirmed``, ``refused``, ``expired``,
+            ``wrong_guest``, ``unavailable``, or ``unreachable``.
+        message: Guest-facing text for this outcome, taken from the
+            response body's ``detail``/``message`` where the server
+            supplied one.
+        keep_pending: Whether the confirmation dialog should stay open with
+            Confirm still enabled. True only for ``unavailable`` and
+            ``unreachable`` -- the two cases where the write was never
+            evaluated (see `blue_horizon.agents.booking.proposals
+            .ProposalStore.confirm`), so trying again is safe. Every other
+            status is terminal.
+
+    """
+
+    status: str
+    message: str
+    keep_pending: bool
+
+
+# Maps a non-2xx `/v1/booking/confirm` status code to its ConfirmOutcome
+# status. Anything else (an unexpected 500, say) falls back to
+# "unreachable" in `_confirm_proposal`: the safest assumption when the
+# outcome is genuinely unknown is that it is still safe to try again,
+# never that the guest already has the room.
+_CONFIRM_STATUS_BY_HTTP_CODE: dict[int, str] = {
+    _HTTP_NOT_FOUND: "expired",
+    _HTTP_FORBIDDEN: "wrong_guest",
+    _HTTP_CONFLICT: "refused",
+    _HTTP_SERVICE_UNAVAILABLE: "unavailable",
+}
+
+
+def _response_detail(response: httpx2.Response) -> str | None:
+    """Best-effort extraction of a JSON error body's ``detail`` field.
+
+    Args:
+        response: An HTTP response that may or may not carry a JSON body
+            shaped like FastAPI's ``HTTPException`` (``{"detail": "..."}"``).
+
+    Returns:
+        str | None: The `detail` string, or ``None`` if the body was not
+        JSON, was not an object, or had no `detail` key.
+
+    """
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    detail = body.get("detail") if isinstance(body, dict) else None
+    return detail if isinstance(detail, str) else None
+
+
+def _confirm_proposal(proposal_id: str, customer_id: int) -> ConfirmOutcome:
     """Confirm a pending proposal.
 
     Args:
@@ -216,8 +276,8 @@ def _confirm_proposal(proposal_id: str, customer_id: int) -> dict[str, Any] | No
         customer_id: Guest confirming it.
 
     Returns:
-        dict[str, Any] | None: The confirm endpoint's JSON body, or ``None``
-        on failure.
+        ConfirmOutcome: What happened, and whether the confirmation dialog
+        should stay open for a retry.
 
     """
     try:
@@ -226,10 +286,42 @@ def _confirm_proposal(proposal_id: str, customer_id: int) -> dict[str, Any] | No
             json={"proposal_id": proposal_id, "customer_id": customer_id},
             timeout=_CHAT_TIMEOUT_S,
         )
-        response.raise_for_status()
-        return response.json()
-    except Exception:  # noqa: BLE001
-        return None
+    except Exception:
+        logger.warning(
+            "Could not reach the API to confirm proposal_id=%s.",
+            proposal_id,
+            exc_info=True,
+        )
+        return ConfirmOutcome(
+            status="unreachable",
+            message=(
+                "Could not reach the booking system. Your request is still "
+                "pending — try Confirm again."
+            ),
+            keep_pending=True,
+        )
+
+    if response.status_code == _HTTP_OK:
+        return ConfirmOutcome(
+            status="confirmed", message=response.json()["message"], keep_pending=False,
+        )
+
+    status = _CONFIRM_STATUS_BY_HTTP_CODE.get(response.status_code, "unreachable")
+    detail = _response_detail(response)
+    if status in ("unavailable", "unreachable"):
+        return ConfirmOutcome(
+            status=status,
+            message=detail or (
+                "The booking system is temporarily unavailable. Your "
+                "request is still pending — try Confirm again."
+            ),
+            keep_pending=True,
+        )
+    return ConfirmOutcome(
+        status=status,
+        message=detail or "Could not confirm this request.",
+        keep_pending=False,
+    )
 
 
 def _dismiss_proposal(proposal_id: str, customer_id: int) -> None:
@@ -759,6 +851,16 @@ _SUMMARY_RENDERERS = {
     "modify": _render_modify_summary,
 }
 
+# Shown instead of a "refused" outcome's own detail when this confirm
+# attempt followed one that came back "unavailable" or "unreachable" on the
+# same proposal. In that situation the earlier write may have already
+# landed with its acknowledgement lost, so asserting the nights were taken
+# by someone else would tell the guest the opposite of the truth.
+_AMBIGUOUS_REFUSAL_MSG = (
+    "We could not confirm whether this went through. Please check "
+    '"Your reservations" before trying again.'
+)
+
 
 @st.dialog("Review your request")
 def _render_proposal_dialog(proposal: dict[str, Any]) -> None:
@@ -770,9 +872,15 @@ def _render_proposal_dialog(proposal: dict[str, Any]) -> None:
     dialog and the eventual commit must never be able to disagree, so do not
     "simplify" this to reuse the assistant's message text instead.
 
+    A confirm that comes back `unavailable` or `unreachable` (see
+    `ConfirmOutcome`) leaves the dialog open with Confirm still enabled
+    instead of closing it: the write was never evaluated, so pressing
+    Confirm again is a clean retry, not a duplicate booking attempt.
+
     Args:
-        proposal: Pending proposal dict with `proposal_id`, `action`, and
-            `summary`.
+        proposal: Pending proposal dict with `proposal_id`, `action`,
+            `summary`, and (once a retry-safe failure has occurred)
+            `had_operational_failure`.
 
     """
     renderer = _SUMMARY_RENDERERS[proposal["action"]]
@@ -781,13 +889,27 @@ def _render_proposal_dialog(proposal: dict[str, Any]) -> None:
     col_confirm, col_cancel = st.columns(2)
     if col_confirm.button("Confirm", type="primary", use_container_width=True):
         customer_id = st.session_state.customer_id
-        result = _confirm_proposal(proposal["proposal_id"], customer_id)
-        st.session_state.pending_proposal = None
-        message = (
-            result["message"] if result else "Could not reach the API to confirm."
-        )
-        st.session_state.messages.append({"role": "assistant", "content": message})
-        st.rerun()
+        # Set by an earlier attempt on this same proposal that came back
+        # "unavailable" or "unreachable" -- see the branch below. Tracked so
+        # a "refused" outcome on *this* attempt can be recognised as the
+        # lost-acknowledgement case: the earlier write may have actually
+        # landed, so this retry's refusal does not necessarily mean the
+        # nights were taken by someone else. Step 18 (reconciliation) is the
+        # real fix; this is the interim mitigation described in the plan.
+        had_operational_failure = proposal.get("had_operational_failure", False)
+        outcome = _confirm_proposal(proposal["proposal_id"], customer_id)
+
+        if outcome.keep_pending:
+            proposal["had_operational_failure"] = True
+            st.session_state.pending_proposal = proposal
+            st.warning(outcome.message)
+        else:
+            message = _AMBIGUOUS_REFUSAL_MSG if (
+                outcome.status == "refused" and had_operational_failure
+            ) else outcome.message
+            st.session_state.pending_proposal = None
+            st.session_state.messages.append({"role": "assistant", "content": message})
+            st.rerun()
 
     if col_cancel.button("Cancel", use_container_width=True):
         customer_id = st.session_state.customer_id

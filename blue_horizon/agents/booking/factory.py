@@ -378,14 +378,16 @@ async def _find_owned_booking(
 
     Raises:
         write_ops.BookingWriteError: If no booking with that id belongs to
-            this guest.
+            this guest. The message deliberately does not echo `booking_id`
+            back: it is an internal primary key, and there is no matching
+            row to attach it to.
 
     """
     bookings = await write_ops.list_bookings(pool, customer_id=customer_id)
     for booking in bookings:
         if booking.booking_id == booking_id:
             return booking
-    msg = f"Booking {booking_id} does not belong to this guest."
+    msg = "That booking does not belong to this guest."
     raise write_ops.BookingWriteError(msg)
 
 
@@ -425,10 +427,7 @@ async def _price_cancellation(
     for request in rooms:
         row = existing.get(request["booking_room_id"])
         if row is None:
-            msg = (
-                f"booking_room_id {request['booking_room_id']} "
-                "is not on this booking."
-            )
+            msg = "That room-stay is not on this booking."
             raise write_ops.BookingWriteError(msg)
 
         new_check_in = (
@@ -561,7 +560,7 @@ async def _price_modification(
     for change in changes:
         before = existing.get(change["booking_room_id"])
         if before is None:
-            msg = f"booking_room_id {change['booking_room_id']} is not on this booking."
+            msg = "That room-stay is not on this booking."
             raise write_ops.BookingWriteError(msg)
 
         new_room_id = await _room_id_for_number(pool, change["new_room_number"])

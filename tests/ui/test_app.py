@@ -31,6 +31,7 @@ streamlit = pytest.importorskip("streamlit", reason="streamlit not installed")
 from ui.app import (  # noqa: E402
     _GUEST_CLAIM_TTL_S,
     _check_health,
+    _confirm_proposal,
     _guest_claims,
     _GuestClaim,
     _handle_stream_event,
@@ -456,6 +457,126 @@ class TestStreamMessage:
             c.kwargs.get("state") == "error"
             for c in mock_status.update.call_args_list
         )
+
+
+# ---------------------------------------------------------------------------
+# _confirm_proposal
+# ---------------------------------------------------------------------------
+
+
+def _mock_response(
+    status_code: int, body: dict[str, object] | None = None,
+) -> MagicMock:
+    """Build a mock `httpx2.Response` for `_confirm_proposal` tests.
+
+    Args:
+        status_code: HTTP status code the mock should report.
+        body: JSON body the mock's `.json()` should return. `None` produces
+            a response whose `.json()` raises, matching a body that is not
+            JSON at all.
+
+    Returns:
+        A `MagicMock` standing in for an `httpx2.Response`.
+
+    """
+    response = MagicMock()
+    response.status_code = status_code
+    if body is None:
+        response.json.side_effect = ValueError("not JSON")
+    else:
+        response.json.return_value = body
+    return response
+
+
+class TestConfirmProposal:
+    """`_confirm_proposal` maps each HTTP outcome to a `ConfirmOutcome`.
+
+    Per the plan's Phase 1 table: `confirmed`/`refused`/`expired`/
+    `wrong_guest` are terminal (`keep_pending=False`); `unavailable` and
+    `unreachable` are not (`keep_pending=True`), since in both cases the
+    write was never evaluated and a retry is safe.
+    """
+
+    def test_200_is_confirmed_and_not_kept_pending(self) -> None:
+        """A 200 response reports `confirmed` with the server's own message."""
+        response = _mock_response(200, {"status": "confirmed", "message": "Booked!"})
+        with patch("ui.app.httpx2.post", return_value=response):
+            outcome = _confirm_proposal("prop-1", 7)
+        assert outcome.status == "confirmed"
+        assert outcome.message == "Booked!"
+        assert outcome.keep_pending is False
+
+    def test_409_is_refused_and_not_kept_pending(self) -> None:
+        """A 409 response reports `refused` with the write's own refusal detail."""
+        response = _mock_response(
+            409, {"detail": "Room 204 is not available for every night requested."},
+        )
+        with patch("ui.app.httpx2.post", return_value=response):
+            outcome = _confirm_proposal("prop-1", 7)
+        assert outcome.status == "refused"
+        assert outcome.message == "Room 204 is not available for every night requested."
+        assert outcome.keep_pending is False
+
+    def test_404_is_expired_and_not_kept_pending(self) -> None:
+        """A 404 response reports `expired`."""
+        response = _mock_response(404, {"detail": "That request has expired."})
+        with patch("ui.app.httpx2.post", return_value=response):
+            outcome = _confirm_proposal("prop-1", 7)
+        assert outcome.status == "expired"
+        assert outcome.keep_pending is False
+
+    def test_403_is_wrong_guest_and_not_kept_pending(self) -> None:
+        """A 403 response reports `wrong_guest`."""
+        response = _mock_response(403, {"detail": "Not your request."})
+        with patch("ui.app.httpx2.post", return_value=response):
+            outcome = _confirm_proposal("prop-1", 7)
+        assert outcome.status == "wrong_guest"
+        assert outcome.keep_pending is False
+
+    def test_503_is_unavailable_and_kept_pending(self) -> None:
+        """A 503 response reports `unavailable` and keeps the dialog open."""
+        response = _mock_response(
+            503, {"detail": "Could not reach the database to complete this request."},
+        )
+        with patch("ui.app.httpx2.post", return_value=response):
+            outcome = _confirm_proposal("prop-1", 7)
+        assert outcome.status == "unavailable"
+        assert outcome.keep_pending is True
+
+    def test_503_with_no_detail_falls_back_to_fixed_copy(self) -> None:
+        """A 503 with a non-JSON body still yields safe, non-raw copy."""
+        response = _mock_response(503, body=None)
+        with patch("ui.app.httpx2.post", return_value=response):
+            outcome = _confirm_proposal("prop-1", 7)
+        assert outcome.status == "unavailable"
+        assert outcome.keep_pending is True
+        assert "still pending" in outcome.message
+
+    def test_network_failure_is_unreachable_and_kept_pending(self) -> None:
+        """A connection error reports `unreachable` and keeps the dialog open.
+
+        No raw exception text leaks into the message -- see the fixed copy
+        used here, unlike the pre-fix `f"Could not reach the API: {exc}"`.
+        """
+        with patch(
+            "ui.app.httpx2.post", side_effect=httpx2.ConnectError("refused"),
+        ):
+            outcome = _confirm_proposal("prop-1", 7)
+        assert outcome.status == "unreachable"
+        assert outcome.keep_pending is True
+        assert "refused" not in outcome.message
+
+    def test_unexpected_status_code_falls_back_to_unreachable(self) -> None:
+        """An unmapped status code is treated as unknown, not as a refusal.
+
+        The safest default when the outcome is genuinely unknown is that a
+        retry is still safe, never that the write already happened.
+        """
+        response = _mock_response(500, {"detail": "Internal Server Error"})
+        with patch("ui.app.httpx2.post", return_value=response):
+            outcome = _confirm_proposal("prop-1", 7)
+        assert outcome.status == "unreachable"
+        assert outcome.keep_pending is True
 
 
 # ---------------------------------------------------------------------------

@@ -478,6 +478,236 @@ class TestConfirm:
         assert second.result is first.result
         assert call_count == 1
 
+    def test_booking_write_error_retires_proposal_and_second_confirm_404s(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A deterministic refusal retires the proposal; a retry then 404s.
+
+        `BookingWriteError` means the write was evaluated and refused (for
+        example, the nights were taken in the meantime), so nothing about a
+        second attempt could change the outcome.
+        """
+        store = _make_store()
+        proposal = _create_book_proposal(store, total="100.00")
+
+        async def fake_commit_booking(
+            write_pool: AsyncConnectionPool[Any],
+            *,
+            customer_id: int,
+            rooms: Sequence[write_ops.RoomRequest],
+        ) -> _FakeCommitResult:
+            """Refuse unconditionally, simulating nights taken in the meantime."""
+            _ = write_pool, customer_id, rooms
+            msg = "Room 101 is not available for every night requested."
+            raise proposals_module.write_ops.BookingWriteError(msg)
+
+        monkeypatch.setattr(
+            proposals_module.write_ops, "commit_booking", fake_commit_booking,
+        )
+
+        with pytest.raises(proposals_module.write_ops.BookingWriteError):
+            asyncio.run(
+                store.confirm(
+                    proposal_id=proposal.proposal_id,
+                    customer_id=_CUSTOMER_ID,
+                    write_pool=_UNUSED_WRITE_POOL,
+                ),
+            )
+
+        assert store.get_pending_for_thread(_THREAD_ID) is None
+        with pytest.raises(ProposalNotFoundError):
+            asyncio.run(
+                store.confirm(
+                    proposal_id=proposal.proposal_id,
+                    customer_id=_CUSTOMER_ID,
+                    write_pool=_UNUSED_WRITE_POOL,
+                ),
+            )
+
+    def test_booking_unavailable_error_leaves_proposal_pending_for_retry(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A database-unreachable failure leaves the proposal pending.
+
+        Unlike `BookingWriteError`, `BookingUnavailableError` means the
+        write was never evaluated, so the guest must be able to press
+        Confirm again on the same proposal rather than seeing "That request
+        has expired."
+        """
+        store = _make_store()
+        proposal = _create_book_proposal(store, total="100.00")
+
+        async def fake_commit_booking(
+            write_pool: AsyncConnectionPool[Any],
+            *,
+            customer_id: int,
+            rooms: Sequence[write_ops.RoomRequest],
+        ) -> _FakeCommitResult:
+            """Simulate a dead pool on the first call only."""
+            _ = write_pool, customer_id, rooms
+            msg = "Could not reach the database to complete this request."
+            raise proposals_module.write_ops.BookingUnavailableError(msg)
+
+        monkeypatch.setattr(
+            proposals_module.write_ops, "commit_booking", fake_commit_booking,
+        )
+
+        with pytest.raises(proposals_module.write_ops.BookingUnavailableError):
+            asyncio.run(
+                store.confirm(
+                    proposal_id=proposal.proposal_id,
+                    customer_id=_CUSTOMER_ID,
+                    write_pool=_UNUSED_WRITE_POOL,
+                ),
+            )
+
+        assert store.get_pending_for_thread(_THREAD_ID) is proposal
+
+    def test_retry_after_unavailable_error_succeeds_and_caches(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A retry that lands after an unavailable failure commits and caches.
+
+        Re-attempting `_commit_proposal` on the retained-pending proposal is
+        what makes invariant 6 (double-booking is structurally impossible)
+        the thing keeping this retry safe: the second call re-prices under
+        `FOR UPDATE` exactly as a first attempt would, it is never skipped.
+        """
+        store = _make_store()
+        proposal = _create_book_proposal(store, total="100.00")
+        fake_result = _FakeCommitResult(total_amount=Decimal("100.00"))
+        call_count = 0
+
+        async def flaky_commit_booking(
+            write_pool: AsyncConnectionPool[Any],
+            *,
+            customer_id: int,
+            rooms: Sequence[write_ops.RoomRequest],
+        ) -> _FakeCommitResult:
+            """Fail with BookingUnavailableError once, then succeed."""
+            _ = write_pool, customer_id, rooms
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                msg = "Could not reach the database to complete this request."
+                raise proposals_module.write_ops.BookingUnavailableError(msg)
+            return fake_result
+
+        monkeypatch.setattr(
+            proposals_module.write_ops, "commit_booking", flaky_commit_booking,
+        )
+
+        with pytest.raises(proposals_module.write_ops.BookingUnavailableError):
+            asyncio.run(
+                store.confirm(
+                    proposal_id=proposal.proposal_id,
+                    customer_id=_CUSTOMER_ID,
+                    write_pool=_UNUSED_WRITE_POOL,
+                ),
+            )
+
+        outcome = asyncio.run(
+            store.confirm(
+                proposal_id=proposal.proposal_id,
+                customer_id=_CUSTOMER_ID,
+                write_pool=_UNUSED_WRITE_POOL,
+            ),
+        )
+
+        assert call_count == 2  # noqa: PLR2004
+        assert outcome.already_confirmed is False
+        assert outcome.result is fake_result
+        assert store.get_pending_for_thread(_THREAD_ID) is None
+
+    def test_retained_pending_proposal_dies_on_invalidate_thread(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A new turn on the thread still kills a retry-pending proposal.
+
+        Retention across `BookingUnavailableError` is bounded by the
+        guest's next utterance, exactly like any other pending proposal:
+        `manager.ainvoke*` calls `invalidate_thread` at the start of every
+        turn.
+        """
+        store = _make_store()
+        proposal = _create_book_proposal(store, total="100.00")
+
+        async def fake_commit_booking(
+            write_pool: AsyncConnectionPool[Any],
+            *,
+            customer_id: int,
+            rooms: Sequence[write_ops.RoomRequest],
+        ) -> _FakeCommitResult:
+            """Simulate a dead pool."""
+            _ = write_pool, customer_id, rooms
+            msg = "Could not reach the database to complete this request."
+            raise proposals_module.write_ops.BookingUnavailableError(msg)
+
+        monkeypatch.setattr(
+            proposals_module.write_ops, "commit_booking", fake_commit_booking,
+        )
+
+        with pytest.raises(proposals_module.write_ops.BookingUnavailableError):
+            asyncio.run(
+                store.confirm(
+                    proposal_id=proposal.proposal_id,
+                    customer_id=_CUSTOMER_ID,
+                    write_pool=_UNUSED_WRITE_POOL,
+                ),
+            )
+
+        store.invalidate_thread(_THREAD_ID)
+
+        assert store.get_pending_for_thread(_THREAD_ID) is None
+        with pytest.raises(ProposalNotFoundError):
+            asyncio.run(
+                store.confirm(
+                    proposal_id=proposal.proposal_id,
+                    customer_id=_CUSTOMER_ID,
+                    write_pool=_UNUSED_WRITE_POOL,
+                ),
+            )
+
+    def test_retained_pending_proposal_still_expires_on_ttl(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A retry-pending proposal is not exempt from the TTL purge.
+
+        Only a *confirmed* proposal (present in `_results`) is exempt from
+        `_purge_expired` -- see its docstring. A proposal left pending after
+        `BookingUnavailableError` was never confirmed, so it still expires.
+        """
+        store = _make_store(ttl_s=0.05)
+        proposal = _create_book_proposal(store, total="100.00")
+
+        async def fake_commit_booking(
+            write_pool: AsyncConnectionPool[Any],
+            *,
+            customer_id: int,
+            rooms: Sequence[write_ops.RoomRequest],
+        ) -> _FakeCommitResult:
+            """Simulate a dead pool."""
+            _ = write_pool, customer_id, rooms
+            msg = "Could not reach the database to complete this request."
+            raise proposals_module.write_ops.BookingUnavailableError(msg)
+
+        monkeypatch.setattr(
+            proposals_module.write_ops, "commit_booking", fake_commit_booking,
+        )
+
+        with pytest.raises(proposals_module.write_ops.BookingUnavailableError):
+            asyncio.run(
+                store.confirm(
+                    proposal_id=proposal.proposal_id,
+                    customer_id=_CUSTOMER_ID,
+                    write_pool=_UNUSED_WRITE_POOL,
+                ),
+            )
+
+        time.sleep(0.1)
+
+        assert store.get_pending_for_thread(_THREAD_ID) is None
+
     def test_confirm_unknown_proposal_raises_not_found(self) -> None:
         """Confirming an unrecognized proposal id raises `ProposalNotFoundError`."""
         store = _make_store()

@@ -16,7 +16,7 @@ writing.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, LiteralString, cast
+from typing import TYPE_CHECKING, Any, Literal, LiteralString, cast
 
 import psycopg
 from psycopg.rows import dict_row
@@ -32,10 +32,10 @@ from tenacity import (
 from blue_horizon.agents._lifecycle import require
 from blue_horizon.agents.booking.config import render_system_prompt
 from blue_horizon.agents.booking.db_utils import (
-    _is_transient_conn_error,
+    _tool_error_message_for_model,
     _truncate_rows,
-    _user_facing_db_message,
     fetch_rooms_metadata,
+    is_transient_conn_error,
 )
 from blue_horizon.agents.booking.guardrails import validate_sql
 from blue_horizon.agents.booking.proposals import ProposalStore
@@ -51,6 +51,11 @@ logger = logging.getLogger(__name__)
 # role is actually refused write privileges at startup. Never mutates data
 # even if the assertion this guards against has already failed.
 _READ_ONLY_PROBE_SQL = "UPDATE room_availability SET status = status WHERE id = -1"
+
+# Coarse classification of a run_sql failure, independent of message text, so
+# evaluators (see eval/stress/workload.py) can assert on structure rather than
+# matching prose that guest-facing or model-facing copy changes could move.
+SqlErrorKind = Literal["unavailable", "sql", "guardrail", "privilege", "unexpected"]
 
 
 def _require_url(url: str, env_var: str) -> None:
@@ -76,11 +81,13 @@ def _require_url(url: str, env_var: str) -> None:
         raise ConfigurationError(msg)
 
 
-def _sql_error_result(error: str) -> dict[str, Any]:
+def _sql_error_result(error: str, *, error_kind: SqlErrorKind) -> dict[str, Any]:
     """Build a standard SQL tool error result dict.
 
     Args:
         error: The error message to include in the result.
+        error_kind: Coarse, message-independent classification of the
+            failure.
 
     Returns:
         A result dict with ``status="error"`` and zero rows.
@@ -92,6 +99,7 @@ def _sql_error_result(error: str) -> dict[str, Any]:
         "rows": [],
         "truncated": False,
         "error": error,
+        "error_kind": error_kind,
     }
 
 
@@ -277,6 +285,8 @@ class BookingSqlResources:
                 - truncated: bool
                 - rowcount: int
                 - error: str (only present on failure)
+                - error_kind: SqlErrorKind (only present on failure; a
+                  message-independent classification for evaluators)
 
         Raises:
             RuntimeError: If resources were not initialized.
@@ -292,7 +302,7 @@ class BookingSqlResources:
         except ValueError as exc:
             msg = str(exc)
             logger.info("run_sql rejected by guardrails: %s", msg)
-            return _sql_error_result(msg)
+            return _sql_error_result(msg, error_kind="guardrail")
 
         retry_cfg = self.config.db.retry
 
@@ -308,13 +318,14 @@ class BookingSqlResources:
         )
 
         def _is_retryable(exc: BaseException) -> bool:
-            return isinstance(exc, _conn_errors) and _is_transient_conn_error(exc)
+            return isinstance(exc, _conn_errors) and is_transient_conn_error(exc)
 
-        # Default only reached if AsyncRetrying's loop completes without
+        # Defaults only reached if AsyncRetrying's loop completes without
         # returning or raising, which tenacity does not do in practice -- this
         # guards against a silent UnboundLocalError if that assumption ever
         # breaks.
-        error_message = _user_facing_db_message()
+        error_message = _tool_error_message_for_model()
+        error_kind: SqlErrorKind = "unavailable"
         try:
             async for attempt in AsyncRetrying(
                 retry=retry_if_exception(_is_retryable),
@@ -328,7 +339,8 @@ class BookingSqlResources:
 
         except _conn_errors:
             logger.warning("run_sql connection error after retries", exc_info=True)
-            error_message = _user_facing_db_message()
+            error_message = _tool_error_message_for_model()
+            error_kind = "unavailable"
 
         except _privilege_errors as exc:
             # A write blocked by the read-only role or the belt-and-braces
@@ -342,6 +354,7 @@ class BookingSqlResources:
                 "Writes are not available through this tool. Use the propose "
                 "tools to book, cancel, or modify a reservation."
             )
+            error_kind = "privilege"
 
         except psycopg.Error as exc:
             # SQL-level errors (type mismatches, syntax errors, constraint
@@ -349,12 +362,14 @@ class BookingSqlResources:
             # diagnose and rewrite the query per its retry instructions.
             logger.warning("run_sql SQL error: %s", exc)
             error_message = f"SQL error: {exc}"
+            error_kind = "sql"
 
         except Exception:
             logger.exception("run_sql unexpected failure")
-            error_message = _user_facing_db_message()
+            error_message = _tool_error_message_for_model()
+            error_kind = "unexpected"
 
-        return _sql_error_result(error_message)
+        return _sql_error_result(error_message, error_kind=error_kind)
 
     async def _execute_once(self, query: str) -> dict[str, Any]:
         """Execute the SQL statement exactly once without any retry logic.

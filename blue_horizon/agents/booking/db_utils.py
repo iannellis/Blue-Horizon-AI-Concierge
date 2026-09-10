@@ -1,7 +1,8 @@
 """Database utilities for the booking SQL agent.
 
-Provides metadata fetching, backoff helpers, transient-error detection,
-row truncation, and user-facing error messages.
+Provides metadata fetching, backoff helpers, transient-error detection, row
+truncation, and the `run_sql` tool-error text handed to the model. None of
+these reach a guest directly; see `_tool_error_message_for_model`.
 """
 
 from __future__ import annotations
@@ -80,8 +81,22 @@ async def fetch_rooms_metadata(
         return enum_values, basic_amenities, additional_amenities, view_types
 
 
-def _is_transient_conn_error(exc: BaseException) -> bool:
+def is_transient_conn_error(exc: BaseException) -> bool:
     """Determine whether an exception looks like a transient failure.
+
+    Covers both Neon cold-start cases. A *suspended* compute dies mid
+    connection, which surfaces as one of the message patterns below. A
+    connection that instead fails to *establish* at all (compute still
+    waking up) does not raise those -- but `psycopg_pool.AsyncConnectionPool`
+    never lets that raw connect exception reach a checkout call either: a
+    failed background connect attempt is retried internally
+    (`reconnect_timeout` defaults to 5 minutes, far longer than this
+    project's per-checkout `pool.timeout_s`), so the checkout's own
+    wait simply times out and raises `PoolTimeout` first. Confirmed
+    empirically against `psycopg_pool` 3.3.1 in
+    `tests/booking/test_resources.py`; unconditionally treating
+    `PoolTimeout` as transient below therefore already covers the
+    wake-up case, and no connect-side message pattern needs adding here.
 
     Args:
         exc: Exception raised by psycopg/psycopg_pool.
@@ -124,14 +139,26 @@ def _truncate_rows(
     return rows[:max_rows], True
 
 
-def _user_facing_db_message() -> str:
-    """Return a user-facing message for database operational failures.
+def _tool_error_message_for_model() -> str:
+    """Return the `run_sql` error text handed back to the booking model.
+
+    This is prompt text, not UX copy: it is consumed only as a `run_sql`
+    tool result, and no guest ever sees it directly. `booking.txt` tells
+    the model to relay a `propose_*` failure "in guest-facing terms" for
+    that tool family, but for `run_sql` specifically the adjacent rule
+    (see the `DATABASE_UNAVAILABLE` marker below) tells the model this is
+    not a query error at all, so the audience of this string's *wording*
+    is the model's reasoning about what to do next, not the guest's eyes.
 
     Returns:
-        A short message suitable for returning to end users when the database is
-        unavailable.
+        Tool-result text carrying a stable leading `DATABASE_UNAVAILABLE`
+        marker the system prompt's retry rule keys off, followed by
+        readable English so a verbatim relay is not gibberish.
 
     """
     return (
-        "The booking system is temporarily unavailable. Please try again in a moment."
+        "DATABASE_UNAVAILABLE: the database is temporarily unreachable "
+        "after retrying. This is not a query error -- do not rewrite or "
+        "retry this query yourself. Tell the guest the booking system is "
+        "temporarily unavailable right now."
     )

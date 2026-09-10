@@ -13,10 +13,10 @@ import pytest
 from psycopg_pool import PoolTimeout
 
 from blue_horizon.agents.booking.db_utils import (
-    _is_transient_conn_error,
+    _tool_error_message_for_model,
     _truncate_rows,
-    _user_facing_db_message,
     fetch_rooms_metadata,
+    is_transient_conn_error,
 )
 
 # ---------------------------------------------------------------------------
@@ -70,22 +70,22 @@ class TestFetchRoomsMetadata:
 
 
 # ---------------------------------------------------------------------------
-# _is_transient_conn_error
+# is_transient_conn_error
 # ---------------------------------------------------------------------------
 
 
 class TestIsTransientConnError:
-    """_is_transient_conn_error correctly classifies exceptions."""
+    """is_transient_conn_error correctly classifies exceptions."""
 
     # --- type-based matches ---
 
     def test_pool_timeout_is_transient(self) -> None:
         """PoolTimeout is always considered transient."""
-        assert _is_transient_conn_error(PoolTimeout("pool exhausted")) is True
+        assert is_transient_conn_error(PoolTimeout("pool exhausted")) is True
 
     def test_builtin_timeout_error_is_transient(self) -> None:
         """Python's built-in TimeoutError is transient."""
-        assert _is_transient_conn_error(TimeoutError("timed out")) is True
+        assert is_transient_conn_error(TimeoutError("timed out")) is True
 
     # --- message-based matches ---
 
@@ -102,7 +102,7 @@ class TestIsTransientConnError:
     )
     def test_known_transient_message_is_transient(self, message: str) -> None:
         """Standard transient-error substrings are detected case-insensitively."""
-        assert _is_transient_conn_error(RuntimeError(message)) is True
+        assert is_transient_conn_error(RuntimeError(message)) is True
 
     # --- non-transient ---
 
@@ -118,11 +118,11 @@ class TestIsTransientConnError:
     )
     def test_non_transient_exception_returns_false(self, exc: BaseException) -> None:
         """Unrelated exceptions are not flagged as transient."""
-        assert _is_transient_conn_error(exc) is False
+        assert is_transient_conn_error(exc) is False
 
     def test_empty_message_returns_false(self) -> None:
         """An exception with no message text is not transient."""
-        assert _is_transient_conn_error(RuntimeError()) is False
+        assert is_transient_conn_error(RuntimeError()) is False
 
 
 # ---------------------------------------------------------------------------
@@ -179,24 +179,34 @@ class TestTruncateRows:
 
 
 # ---------------------------------------------------------------------------
-# _user_facing_db_message
+# _tool_error_message_for_model
 # ---------------------------------------------------------------------------
 
 
-class TestUserFacingDbMessage:
-    """_user_facing_db_message returns a non-empty, user-safe string."""
+class TestToolErrorMessageForModel:
+    """_tool_error_message_for_model returns a stable, marked instruction.
+
+    This string is a `run_sql` tool result the model consumes, not guest-
+    facing copy -- see `booking.txt`'s ``DATABASE_UNAVAILABLE`` retry rule,
+    which keys off the exact marker asserted here.
+    """
 
     def test_returns_string(self) -> None:
         """Return value is a non-empty string."""
-        msg = _user_facing_db_message()
+        msg = _tool_error_message_for_model()
         assert isinstance(msg, str)
         assert len(msg) > 0
 
-    def test_message_mentions_booking_system(self) -> None:
-        """Message references the booking system so users understand context."""
-        msg = _user_facing_db_message()
-        assert "booking" in msg.lower()
+    def test_starts_with_stable_marker(self) -> None:
+        """The leading marker is exact, since the prompt's retry rule keys off it."""
+        msg = _tool_error_message_for_model()
+        assert msg.startswith("DATABASE_UNAVAILABLE:")
+
+    def test_instructs_against_retrying(self) -> None:
+        """The text tells the model not to rewrite or retry, unlike a SQL error."""
+        msg = _tool_error_message_for_model()
+        assert "retry" in msg.lower()
 
     def test_message_is_deterministic(self) -> None:
         """Successive calls return the same string."""
-        assert _user_facing_db_message() == _user_facing_db_message()
+        assert _tool_error_message_for_model() == _tool_error_message_for_model()

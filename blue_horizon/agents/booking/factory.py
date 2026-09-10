@@ -148,6 +148,7 @@ def build_booking_agent(
               - truncated: bool
               - rowcount: int
               - error: str (only present on failure)
+              - error_kind: str (only present on failure)
 
         """
         return await resources.execute_sql(query)

@@ -11,7 +11,6 @@ import random
 from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
-from psycopg_pool import PoolTimeout
 from tenacity import (
     AsyncRetrying,
     before_sleep_log,
@@ -20,6 +19,7 @@ from tenacity import (
     wait_exponential,
 )
 
+from blue_horizon.agents.booking.db_utils import is_transient_conn_error
 from eval.booking_db_manager import reset_neon_branch
 from eval.db_invariants import find_overlapping_booking_rooms
 
@@ -67,7 +67,7 @@ async def _init_branch_and_targets(
 
     targets: list[dict[str, object]] = []
     async for attempt in AsyncRetrying(
-        retry=retry_if_exception(_is_transient_db_error),
+        retry=retry_if_exception(is_transient_conn_error),
         stop=stop_after_attempt(cfg.db_retry_attempts),
         wait=wait_exponential(multiplier=cfg.db_retry_delay_s, exp_base=2),
         before_sleep=before_sleep_log(logger, logging.WARNING),
@@ -217,7 +217,7 @@ async def _check_invariants(
     overlap_rows: list[BookingRoomOverlap] = []
     null_status_count = 0
     async for attempt in AsyncRetrying(
-        retry=retry_if_exception(_is_transient_db_error),
+        retry=retry_if_exception(is_transient_conn_error),
         stop=stop_after_attempt(cfg.db_retry_attempts),
         wait=wait_exponential(multiplier=cfg.db_retry_delay_s, exp_base=2),
         before_sleep=before_sleep_log(logger, logging.WARNING),
@@ -265,7 +265,7 @@ async def _fetch_booked_dates(
     """
     rows: list[Any] = []
     async for attempt in AsyncRetrying(
-        retry=retry_if_exception(_is_transient_db_error),
+        retry=retry_if_exception(is_transient_conn_error),
         stop=stop_after_attempt(cfg.db_retry_attempts),
         wait=wait_exponential(multiplier=cfg.db_retry_delay_s, exp_base=2),
         before_sleep=before_sleep_log(logger, logging.WARNING),
@@ -296,26 +296,3 @@ async def _set_search_path(conn: object, schema: str) -> None:
         "SELECT set_config('search_path', %s, false)",
         (schema,),
     )
-
-
-def _is_transient_db_error(exc: BaseException) -> bool:
-    """Return True if the exception looks like a transient DB connection failure.
-
-    Args:
-        exc: The exception raised by psycopg or psycopg_pool.
-
-    Returns:
-        True if the exception is a known transient connection error.
-
-    """
-    if isinstance(exc, (PoolTimeout, TimeoutError)):
-        return True
-    msg = str(exc).lower()
-    patterns = (
-        "ssl connection has been closed unexpectedly",
-        "server closed the connection unexpectedly",
-        "connection is closed",
-        "connection not open",
-        "terminating connection",
-    )
-    return any(p in msg for p in patterns)

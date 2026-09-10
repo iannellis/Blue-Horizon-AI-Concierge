@@ -82,6 +82,7 @@ SQL examples below use placeholders like `$1`, `$2`, `$3`, etc. You **must** rep
 * Unless the user requests otherwise, limit results to at most `$top_k` rows.
 * You may order results by relevant columns.
 * If you get a query error, rewrite and retry (max 2 reformulations).
+* If the error starts with `DATABASE_UNAVAILABLE`, this is not a query error — the database itself is temporarily unreachable. Do not rewrite or retry the query; it will not help, and every retry burns time you don't have. Tell the guest the booking system is temporarily unavailable and do not spend a reformulation on it.
 * If a query returns an empty result, that's acceptable: say you couldn't find relevant rooms.
 * `run_sql` cannot write. If it refuses a statement, do not try to rephrase it as a write — use the matching `propose_*` tool instead.
 

@@ -326,6 +326,69 @@ is not a mechanism, it is a coincidence that held until something reordered it. 
 makes the guard's precondition (`.env` loaded) something it establishes itself rather
 than something it assumes.
 
+### Asking the guest to try again was hiding three different failures
+
+**Status:** adopted.
+
+The UI used to show one string, "please try again," for nearly every failure: a router
+timeout, a sub-agent exception, a startup window, a lost race for a room, a database
+outage. Investigating where that copy actually came from turned up three separate
+reasons it was wrong, not one:
+
+1. **It asked the guest to do work the system could already do itself.** The two
+   dominant triggers - a HuggingFace Space cold start and a Neon compute resume - are
+   both self-healing and time-bounded. Nothing needed the guest's help; the system just
+   was not telling them that.
+2. **On the confirm path, it invited an action whose safety had never been
+   established.** The proposal used to be retired *before* the commit ran, so a retry
+   after a failed confirm returned a flat `404 "That request has expired"` - the guest
+   who tried to comply with "try again" was punished for it.
+3. **It was a catch-all, so it destroyed information the system already had.** A `409`
+   carrying the precise reason ("Room 204 is not available for every night requested")
+   was collapsed into the same sentence as a network error, discarding the one detail
+   that would have actually told the guest something.
+
+**The fix classifies failures by whether a repeat is known to be safe, not by how the
+error happened to surface:**
+
+- **Idempotent reads** (`run_sql`, `/v1/bookings`, `/v1/customers`, `/v1/health`): the
+  system absorbs the failure itself. A guest is never asked to retry a read; a failed
+  one is a system state, reported and retried automatically, not a user error.
+- **The chat turn**: not auto-retried server-side, because a turn may already have
+  mutated the `ProposalStore`, appended a message to the checkpoint, and consumed a
+  concurrency slot. The UI offers a resend action instead of a sentence asking the
+  guest to retype, and only enables it once a health poll confirms recovery.
+- **The confirm write**: never blind-retried. The fix here is not copy at all, but
+  making a client-initiated retry actually safe - see below.
+
+**The false `404` on a confirm retry is fixed by changing what "retire the proposal"
+means, not by rewording the failure.** A proposal is now retired only once the write's
+outcome is actually known: a determinate refusal (`BookingWriteError`, e.g. the nights
+were taken) retires it, but an unreachable database (`BookingUnavailableError`) leaves
+it pending, so a second confirm is a genuine retry. The case this alone does not solve
+- the `COMMIT` landing but the acknowledgment being lost, so a naive retry re-prices,
+finds the guest's own booking, and reports the room as unavailable to the guest who
+actually got it - is closed by a reconciliation read
+(`write_ops.find_booking_for_rooms`) that is exact, not heuristic, because of the same
+exclusion constraint that makes double-booking structurally impossible elsewhere in
+this system. See
+[Booking agent](architecture/booking-agent.md#3-the-proposeconfirm-flow) for the
+mechanism.
+
+**Startup keeps its unbounded retry loop; only the guest-facing claim about it is
+bounded.** A `STARTING`/`FAILED` readiness state machine replaces a boolean, so the
+guest sees "this will resolve on its own" for an ordinary cold start and "this will not
+resolve on its own" for a genuine misconfiguration - but the initialization loop itself
+never gives up in either case, because an externally-fixed dependency should still
+recover without an operator restart. Giving up on a Space that sleeps would be worse
+than continuing to retry it. See
+[Orchestration](architecture/orchestration.md#readiness) for the state machine and
+the transient/permanent classification.
+
+Mechanism lives in the architecture pages linked above; this entry exists to record the
+reasoning and the tiering, per this file's own rule against duplicating the same fact in
+two places.
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

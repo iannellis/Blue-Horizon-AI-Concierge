@@ -12,7 +12,10 @@ The file is structured into sections that map to the Pydantic models in
 | `[booking]` | Booking agent LLM, SQL guardrails, DB pool settings |
 | `[booking.proposals]` | `ttl_s`, how long an unconfirmed proposal stays in the in-process store before it is purged |
 | `[load_data]` | Paths to the source data pickles, and `seeded_customer_count` |
-| `[neon]` | Neon project ID and branch name, required by `AppConfig` |
+
+Neon branch management (project ID, branch name, reset tuning) lives entirely in
+`eval/`, not here - the serving app has no Neon management awareness. See
+[Evaluation](../evaluation/harness.md#prerequisites).
 
 ## Notable settings
 
@@ -36,6 +39,19 @@ again.
 customers get the dense low `customer_id` block that the UI's guest assignment and the
 eval and stress harnesses assume. It is the single source of truth that both
 `booking_pgsql.py` and `write_ops.list_customers` read, so the two cannot drift apart.
+
+**`[orchestration.orchestration].unavailable_retry_after_s`** (default 5.0) is the
+`Retry-After` seconds returned with a `/v1/chat` (and `/v1/customers`, `/v1/bookings`)
+`503` while the orchestrator is not ready, in both the `STARTING` and `FAILED` readiness
+states. Kept short by design: the init loop keeps retrying in both states, so a client
+polling at this interval sees a transient outage recover on its own. See
+[Orchestration](../architecture/orchestration.md#readiness).
+
+**`[orchestration.messages].failed`** is shown while readiness is `FAILED`: the last
+startup attempt was classified permanent. Unlike `.unavailable` (shown for `STARTING`,
+carrying no retry instruction because recovery is expected on its own), this string must
+not offer a retry affordance the guest cannot act on - the process itself keeps
+retrying regardless, but nothing the guest does changes that.
 
 **`statement_timeout` and `search_path` are not in this file.** They are set at the
 database role level, so that they apply correctly under PgBouncer transaction pooling:
@@ -75,7 +91,6 @@ covers both processes when running locally.
 | Variable | Description |
 |----------|-------------|
 | `PGSQL_ROOT_PARENT_DB_URL` | Schema-owner URL for the **Parent** branch specifically. Used only by the data-loading tooling; not read by the API or UI at runtime. Required to load data, not to start the app afterward. |
-| `NEON_API_KEY` | Neon management API key. Read into `AppConfig` but currently unused by the app itself |
 | `LANGSMITH_API_KEY` | LangSmith API key, enabling tracing |
 | `LANGSMITH_TRACING` | Set to `true` to activate tracing (requires `LANGSMITH_API_KEY`) |
 | `LANGCHAIN_PROJECT` | LangSmith project name to log traces under |

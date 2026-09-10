@@ -56,6 +56,40 @@ Proposals are TTL-bounded (`[booking.proposals].ttl_s`, 30 minutes by default),
 single-use, and superseded by any new proposal or user message on the same thread. A
 proposal reserves no inventory, so the TTL only bounds the store's size.
 
+**A proposal is retired only once the write's outcome is actually known.** Confirming
+calls `write_ops.commit_booking` (or `cancel_`/`modify_booking`) and only then removes
+the proposal from the pending index - not before. That ordering is what makes a `503`
+retryable: if the database cannot be reached at all
+(`write_ops.BookingUnavailableError`), the request was never evaluated against
+`room_availability`, so the proposal is left pending instead of retired, and a second
+`POST /v1/booking/confirm` on the same `proposal_id` is a genuine retry rather than a
+`404`. Only a determinate refusal (`write_ops.BookingWriteError` - the write was
+evaluated and the nights are unavailable) retires the proposal, because that outcome is
+already known and a retry would just re-ask a question that has been answered.
+
+**Invariant 6 (double-booking is structurally impossible) is what makes retaining a
+pending proposal across a failed attempt safe.** A retried commit re-prices every
+night from scratch under the same `SELECT ... FOR UPDATE` lock described below, so it
+can never write a second, conflicting row - it can only either succeed cleanly (nothing
+was written the first time) or, if the first attempt's `COMMIT` actually landed and
+only the acknowledgment was lost, discover the guest's own booking already exists.
+
+That lost-acknowledgment case is settled by a **reconciliation read**,
+`write_ops.find_booking_for_rooms`, called from the confirm path only for a `"book"`
+action whose retry raises `BookingUnavailableError` again. It looks up whether every
+requested room-stay already belongs to one booking owned by the guest, and it is
+**exact, not heuristic**: the `booking_rooms_no_overlap` GiST exclusion constraint makes
+`(room_id, [check_in, check_out))` unique across the live rows in `booking_rooms`, so a
+match can only be the guest's own prior commit. Found means the commit landed - the
+proposal is retired and the real receipt returned, `already_confirmed=False` since this
+is the first time the guest sees it. Not found means it did not - the proposal stays
+pending. A failed reconciliation read itself is left unresolved rather than reported as
+either outcome, since collapsing "checked and found nothing" together with "could not
+check" would tell the guest something this code never actually established. Scoped to
+`"book"` only: `cancel` and `modify` do not share that uniqueness property, and their
+own state checks (already cancelled, unknown `booking_room_id`) are already
+self-describing.
+
 ### 4. The eval suite checks for the failure mode anyway
 
 `booking_no_unbacked_success_claims` explicitly looks for a success claim with no

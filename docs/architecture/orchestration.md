@@ -60,6 +60,47 @@ Initialization uses `tenacity` with exponential backoff between `init_retry_base
 `init_retry_max_s`, so a cold Redis or a suspended Neon compute delays startup instead
 of failing it.
 
+## Readiness
+
+`OrchestrationManager` tracks a three-state `Readiness` enum, not a boolean, because
+"not ready yet" and "will not become ready by itself" call for different guest-facing
+copy and, for the latter, no retry affordance at all:
+
+| State | Entered when | `/v1/chat`, `/v1/customers`, `/v1/bookings` |
+|---|---|---|
+| `READY` | The compiled agent is built | Served normally |
+| `STARTING` | No agent yet, and the last attempt (if any) failed for a reason classified transient | `503` + `Retry-After`, `[orchestration.messages].unavailable` - no retry instruction, since recovery is expected on its own |
+| `FAILED` | No agent yet, and the last attempt failed for a reason classified **permanent** | `503` + `Retry-After`, `[orchestration.messages].failed` - explicitly says this will not resolve on its own |
+
+`is_ready` stays available as a derived `READY`-or-not property for callers (like
+`/v1/health`) that only need a yes/no answer; `readiness` exposes the full state for
+callers that must distinguish `STARTING` from `FAILED`.
+
+**Classification, not the retry loop, is what changes.** The init loop keeps
+`stop_never` in both non-ready states: an externally-fixed dependency (a corrected
+database role, a Neon compute that finishes waking up) should recover without an
+operator restart, even after being classified `FAILED` once. What differs is only the
+message shown while waiting. Classification comes from the exception type the last
+init attempt raised:
+
+- `ConfigurationError` (a sibling of `OperationalError`, not a subclass, so existing
+  `except OperationalError` handlers do not swallow it) marks the failure permanent and
+  sets `FAILED`. Raised only from genuinely unrecoverable sites: `startup_check`'s
+  read-only-role guard (see [Booking agent](booking-agent.md#1-two-database-roles)),
+  a missing packaged prompt file, a missing or blank required database URL.
+- Everything else - `OperationalError`, or an exception type the classifier does not
+  recognise - sets `STARTING`. Defaulting an unrecognised exception to `STARTING`
+  rather than `FAILED` is deliberate: a misclassification then degrades to bad copy
+  (a permanent failure described as transient) rather than to a guest being told a
+  transient outage will never resolve, and the process never gives up regardless.
+
+A `/v1/chat` request is gated on `is_ready` before either content-negotiated branch
+commits to a response, since a `StreamingResponse` commits its `200` as soon as it
+starts and cannot become a `503` afterward. See
+[API Reference](../api.md#readiness-503) for the wire-level response shape, and
+[Design Goals and Decisions](../design-decisions.md#asking-the-guest-to-try-again-was-hiding-three-different-failures)
+for why "please try again" was replaced by this instead of by better copy alone.
+
 ## Session isolation
 
 Each conversation is keyed by a UUID `thread_id`. The checkpointer stores that thread's

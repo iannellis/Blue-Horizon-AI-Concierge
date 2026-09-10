@@ -93,6 +93,12 @@ is dismantling a guarantee.
 - Retry policy is `tenacity`. SQL parsing is `sqlglot`. DataFrame validation is `pandera`.
   Four bespoke backoff implementations and a regex SQL guardrail preceded these; do not
   hand-roll replacements.
+- Guest-facing failure copy is classified by retry-safety tier (idempotent read, chat
+  turn, confirm write), not by where the error happened to surface. See
+  `docs/design-decisions.md#asking-the-guest-to-try-again-was-hiding-three-different-failures`.
+  `eval/stress/workload.py`'s prose-matching outcome classifier is coupled to this: it
+  reads assistant-facing copy as a fallback, so a guest-facing wording change can move a
+  stress metric.
 
 ## Where things are
 

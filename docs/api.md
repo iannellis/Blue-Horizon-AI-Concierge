@@ -5,10 +5,10 @@ The FastAPI backend runs on port `8000` and exposes the following endpoints unde
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/v1/health` | Returns `{"status": "ok"}` (200) when ready, `{"status": "starting"}` (503) during init |
-| `GET` | `/v1/customers` | Lists the seeded guests as `{customer_id, first_name, last_name}`, for guest assignment |
-| `GET` | `/v1/bookings?customer_id=` | Lists one guest's reservations (confirmation number, rooms, dates, total, status) |
-| `POST` | `/v1/chat` | Send a message. Content-negotiated: `Accept: text/event-stream` streams SSE events, anything else returns one JSON response |
+| `GET` | `/v1/health` | Returns `{"status": "ok"}` (200) when ready, `{"status": "starting"}` or `{"status": "failed"}` (503) otherwise |
+| `GET` | `/v1/customers` | Lists the seeded guests as `{customer_id, first_name, last_name}`, for guest assignment. 503 during the startup window |
+| `GET` | `/v1/bookings?customer_id=` | Lists one guest's reservations (confirmation number, rooms, dates, total, status). 503 during the startup window |
+| `POST` | `/v1/chat` | Send a message. Content-negotiated: `Accept: text/event-stream` streams SSE events, anything else returns one JSON response. 503 while not ready |
 | `POST` | `/v1/booking/confirm` | Commit a pending proposal. The only path that ever writes a booking, cancellation, or modification |
 | `POST` | `/v1/booking/dismiss` | Discard a pending proposal without writing anything |
 
@@ -27,6 +27,34 @@ on `/v1/chat`.
 
 `thread_id` is bound to whichever `customer_id` first uses it. A later request reusing
 that `thread_id` under a different `customer_id` is rejected with `409 Conflict`.
+
+## Readiness (503)
+
+Both content-negotiated branches of `/v1/chat` are gated on the orchestrator's
+readiness, checked before either branch commits to a response. While not ready, the
+endpoint returns:
+
+```json
+{
+  "status": "starting",
+  "message": "The system is starting up and should be ready again shortly. No action is needed on your part.",
+  "retry_after_s": 5
+}
+```
+
+with HTTP `503` and a matching `Retry-After` header, for **both** an SSE request and a
+plain JSON request - an SSE client gets this same JSON body instead of a stream, since
+there is nothing yet to stream. `status` is `"starting"` while the system is expected to
+recover on its own, or `"failed"` if the last startup attempt was classified as a
+permanent misconfiguration; either way the client should treat the response as
+retryable and wait `retry_after_s` seconds, since the background init loop keeps
+retrying even in the `"failed"` case. See
+[Orchestration](architecture/orchestration.md#readiness) for what drives the
+classification.
+
+`GET /v1/customers` and `GET /v1/bookings` return the same shape (503 with
+`Retry-After`, `detail` in place of `message`) during the same startup window, since
+both read from the booking database pool.
 
 ## Streaming events
 
@@ -52,7 +80,23 @@ confirmation dialog renders. `summary` is action-shaped (`book`, `cancel`, or `m
 and is **never** derived from the assistant's own text.
 
 Any exception mid-stream, including a `thread_id`/`customer_id` mismatch, is translated
-into `{"type": "error", "message": "..."}` rather than silently severing the connection.
+into an `error` event rather than silently severing the connection:
+
+```json
+{"type": "error", "message": "...", "code": "thread_mismatch"}
+```
+
+`code` is additive: a client that only reads `message` behaves exactly as it did before
+this field existed. It cannot be an HTTP status here, unlike the readiness 503 above -
+the 200 and the SSE headers are already committed by the time a turn in progress can
+fail. The full code enum is `"unavailable" | "failed" | "timeout" | "thread_mismatch" |
+"internal"`, but only `"thread_mismatch"` (a `thread_id`/`customer_id` mismatch) and
+`"internal"` (anything else this module does not specifically recognise) are reachable
+today. `"unavailable"` and `"failed"` are not reachable mid-stream: an unready
+orchestrator is stopped by the readiness gate above before a stream ever starts.
+`"timeout"` is reserved too - a node-level timeout is already absorbed into a normal
+`done` event carrying `[orchestration.messages].error` text, never raised as an
+exception this handler would see.
 
 The non-streaming JSON response carries the same `proposal` field when a proposal is
 pending after the turn.
@@ -82,3 +126,42 @@ Or the guest declines, and the client calls `POST /v1/booking/dismiss`.
 
 Proposals are single-use and expire after `[booking.proposals].ttl_s`. Sending another
 chat message on the same thread supersedes any pending proposal.
+
+### Confirm status codes
+
+| Status | Meaning | Proposal afterward |
+|---|---|---|
+| `200` | Committed. `already_confirmed` distinguishes a fresh write from a replayed cached result (a duplicate confirm) | Retired |
+| `404` | Unknown or expired (`ProposalNotFoundError`) | Already gone |
+| `403` | Belongs to a different guest (`ProposalOwnershipError`) | Unchanged |
+| `409` | The write was evaluated and refused - most commonly, another guest took one of the nights in the meantime. `detail` carries the app-authored reason verbatim | Retired |
+| `503` | The database could not be reached at all; nothing was decided either way. `Retry-After` header included | **Kept pending** - confirming again is safe and is a real retry, not a duplicate |
+
+The `503` case is why a client should keep its confirm dialog open (Confirm still
+enabled) rather than treating every non-200 the same way: the proposal survives it on
+the server, specifically so a guest can press Confirm again after a transient database
+blip. See
+[Booking agent](architecture/booking-agent.md#3-the-proposeconfirm-flow) for the
+retire-on-`409`-but-not-on-`503` distinction this depends on.
+
+## Failure semantics
+
+Not every non-2xx response means the same thing to a client, and treating them
+identically is what this API is deliberately designed to avoid:
+
+| Response | Retryable? | Why |
+|---|---|---|
+| `/v1/chat` `503` | Yes, after `retry_after_s` | Nothing ran; the init loop keeps retrying regardless of `status` |
+| `/v1/customers`, `/v1/bookings` `503` | Yes, after `retry_after_s` | Same startup window as above |
+| Mid-stream `error` event | Depends on `code` (see above) | The turn may already have mutated state (a proposal, the conversation history); this is not a blanket invitation to resend |
+| Confirm `503` | Yes - the proposal is still pending | Nothing was decided; see the table above |
+| Confirm `409` | No | The proposal is retired; a client should let the guest start a new request, not retry the same one |
+| Confirm `404` / `403` | No | Terminal for this proposal id |
+| Dismiss `404` / `403` | No | Terminal for this proposal id |
+
+This mirrors the retry-safety tiering described in
+[Design Goals and Decisions](design-decisions.md#asking-the-guest-to-try-again-was-hiding-three-different-failures):
+an idempotent read is retried by the system itself and never surfaces a user-facing
+failure at all; the chat turn offers a resend rather than auto-retrying, since it may
+already have side effects; the confirm write never blind-retries, and instead the `503`
+case is engineered to make a client-initiated retry safe.

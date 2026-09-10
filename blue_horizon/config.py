@@ -380,6 +380,11 @@ class OrchestrationRuntimeConfig(FrozenModel):
         llm_concurrency: Maximum number of concurrent LLM pipeline executions.
             Limits simultaneous ainvoke calls to prevent token-per-minute
             exhaustion under high concurrency.
+        unavailable_retry_after_s: `Retry-After` seconds returned with a
+            `/v1/chat` 503 while the orchestrator is not ready (`STARTING`
+            or `FAILED`). Short by design: the init loop keeps retrying in
+            both states, so a client polling at this interval sees a
+            transient outage recover on its own.
 
     """
 
@@ -389,6 +394,7 @@ class OrchestrationRuntimeConfig(FrozenModel):
     info_timeout_s: float
     booking_timeout_s: float
     llm_concurrency: Annotated[int, Field(ge=1)] = 10
+    unavailable_retry_after_s: Annotated[float, Field(gt=0.0)] = 5.0
 
 
 class OrchestrationPromptsConfig(FrozenModel):
@@ -409,14 +415,23 @@ class MessagesConfig(FrozenModel):
 
     Attributes:
         refusal: Response when the user request is refused.
-        error: Response for technical failures.
-        unavailable: Message used while initialization is pending.
+        error: Response for a chat turn that failed mid-flight (router or
+            sub-agent timeout/exception, an empty turn). The guest can send
+            the message again; nothing here asserts that doing so will help.
+        unavailable: Message shown while readiness is `STARTING`: the system
+            is initializing and expected to recover on its own, so this
+            carries no retry instruction.
+        failed: Message shown while readiness is `FAILED`: the last startup
+            attempt was classified permanent (see `ConfigurationError`). The
+            init loop keeps retrying regardless, but this string must not
+            offer a retry affordance the guest cannot act on.
 
     """
 
     refusal: str
     error: str
     unavailable: str
+    failed: str
 
 
 class OrchestrationConfig(FrozenModel):

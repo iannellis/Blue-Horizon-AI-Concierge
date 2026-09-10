@@ -124,6 +124,10 @@ class RunSqlOutput(BaseModel):
         rows: Result rows returned by the tool, when present.
         truncated: Whether the tool output was truncated by the agent guardrails.
         error: User-facing error message when the tool fails.
+        error_kind: Message-independent failure classification (see
+            `resources.SqlErrorKind`), present only on failure. Lets a
+            consumer like the stress harness's outcome classifier key off
+            structure instead of matching this tool's error text.
 
     """
 
@@ -131,7 +135,31 @@ class RunSqlOutput(BaseModel):
     rowcount: int | None = None
     truncated: bool | None = None
     error: str | None = None
+    error_kind: str | None = None
     rows: list[dict[str, Any]] | None = None
+
+
+def _parse_run_sql_payload(
+    output: RunSqlOutput | Mapping[str, object],
+) -> RunSqlOutput | None:
+    """Coerce a run_sql tool output into a validated `RunSqlOutput`.
+
+    Args:
+        output: Raw or already-typed run_sql tool output.
+
+    Returns:
+        The validated payload, or `None` if `output` is neither a
+        `RunSqlOutput` nor a mapping that validates as one.
+
+    """
+    if isinstance(output, RunSqlOutput):
+        return output
+    if isinstance(output, Mapping):
+        try:
+            return RunSqlOutput.model_validate(dict(output))
+        except ValidationError:
+            return None
+    return None
 
 
 class ProposeOutput(BaseModel):
@@ -492,14 +520,8 @@ class EvalCaptureCallback(AsyncCallbackHandler):
             base_entry: Optional base entry with input previews.
 
         """
-        if isinstance(output, RunSqlOutput):
-            payload = output
-        elif isinstance(output, Mapping):
-            try:
-                payload = RunSqlOutput.model_validate(dict(output))
-            except ValidationError:
-                return
-        else:
+        payload = _parse_run_sql_payload(output)
+        if payload is None:
             return
         summary = dict(base_entry or {})
         summary["tool"] = "run_sql"
@@ -510,6 +532,8 @@ class EvalCaptureCallback(AsyncCallbackHandler):
             summary["rows"] = _compact_rows(payload.rows, max_rows=1)
         if payload.error:
             summary["error"] = payload.error
+        if payload.error_kind:
+            summary["error_kind"] = payload.error_kind
         summary["output_preview"] = _preview(
             {
                 "status": payload.status,

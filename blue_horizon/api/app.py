@@ -47,11 +47,6 @@ _KEEPALIVE_INTERVAL_S = 15.0
 # BookingUnavailableError. Deliberately short: the dominant cause is a Neon
 # compute resume, normally a few hundred milliseconds, not a lengthy outage.
 _CONFIRM_RETRY_AFTER_S = 5
-# How long a client should wait before retrying a /v1/chat request made
-# while the orchestrator is not ready. Same rationale as above, and shared
-# across the STARTING and FAILED readiness states: the loop keeps retrying
-# in both, so there is no basis yet for a longer interval in the FAILED case.
-_CHAT_RETRY_AFTER_S = 5
 
 
 class ChatPayload(BaseModel):
@@ -181,6 +176,22 @@ def _error_event(exc: Exception) -> dict[str, Any]:
     }
 
 
+def _chat_retry_after_s() -> int:
+    """Return the `Retry-After` seconds for a `/v1/chat` 503 while not ready.
+
+    Returns:
+        int: The configured
+        `[orchestration.orchestration].unavailable_retry_after_s`, shared
+        across the STARTING and FAILED readiness states -- the init loop
+        keeps retrying in both, so there is no basis yet for a longer
+        interval in the FAILED case.
+
+    """
+    return int(
+        load_app_config().orchestration.orchestration.unavailable_retry_after_s,
+    )
+
+
 def _not_ready_response() -> JSONResponse:
     """Build the 503 response for a `/v1/chat` request while not ready.
 
@@ -196,15 +207,16 @@ def _not_ready_response() -> JSONResponse:
 
     """
     status = "failed" if orchestrator.readiness is Readiness.FAILED else "starting"
+    retry_after_s = _chat_retry_after_s()
     body = {
         "status": status,
         "message": orchestrator.get_readiness_message(),
-        "retry_after_s": _CHAT_RETRY_AFTER_S,
+        "retry_after_s": retry_after_s,
     }
     return JSONResponse(
         body,
         status_code=503,
-        headers={"Retry-After": str(_CHAT_RETRY_AFTER_S)},
+        headers={"Retry-After": str(retry_after_s)},
     )
 
 
@@ -249,7 +261,7 @@ async def list_customers() -> list[dict[str, Any]]:
         raise HTTPException(
             status_code=503,
             detail=orchestrator.get_readiness_message(),
-            headers={"Retry-After": str(_CHAT_RETRY_AFTER_S)},
+            headers={"Retry-After": str(_chat_retry_after_s())},
         ) from exc
     seeded_customer_count = (
         load_app_config().load_data.booking_pgsql.seeded_customer_count
@@ -295,7 +307,7 @@ async def list_bookings(customer_id: int) -> dict[str, Any]:
         raise HTTPException(
             status_code=503,
             detail=orchestrator.get_readiness_message(),
-            headers={"Retry-After": str(_CHAT_RETRY_AFTER_S)},
+            headers={"Retry-After": str(_chat_retry_after_s())},
         ) from exc
     bookings = await write_ops.list_bookings(write_pool, customer_id=customer_id)
     return {"bookings": [write_ops.serialize_booking(b) for b in bookings]}

@@ -51,6 +51,10 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
                 "Sorry - the system isn't available at the moment. "
                 "Please try again shortly."
             ),
+            "failed": (
+                "Sorry - the system hit a problem that will not resolve on "
+                "its own. Please check back later."
+            ),
         },
     },
     "info": {
@@ -172,6 +176,8 @@ def test_load_packaged_app_config() -> None:
     )
     cfg = AppConfig.model_validate(data)
     assert cfg.orchestration.messages.unavailable
+    assert cfg.orchestration.messages.failed
+    assert cfg.orchestration.orchestration.unavailable_retry_after_s > 0
     assert cfg.info.redis.health_check_interval_s > 0
     assert cfg.booking.agent.top_k > 0
     assert cfg.booking.proposals.ttl_s > 0

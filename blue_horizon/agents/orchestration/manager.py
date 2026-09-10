@@ -10,7 +10,7 @@ import asyncio
 import contextlib
 import enum
 import logging
-from typing import TYPE_CHECKING, Any, Final, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.messages import AIMessage, HumanMessage
 from tenacity import (
@@ -56,16 +56,6 @@ _NODE_TO_STAGE: dict[str, tuple[str, str]] = {
 }
 
 logger = logging.getLogger(__name__)
-
-# Guest-facing copy for the FAILED readiness state. Not yet a config value:
-# step 16 of the failure-handling plan promotes this into
-# `[orchestration.messages].failed` alongside a full rewrite of `.error` and
-# `.unavailable`; until then it lives here as the one guest-visible string
-# this module needs that config does not yet define.
-_FAILED_MESSAGE: Final[str] = (
-    "Sorry - the system hit a problem that will not resolve on its own. "
-    "Please check back later."
-)
 
 
 class Readiness(enum.Enum):
@@ -438,12 +428,12 @@ class OrchestrationManager:
 
         Returns:
             str: The configured "still starting" message while `readiness`
-            is `STARTING`, or a fixed "will not resolve on its own" message
-            while it is `FAILED`.
+            is `STARTING`, or the configured "will not resolve on its own"
+            message while it is `FAILED`.
 
         """
         if self._readiness is Readiness.FAILED:
-            return _FAILED_MESSAGE
+            return self._resources.config.messages.failed
         return self._resources.config.messages.unavailable
 
     async def _init_loop(self) -> None:

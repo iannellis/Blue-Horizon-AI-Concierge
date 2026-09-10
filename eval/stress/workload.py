@@ -458,17 +458,19 @@ def _classify_outcome(
 ) -> str:
     """Classify a stress-test operation outcome.
 
-    The propose+confirm pair captured for the turn is preferred because it
-    is more stable than natural-language response text. Assistant text is
-    only used as a fallback when the turn made no ``propose_*`` call at all
-    (for example, the agent refused or asked a clarifying question instead).
+    Three sources are tried in order, most stable first: a Python-level
+    invocation error, the turn's propose+confirm pair, and -- when neither
+    fired -- the last ``run_sql`` call's structured ``error_kind``. Assistant
+    text is the last resort, used only when none of the above produced an
+    answer (for example, the agent refused or asked a clarifying question
+    with no tool call behind it).
 
     Args:
         op_type: Effective operation type (``BOOK``, ``MODIFY``, or ``CANCEL``).
         assistant_text: Assistant response text.
         err_text: Python-level error text from orchestration invocation, if any.
         tool_summary: Captured tool summary entries for the turn, including
-            any ``propose_*`` and ``confirm_booking`` entries.
+            any ``run_sql``, ``propose_*``, and ``confirm_booking`` entries.
 
     Returns:
         One of ``"success"``, ``"conflict"``, or ``"error"``.
@@ -481,6 +483,10 @@ def _classify_outcome(
     propose_confirm_outcome = _classify_propose_confirm_outcome(tool_summary)
     if propose_confirm_outcome is not None:
         return propose_confirm_outcome
+
+    run_sql_outcome = _classify_run_sql_outcome(tool_summary)
+    if run_sql_outcome is not None:
+        return run_sql_outcome
 
     return _classify_text_outcome(assistant_text)
 
@@ -546,8 +552,43 @@ def _last_propose_and_confirm(
     return propose_entry, confirm_entry
 
 
+def _classify_run_sql_outcome(tool_summary: list[dict[str, object]]) -> str | None:
+    """Classify an outcome from the turn's last ``run_sql`` call, if it failed.
+
+    Reads ``error_kind`` (see ``resources.SqlErrorKind``), a message-
+    independent classification, instead of matching the tool's error text.
+    Only ``"unavailable"`` -- the database itself unreachable after
+    retrying, not an ordinary query error -- is decisive here; every other
+    ``error_kind`` (a query error, a guardrail rejection, ...) is left to
+    the text fallback, which already reads those correctly.
+
+    Args:
+        tool_summary: Captured tool summary entries for the turn.
+
+    Returns:
+        ``"error"`` when the last ``run_sql`` call failed with
+        ``error_kind == "unavailable"``, else ``None`` so the caller falls
+        through to the text heuristic.
+
+    """
+    sql_calls = _collect_run_sql_calls(tool_summary)
+    if not sql_calls:
+        return None
+    last_call = sql_calls[-1]
+    failed = last_call.get("status") == "error"
+    if failed and last_call.get("error_kind") == "unavailable":
+        return "error"
+    return None
+
+
 def _classify_text_outcome(text: str) -> str:
     """Classify an assistant response into a coarse outcome bucket.
+
+    Last-resort fallback: this reads assistant *prose*, not a structured
+    signal, so a guest-facing copy change (``booking.txt``, the propose/
+    confirm refusal strings) can silently move this metric. Error markers
+    are checked ahead of conflict markers so an assistant sentence that
+    happens to combine both reads as the more serious outcome.
 
     Args:
         text: The assistant's response text.
@@ -557,6 +598,8 @@ def _classify_text_outcome(text: str) -> str:
 
     """
     lower = text.lower().replace("\u2019", "'").replace("\u2018", "'")
+    if any(m in lower for m in ["error", "failed", "exception", "try again"]):
+        return "error"
     conflict_markers = [
         "unavailable",
         "no availability",
@@ -570,8 +613,6 @@ def _classify_text_outcome(text: str) -> str:
     ]
     if any(m in lower for m in conflict_markers):
         return "conflict"
-    if any(m in lower for m in ["error", "failed", "exception", "try again"]):
-        return "error"
     return "success"
 
 

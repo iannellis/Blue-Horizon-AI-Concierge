@@ -3,12 +3,13 @@
 These tests are DB-independent: `ProposalStore.create()`, `dismiss()`, and
 the pending-lookup/TTL/supersession machinery never touch the database, and
 `confirm()`'s dispatch to `write_ops` is exercised here with the
-`write_ops.commit_booking`/`cancel_booking`/`modify_booking` functions
-monkeypatched out, since their actual correctness against a live database is
-covered separately by `tests/booking/test_write_ops.py` (`db_integration`).
-What is under test here is the store's own contract: single confirm-use,
-ownership, supersession, invalidation-on-new-turn, TTL expiry, and the
-pricing-mismatch assertion.
+`write_ops.commit_booking`/`cancel_booking`/`modify_booking`/
+`find_booking_for_rooms` functions monkeypatched out, since their actual
+correctness against a live database is covered separately by
+`tests/booking/test_write_ops.py` (`db_integration`). What is under test here
+is the store's own contract: single confirm-use, ownership, supersession,
+invalidation-on-new-turn, TTL expiry, the pricing-mismatch assertion, and
+the reconciliation read that settles a lost commit ack (step 18).
 """
 # ruff: noqa: S101
 
@@ -73,6 +74,33 @@ class _FakeCommitResult:
             self.total_amount = total_amount
         if refunded_amount is not None:
             self.refunded_amount = refunded_amount
+
+
+async def _fake_find_booking_for_rooms_returns_none(
+    write_pool: AsyncConnectionPool[Any],
+    *,
+    customer_id: int,
+    rooms: Sequence[write_ops.RoomRequest],
+) -> _FakeCommitResult | None:
+    """Stand in for a reconciliation read that finds no matching booking.
+
+    The default fake for most `BookingUnavailableError` tests below: it
+    simulates the common case where nothing was actually committed, so
+    `confirm()` should behave exactly as it did before step 18 introduced
+    the reconciliation read.
+
+    Args:
+        write_pool: Unused; `confirm()` forwards its own `write_pool`
+            argument (`None` in these tests) without inspecting it.
+        customer_id: Unused; this fake always reports nothing found.
+        rooms: Unused; this fake always reports nothing found.
+
+    Returns:
+        None, unconditionally.
+
+    """
+    _ = write_pool, customer_id, rooms
+    return None
 
 
 def _make_store(*, ttl_s: float = _DEFAULT_TTL_S) -> ProposalStore:
@@ -532,7 +560,9 @@ class TestConfirm:
         Unlike `BookingWriteError`, `BookingUnavailableError` means the
         write was never evaluated, so the guest must be able to press
         Confirm again on the same proposal rather than seeing "That request
-        has expired."
+        has expired." The reconciliation read (step 18) finds nothing here,
+        since nothing was actually committed, so it changes nothing about
+        this outcome.
         """
         store = _make_store()
         proposal = _create_book_proposal(store, total="100.00")
@@ -551,6 +581,11 @@ class TestConfirm:
         monkeypatch.setattr(
             proposals_module.write_ops, "commit_booking", fake_commit_booking,
         )
+        monkeypatch.setattr(
+            proposals_module.write_ops,
+            "find_booking_for_rooms",
+            _fake_find_booking_for_rooms_returns_none,
+        )
 
         with pytest.raises(proposals_module.write_ops.BookingUnavailableError):
             asyncio.run(
@@ -561,6 +596,200 @@ class TestConfirm:
                 ),
             )
 
+        assert store.get_pending_for_thread(_THREAD_ID) is proposal
+
+    def test_reconciliation_finds_the_commit_and_reports_success(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The lost-ack case: the commit landed, only the ack was lost.
+
+        `commit_booking` raises `BookingUnavailableError` (the connection
+        died after COMMIT but before the ack returned), but
+        `find_booking_for_rooms` then finds the guest's own booking. That
+        must report success and cache it, not leave the guest thinking the
+        room was lost when they actually have it -- the exact contradiction
+        step 18 exists to close.
+        """
+        store = _make_store()
+        proposal = _create_book_proposal(store, total="100.00")
+        reconciled_result = _FakeCommitResult(total_amount=Decimal("100.00"))
+
+        async def fake_commit_booking(
+            write_pool: AsyncConnectionPool[Any],
+            *,
+            customer_id: int,
+            rooms: Sequence[write_ops.RoomRequest],
+        ) -> _FakeCommitResult:
+            """Simulate the ack being lost after a commit that landed."""
+            _ = write_pool, customer_id, rooms
+            msg = "Could not reach the database to complete this request."
+            raise proposals_module.write_ops.BookingUnavailableError(msg)
+
+        find_calls: list[dict[str, Any]] = []
+
+        async def fake_find_booking_for_rooms(
+            write_pool: AsyncConnectionPool[Any],
+            *,
+            customer_id: int,
+            rooms: Sequence[write_ops.RoomRequest],
+        ) -> _FakeCommitResult:
+            """Report the lost commit as found, recording the call."""
+            _ = write_pool
+            find_calls.append({"customer_id": customer_id, "rooms": rooms})
+            return reconciled_result
+
+        monkeypatch.setattr(
+            proposals_module.write_ops, "commit_booking", fake_commit_booking,
+        )
+        monkeypatch.setattr(
+            proposals_module.write_ops,
+            "find_booking_for_rooms",
+            fake_find_booking_for_rooms,
+        )
+
+        outcome = asyncio.run(
+            store.confirm(
+                proposal_id=proposal.proposal_id,
+                customer_id=_CUSTOMER_ID,
+                write_pool=_UNUSED_WRITE_POOL,
+            ),
+        )
+
+        assert outcome.already_confirmed is False
+        assert outcome.result is reconciled_result
+        assert find_calls == [{"customer_id": _CUSTOMER_ID, "rooms": []}]
+        # Retired and cached exactly as a normal successful commit would be,
+        # so a second confirm replays it instead of re-attempting the write.
+        assert store.get_pending_for_thread(_THREAD_ID) is None
+        replay = asyncio.run(
+            store.confirm(
+                proposal_id=proposal.proposal_id,
+                customer_id=_CUSTOMER_ID,
+                write_pool=_UNUSED_WRITE_POOL,
+            ),
+        )
+        assert replay.already_confirmed is True
+        assert replay.result is reconciled_result
+
+    def test_reconciliation_read_failure_leaves_proposal_pending(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A reconciliation read that cannot reach the database is not a guess.
+
+        The read itself failing must not be read as "the commit did not
+        land": that would turn one failure (the commit's) into a second,
+        different-shaped one (a false negative). The proposal stays pending
+        either way, exactly as if no reconciliation had been attempted.
+        """
+        store = _make_store()
+        proposal = _create_book_proposal(store, total="100.00")
+
+        async def fake_commit_booking(
+            write_pool: AsyncConnectionPool[Any],
+            *,
+            customer_id: int,
+            rooms: Sequence[write_ops.RoomRequest],
+        ) -> _FakeCommitResult:
+            """Simulate a dead pool."""
+            _ = write_pool, customer_id, rooms
+            msg = "Could not reach the database to complete this request."
+            raise proposals_module.write_ops.BookingUnavailableError(msg)
+
+        async def fake_find_booking_for_rooms(
+            write_pool: AsyncConnectionPool[Any],
+            *,
+            customer_id: int,
+            rooms: Sequence[write_ops.RoomRequest],
+        ) -> _FakeCommitResult | None:
+            """Simulate the reconciliation read itself being unreachable."""
+            _ = write_pool, customer_id, rooms
+            msg = "Could not reach the database to complete this request."
+            raise proposals_module.write_ops.BookingUnavailableError(msg)
+
+        monkeypatch.setattr(
+            proposals_module.write_ops, "commit_booking", fake_commit_booking,
+        )
+        monkeypatch.setattr(
+            proposals_module.write_ops,
+            "find_booking_for_rooms",
+            fake_find_booking_for_rooms,
+        )
+
+        with pytest.raises(proposals_module.write_ops.BookingUnavailableError):
+            asyncio.run(
+                store.confirm(
+                    proposal_id=proposal.proposal_id,
+                    customer_id=_CUSTOMER_ID,
+                    write_pool=_UNUSED_WRITE_POOL,
+                ),
+            )
+
+        assert store.get_pending_for_thread(_THREAD_ID) is proposal
+
+    def test_reconciliation_is_skipped_for_cancel_proposals(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """`cancel`/`modify` proposals never call `find_booking_for_rooms`.
+
+        `booking_rooms_no_overlap`'s uniqueness, the property that makes the
+        reconciliation read exact rather than heuristic, is specific to a
+        fresh `book`. `cancel` and `modify` already describe their own
+        outcome through `BookingWriteError` (already cancelled, unknown
+        `booking_room_id`), so step 18 scopes the read to `action == "book"`.
+        """
+        store = _make_store()
+        proposal = store.create(
+            thread_id=_THREAD_ID,
+            customer_id=_CUSTOMER_ID,
+            action="cancel",
+            summary={"rooms": [], "total": "50.00"},
+            details=(123, None),
+        )
+
+        async def fake_cancel_booking(
+            write_pool: AsyncConnectionPool[Any],
+            *,
+            customer_id: int,
+            booking_id: int,
+            rooms: Sequence[write_ops.CancelRoomInstruction] | None,
+        ) -> _FakeCommitResult:
+            """Simulate a dead pool."""
+            _ = write_pool, customer_id, booking_id, rooms
+            msg = "Could not reach the database to complete this request."
+            raise proposals_module.write_ops.BookingUnavailableError(msg)
+
+        find_calls: list[object] = []
+
+        async def fake_find_booking_for_rooms(
+            write_pool: AsyncConnectionPool[Any],
+            *,
+            customer_id: int,
+            rooms: Sequence[write_ops.RoomRequest],
+        ) -> _FakeCommitResult | None:
+            """Record whether it was called at all; must never be for cancel."""
+            _ = write_pool, customer_id, rooms
+            find_calls.append(None)
+            return None
+
+        monkeypatch.setattr(
+            proposals_module.write_ops, "cancel_booking", fake_cancel_booking,
+        )
+        monkeypatch.setattr(
+            proposals_module.write_ops,
+            "find_booking_for_rooms",
+            fake_find_booking_for_rooms,
+        )
+
+        with pytest.raises(proposals_module.write_ops.BookingUnavailableError):
+            asyncio.run(
+                store.confirm(
+                    proposal_id=proposal.proposal_id,
+                    customer_id=_CUSTOMER_ID,
+                    write_pool=_UNUSED_WRITE_POOL,
+                ),
+            )
+
+        assert find_calls == []
         assert store.get_pending_for_thread(_THREAD_ID) is proposal
 
     def test_retry_after_unavailable_error_succeeds_and_caches(
@@ -595,6 +824,11 @@ class TestConfirm:
 
         monkeypatch.setattr(
             proposals_module.write_ops, "commit_booking", flaky_commit_booking,
+        )
+        monkeypatch.setattr(
+            proposals_module.write_ops,
+            "find_booking_for_rooms",
+            _fake_find_booking_for_rooms_returns_none,
         )
 
         with pytest.raises(proposals_module.write_ops.BookingUnavailableError):
@@ -646,6 +880,11 @@ class TestConfirm:
         monkeypatch.setattr(
             proposals_module.write_ops, "commit_booking", fake_commit_booking,
         )
+        monkeypatch.setattr(
+            proposals_module.write_ops,
+            "find_booking_for_rooms",
+            _fake_find_booking_for_rooms_returns_none,
+        )
 
         with pytest.raises(proposals_module.write_ops.BookingUnavailableError):
             asyncio.run(
@@ -693,6 +932,11 @@ class TestConfirm:
 
         monkeypatch.setattr(
             proposals_module.write_ops, "commit_booking", fake_commit_booking,
+        )
+        monkeypatch.setattr(
+            proposals_module.write_ops,
+            "find_booking_for_rooms",
+            _fake_find_booking_for_rooms_returns_none,
         )
 
         with pytest.raises(proposals_module.write_ops.BookingUnavailableError):

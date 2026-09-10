@@ -992,3 +992,74 @@ class TestListBookings:
                     )
 
         asyncio.run(_run())
+
+
+class TestFindBookingForRooms:
+    """`find_booking_for_rooms` -- the confirm path's lost-ack reconciliation read."""
+
+    def test_finds_a_freshly_committed_booking(self, rw_db_url: str) -> None:
+        """A just-committed booking's exact room-stays are found and match."""
+
+        async def _run() -> None:
+            async with _rw_pool(rw_db_url) as pool:
+                customer_id, _ = await _first_two_customer_ids(pool)
+                request, expected_total = await _find_available_block(pool, nights=2)
+                committed = await write_ops.commit_booking(
+                    pool, customer_id=customer_id, rooms=[request],
+                )
+                try:
+                    found = await write_ops.find_booking_for_rooms(
+                        pool, customer_id=customer_id, rooms=[request],
+                    )
+                    assert found is not None
+                    assert found.booking_id == committed.booking_id
+                    assert found.confirmation_number == committed.confirmation_number
+                    assert found.total_amount == expected_total
+                finally:
+                    await write_ops.cancel_booking(
+                        pool, customer_id=customer_id, booking_id=committed.booking_id,
+                    )
+
+        asyncio.run(_run())
+
+    def test_returns_none_when_no_matching_booking_exists(
+        self, rw_db_url: str,
+    ) -> None:
+        """A room-stay nobody has ever booked reconciles to nothing, not a guess."""
+
+        async def _run() -> None:
+            async with _rw_pool(rw_db_url) as pool:
+                customer_id, _ = await _first_two_customer_ids(pool)
+                request, _ = await _find_available_block(pool, nights=1)
+
+                found = await write_ops.find_booking_for_rooms(
+                    pool, customer_id=customer_id, rooms=[request],
+                )
+
+                assert found is None
+
+        asyncio.run(_run())
+
+    def test_returns_none_for_a_different_customers_booking(
+        self, rw_db_url: str,
+    ) -> None:
+        """The reconciliation read enforces ownership too, not only a fresh commit."""
+
+        async def _run() -> None:
+            async with _rw_pool(rw_db_url) as pool:
+                owner_id, other_id = await _first_two_customer_ids(pool)
+                request, _ = await _find_available_block(pool, nights=1)
+                committed = await write_ops.commit_booking(
+                    pool, customer_id=owner_id, rooms=[request],
+                )
+                try:
+                    found = await write_ops.find_booking_for_rooms(
+                        pool, customer_id=other_id, rooms=[request],
+                    )
+                    assert found is None
+                finally:
+                    await write_ops.cancel_booking(
+                        pool, customer_id=owner_id, booking_id=committed.booking_id,
+                    )
+
+        asyncio.run(_run())

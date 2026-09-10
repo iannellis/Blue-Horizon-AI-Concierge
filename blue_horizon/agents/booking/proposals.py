@@ -252,9 +252,10 @@ class ProposalStore:
                 Retires the proposal: this is a deterministic refusal, and a
                 retry would only re-evaluate the same now-known outcome.
             write_ops.BookingUnavailableError: If the database could not be
-                reached at all. Leaves the proposal pending instead of
-                retiring it, so a subsequent confirm is a real retry rather
-                than a 404.
+                reached at all, and either the action was not `"book"` or
+                the reconciliation read below found nothing. Leaves the
+                proposal pending instead of retiring it, so a subsequent
+                confirm is a real retry rather than a 404.
 
         """
         self._purge_expired()
@@ -282,6 +283,32 @@ class ProposalStore:
             result = await _commit_proposal(write_pool, proposal)
         except write_ops.BookingWriteError:
             self._retire(proposal)
+            raise
+        except write_ops.BookingUnavailableError:
+            # The commit itself could not tell whether it landed: the
+            # connection may have died after COMMIT but before the ack
+            # returned. Settle it with a read instead of guessing, but only
+            # for "book" -- find_booking_for_rooms relies on
+            # booking_rooms_no_overlap's uniqueness, a property "cancel" and
+            # "modify" don't share, and their own state checks (already
+            # cancelled, unknown booking_room_id) already describe what
+            # happened without needing this. If the reconciliation read
+            # itself fails, let that exception propagate as-is: the proposal
+            # stays pending either way, and turning one failure into a
+            # second, different-shaped one would tell the guest something
+            # this code never actually established.
+            if proposal.action == "book":
+                reconciled = await write_ops.find_booking_for_rooms(
+                    write_pool,
+                    customer_id=proposal.customer_id,
+                    rooms=cast("list[write_ops.RoomRequest]", proposal.details),
+                )
+                if reconciled is not None:
+                    self._retire(proposal)
+                    self._results[proposal_id] = reconciled
+                    return ConfirmOutcome(
+                        proposal=proposal, result=reconciled, already_confirmed=False,
+                    )
             raise
 
         self._retire(proposal)

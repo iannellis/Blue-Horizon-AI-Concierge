@@ -176,3 +176,47 @@ class TestBookingWriteErrorNotSwallowed:
                 write_ops.cancel_booking(pool, customer_id=1, booking_id=1),
             )
         assert "does not exist" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# find_booking_for_rooms shares the same pool-acquisition failure handling
+# ---------------------------------------------------------------------------
+
+
+class TestFindBookingForRoomsPoolAcquisitionFailure:
+    """The reconciliation read reports a dead pool the same way the writes do.
+
+    So the confirm-path caller (`ProposalStore.confirm`) can tell "checked
+    and found nothing" (a clean `None`) apart from "could not check" (this
+    exception) -- collapsing the two would let a failed reconciliation read
+    report a room as lost when nothing was actually established.
+    """
+
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            psycopg.OperationalError("connection timeout expired"),
+            psycopg.InterfaceError("connection already closed"),
+            PoolTimeout("couldn't get a connection in time"),
+            TimeoutError("timed out"),
+        ],
+    )
+    def test_operational_failure_raises_unavailable(self, exc: BaseException) -> None:
+        """A connect-time failure of any recognised kind is reported uniformly."""
+        pool = _pool_that_fails_to_connect(exc)
+        with pytest.raises(write_ops.BookingUnavailableError):
+            asyncio.run(
+                write_ops.find_booking_for_rooms(
+                    pool, customer_id=1, rooms=[_ROOM_REQUEST],
+                ),
+            )
+
+    def test_empty_rooms_returns_none_without_touching_the_pool(self) -> None:
+        """No rooms to reconcile is a trivial `None`, never a database round trip."""
+        pool = _pool_that_fails_to_connect(
+            psycopg.OperationalError("connection timeout expired"),
+        )
+        result = asyncio.run(
+            write_ops.find_booking_for_rooms(pool, customer_id=1, rooms=[]),
+        )
+        assert result is None

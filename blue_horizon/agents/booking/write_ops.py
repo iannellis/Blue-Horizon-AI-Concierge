@@ -712,6 +712,102 @@ async def list_bookings(
     return summaries
 
 
+async def find_booking_for_rooms(
+    pool: AsyncConnectionPool[Any],
+    *,
+    customer_id: int,
+    rooms: Sequence[RoomRequest],
+) -> CommitResult | None:
+    """Look up an existing booking that exactly matches a set of room-stays.
+
+    Reconciliation read for the confirm path's lost-ack case: after
+    `commit_booking` raises `BookingUnavailableError`, the caller cannot tell
+    whether the write landed before the connection was lost. This settles it
+    exactly, not heuristically, because `booking_rooms_no_overlap` makes
+    `(room_id, [check_in, check_out))` unique across the rows actually
+    present in `booking_rooms` -- a cancelled room-stay's row is deleted (or,
+    for a partial trim, updated in place), never soft-deleted, so a match
+    here can only be the guest's own prior commit, not a stale row.
+
+    Read-only, alongside `list_bookings`: this adds no new write path, so
+    invariant 2 (`write_ops.py` is the only module that writes bookings)
+    still holds.
+
+    Args:
+        pool: Read-write booking database pool (`bh_agent_rw`).
+        customer_id: Server-injected identity of the guest who proposed the
+            booking.
+        rooms: The exact room, date-range requests the proposal would have
+            booked, in the same shape `commit_booking` would have received.
+
+    Returns:
+        CommitResult | None: The matching booking, shaped exactly like a
+        fresh `commit_booking` return, when every requested room-stay is
+        found on one booking owned by `customer_id`. `None` when no such
+        booking exists, meaning the write did not land.
+
+    Raises:
+        BookingUnavailableError: If the database could not be reached at
+            all, so the caller can tell "checked and found nothing" apart
+            from "could not check" -- collapsing the two here would report a
+            room as lost when the truth was never established.
+
+    """
+    if not rooms:
+        return None
+
+    with _reraise_operational_as_unavailable():
+        async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            booking_ids: set[int] = set()
+            matched: list[PricedRoomStay] = []
+            for room in rooms:
+                await cur.execute(
+                    """
+                    SELECT br.booking_id, br.total_amount
+                    FROM booking_rooms br
+                    JOIN bookings b ON b.booking_id = br.booking_id
+                    WHERE b.customer_id = %s AND br.room_id = %s
+                      AND br.check_in = %s AND br.check_out = %s
+                      AND b.status != 'cancelled'
+                    """,
+                    (customer_id, room.room_id, room.check_in, room.check_out),
+                )
+                row = await cur.fetchone()
+                if row is None:
+                    return None
+                booking_ids.add(row["booking_id"])
+                matched.append(
+                    PricedRoomStay(
+                        room_id=room.room_id,
+                        room_number=room.room_number,
+                        check_in=room.check_in,
+                        check_out=room.check_out,
+                        total_amount=row["total_amount"],
+                    ),
+                )
+
+            if len(booking_ids) != 1:
+                return None
+            (booking_id,) = booking_ids
+
+            await cur.execute(
+                "SELECT confirmation_number FROM bookings WHERE booking_id = %s",
+                (booking_id,),
+            )
+            booking_row = await cur.fetchone()
+
+    if booking_row is None or booking_row["confirmation_number"] is None:
+        return None
+
+    total_amount = sum((stay.total_amount for stay in matched), Decimal("0.00"))
+    return CommitResult(
+        booking_id=booking_id,
+        confirmation_number=booking_row["confirmation_number"],
+        rooms=tuple(matched),
+        total_amount=total_amount,
+    )
+
+
 async def list_customers(
     pool: AsyncConnectionPool[Any], *, seeded_customer_count: int,
 ) -> list[CustomerSummary]:

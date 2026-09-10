@@ -1,4 +1,4 @@
-"""Tests for blue_horizon/neon.py.
+"""Tests for eval/neon.py.
 
 All async functions are exercised via asyncio.run() so no pytest-asyncio
 dependency is required.
@@ -12,8 +12,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx2
 import pytest
 
-from blue_horizon.config import NeonConfig
-from blue_horizon.neon import (
+from eval.config import NeonConfig
+from eval.neon import (
     _find_branch,
     _restore_branch,
     _wait_for_operation,
@@ -164,7 +164,7 @@ class TestRestoreBranch:
     def test_retries_on_423_then_succeeds(self) -> None:
         """A 423 on the first attempt triggers a retry that succeeds on 200."""
         client = self._make_client([423, 200])
-        with patch("blue_horizon.neon.asyncio.sleep", new_callable=AsyncMock):
+        with patch("eval.neon.asyncio.sleep", new_callable=AsyncMock):
             asyncio.run(
                 _restore_branch(
                     client,
@@ -183,7 +183,7 @@ class TestRestoreBranch:
         """HTTPStatusError is raised when every attempt returns 423."""
         client = self._make_client([423, 423])
         with (
-            patch("blue_horizon.neon.asyncio.sleep", new_callable=AsyncMock),
+            patch("eval.neon.asyncio.sleep", new_callable=AsyncMock),
             pytest.raises(httpx2.HTTPStatusError),
         ):
             asyncio.run(
@@ -204,7 +204,7 @@ class TestRestoreBranch:
         """asyncio.sleep is called with lock_retry_delay_s between 423 retries."""
         client = self._make_client([423, 200])
         sleep_mock = AsyncMock()
-        with patch("blue_horizon.neon.asyncio.sleep", sleep_mock):
+        with patch("eval.neon.asyncio.sleep", sleep_mock):
             asyncio.run(
                 _restore_branch(
                     client,
@@ -271,7 +271,7 @@ class TestWaitForOperation:
     def test_returns_once_finished(self) -> None:
         """Polling stops as soon as the operation reports 'finished'."""
         client = self._make_client(["running", "finished"])
-        with patch("blue_horizon.neon.asyncio.sleep", new_callable=AsyncMock):
+        with patch("eval.neon.asyncio.sleep", new_callable=AsyncMock):
             asyncio.run(
                 _wait_for_operation(
                     client,
@@ -319,7 +319,7 @@ class TestWaitForOperations:
         """Every operation with an id is passed to _wait_for_operation."""
         wait_mock = AsyncMock()
         client = MagicMock()
-        with patch("blue_horizon.neon._wait_for_operation", wait_mock):
+        with patch("eval.neon._wait_for_operation", wait_mock):
             asyncio.run(
                 _wait_for_operations(
                     client,
@@ -347,9 +347,9 @@ class TestResetBranch:
         find_mock = AsyncMock(return_value=(_BRANCH_ID, _PARENT_ID))
         restore_mock = AsyncMock()
         with (
-            patch("blue_horizon.neon._find_branch", find_mock),
-            patch("blue_horizon.neon._restore_branch", restore_mock),
-            patch("blue_horizon.neon.httpx2.AsyncClient") as mock_client_cls,
+            patch("eval.neon._find_branch", find_mock),
+            patch("eval.neon._restore_branch", restore_mock),
+            patch("eval.neon.httpx2.AsyncClient") as mock_client_cls,
         ):
             mock_client_cls.return_value.__aenter__ = AsyncMock(
                 return_value=MagicMock(),
@@ -373,3 +373,19 @@ class TestResetBranch:
         assert kwargs["lock_retry_delay_s"] == _LOCK_RETRY_DELAY
         assert kwargs["operation_poll_interval_s"] == _OPERATION_POLL_INTERVAL
         assert kwargs["operation_poll_timeout_s"] == _OPERATION_POLL_TIMEOUT
+
+
+# ---------------------------------------------------------------------------
+# NeonConfig
+# ---------------------------------------------------------------------------
+
+
+class TestNeonConfigClamping:
+    """`NeonConfig.lock_retry_attempts` still clamps via the shared `PositiveInt`."""
+
+    def test_lock_retry_attempts_clamps_below_one(self) -> None:
+        """A configured retry count below 1 is raised to 1, matching prior behaviour."""
+        cfg = NeonConfig(
+            project_id="p", branch_name="b", lock_retry_attempts=-3,
+        )
+        assert cfg.lock_retry_attempts == 1

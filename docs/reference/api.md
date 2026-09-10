@@ -8,10 +8,6 @@
 
 ::: blue_horizon.config
 
-## Neon branch management
-
-::: blue_horizon.neon
-
 ## Data loading
 
 ::: blue_horizon.load_data.information_redis

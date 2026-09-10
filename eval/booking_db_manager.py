@@ -12,8 +12,8 @@ from typing import Any
 from dotenv import load_dotenv
 from psycopg_pool import AsyncConnectionPool
 
-from blue_horizon.config import NeonConfig
-from blue_horizon.neon import reset_branch as _reset_branch
+from eval.config import NeonConfig
+from eval.neon import reset_branch as _reset_branch
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ async def open_schema_pool(
 async def reset_neon_branch(neon_cfg: NeonConfig, *, api_key: str | None) -> None:
     """Reset a Neon branch to its parent baseline state via the Neon API.
 
-    Delegates to :func:`blue_horizon.neon.reset_branch`.
+    Delegates to :func:`eval.neon.reset_branch`.
 
     Args:
         neon_cfg: Neon project and branch configuration including project ID,

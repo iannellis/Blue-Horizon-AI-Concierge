@@ -451,38 +451,6 @@ class OrchestrationConfig(FrozenModel):
     messages: MessagesConfig
 
 
-class NeonConfig(FrozenModel):
-    """Neon branch configuration for the database reset feature.
-
-    Attributes:
-        project_id: Neon project ID (visible in the console URL).
-        branch_name: Name of the branch to reset to its parent baseline.
-        lock_retry_attempts: Retry attempts when the branch is locked (HTTP 423).
-            Clamped to a minimum of 1.
-        lock_retry_delay_s: Seconds to wait between lock retry attempts.
-        operation_poll_interval_s: Seconds to wait between polls of a restore
-            operation's status. The restore API call returns as soon as Neon
-            accepts the request, not once the branch is actually restored, so
-            callers must poll until the operation reports "finished" before
-            treating the branch as ready.
-        operation_poll_timeout_s: Maximum seconds to wait for a restore
-            operation to reach a terminal status before giving up.
-        http_timeout_s: Timeout in seconds for each HTTP request to the Neon
-            management API. An archived branch takes longer than the
-            client's default timeout to wake up and respond, so this must be
-            generous enough to cover that cold start.
-
-    """
-
-    project_id: str
-    branch_name: str
-    lock_retry_attempts: PositiveInt = 8
-    lock_retry_delay_s: Annotated[float, Field(ge=0.0)] = 5.0
-    operation_poll_interval_s: Annotated[float, Field(ge=0.0)] = 2.0
-    operation_poll_timeout_s: Annotated[float, Field(gt=0.0)] = 120.0
-    http_timeout_s: Annotated[float, Field(gt=0.0)] = 30.0
-
-
 class AppConfig(BaseSettings):
     """Parsed application configuration container.
 
@@ -513,9 +481,6 @@ class AppConfig(BaseSettings):
         pgsql_ro_db_url: PostgreSQL connection URL from environment,
             authenticated as the read-only booking agent role (``bh_agent_ro``).
             Used exclusively by the `run_sql` tool the model can reach.
-        neon_api_key: Neon management API key.  When ``None``, the reset
-            endpoint is disabled.
-        neon: Neon branch configuration (project ID and branch name).
 
     """
 
@@ -535,8 +500,6 @@ class AppConfig(BaseSettings):
     )
     pgsql_rw_db_url: str = Field(validation_alias="PGSQL_RW_DB_URL")
     pgsql_ro_db_url: str = Field(validation_alias="PGSQL_RO_DB_URL")
-    neon_api_key: str | None = Field(default=None, validation_alias="NEON_API_KEY")
-    neon: NeonConfig
 
 
 @lru_cache(maxsize=1)

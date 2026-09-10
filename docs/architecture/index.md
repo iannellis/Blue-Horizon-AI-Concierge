@@ -46,7 +46,6 @@ blue_horizon/          # Main application package
                           # booking tables in PostgreSQL
   system_prompts/      # System prompt templates (.txt)
   config.py            # Pydantic configuration models
-  neon.py              # Neon branch reset utility
 
 ui/
   app.py               # Streamlit chat UI: guest session, proposal dialog, reservations panel

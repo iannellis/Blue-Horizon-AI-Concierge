@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from blue_horizon.config import AppConfig, NeonConfig, NonNegInt, PositiveInt
+from blue_horizon.config import AppConfig, NonNegInt, PositiveInt
 from blue_horizon.config import FrozenModel as _FrozenModel
 
 EXPECTED_BATCH_SIZE = 64
@@ -127,17 +127,7 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
             "seeded_customer_count": EXPECTED_SEEDED_CUSTOMER_COUNT,
         },
     },
-    "neon": {
-        "project_id": "test-project-id",
-        "branch_name": "Production",
-        "lock_retry_attempts": 8,
-        "lock_retry_delay_s": 5.0,
-    },
 }
-
-
-EXPECTED_NEON_LOCK_RETRY_ATTEMPTS = 8
-EXPECTED_NEON_LOCK_RETRY_DELAY_S = 5.0
 
 
 def test_parse_app_config_from_dict() -> None:
@@ -153,9 +143,6 @@ def test_parse_app_config_from_dict() -> None:
         cfg.load_data.booking_pgsql.seeded_customer_count
         == EXPECTED_SEEDED_CUSTOMER_COUNT
     )
-    assert cfg.neon.branch_name == "Production"
-    assert cfg.neon.lock_retry_attempts == EXPECTED_NEON_LOCK_RETRY_ATTEMPTS
-    assert cfg.neon.lock_retry_delay_s == EXPECTED_NEON_LOCK_RETRY_DELAY_S
 
 
 def test_load_packaged_app_config() -> None:
@@ -183,9 +170,6 @@ def test_load_packaged_app_config() -> None:
     assert cfg.booking.proposals.ttl_s > 0
     assert isinstance(cfg.load_data.booking_pgsql.data_path, Path)
     assert cfg.load_data.booking_pgsql.seeded_customer_count > 0
-    assert cfg.neon.branch_name
-    assert cfg.neon.lock_retry_attempts >= 1
-    assert cfg.neon.lock_retry_delay_s >= 0
 
 
 class _PositiveModel(_FrozenModel):
@@ -237,14 +221,3 @@ class TestFrozenModel:
         model = _PositiveModel(a=3)
         with pytest.raises(ValidationError):
             model.a = 9
-
-
-class TestNeonConfigClamping:
-    """`NeonConfig.lock_retry_attempts` still clamps via the shared `PositiveInt`."""
-
-    def test_lock_retry_attempts_clamps_below_one(self) -> None:
-        """A configured retry count below 1 is raised to 1, matching prior behaviour."""
-        cfg = NeonConfig(
-            project_id="p", branch_name="b", lock_retry_attempts=-3,
-        )
-        assert cfg.lock_retry_attempts == 1

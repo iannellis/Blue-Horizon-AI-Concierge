@@ -1,8 +1,11 @@
-"""Neon branch reset utility for production use.
+"""Neon branch reset utility.
 
 Resets a named Neon branch to its parent's data state via the Neon
-management API.  Used by the API's reset endpoint so users can clear
-their bookings and return the database to its baseline state.
+management API. Used by `eval.booking_db_manager` to reset the Development
+branch before a `db_integration` test run or an eval, and by CI
+(`ci.yml`) the same way. Not imported anywhere under `blue_horizon/`: the
+serving app has no Neon management awareness, and never ships this module
+to the deployed container.
 
 The restore API call itself is asynchronous on Neon's side: it returns as
 soon as the request is accepted, before the branch's data (and anything
@@ -22,7 +25,7 @@ from typing import TYPE_CHECKING, Any
 import httpx2
 
 if TYPE_CHECKING:
-    from blue_horizon.config import NeonConfig
+    from eval.config import NeonConfig
 
 _log = logging.getLogger(__name__)
 

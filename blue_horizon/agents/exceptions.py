@@ -11,6 +11,20 @@ class OperationalError(RuntimeError):
     """
 
 
+class ConfigurationError(RuntimeError):
+    """Raised for permanent misconfiguration that retrying cannot fix.
+
+    Deliberately a **sibling** of `OperationalError`, not a subclass: broad
+    `except OperationalError` handlers exist specifically to catch transient
+    failures and keep retrying, and must not silently swallow a defect that
+    no amount of retrying resolves (e.g. `PGSQL_RO_DB_URL` pointed at a
+    writable role, per invariant 7, or a missing prompt resource). Consumers
+    that genuinely want to treat both the same way still can, via
+    `except (OperationalError, ConfigurationError)`.
+
+    """
+
+
 class ThreadCustomerMismatchError(RuntimeError):
     """Raised when a `thread_id` is reused with a different `customer_id`.
 

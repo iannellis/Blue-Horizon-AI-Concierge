@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import enum
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Final, cast
 
 from langchain_core.messages import AIMessage, HumanMessage
 from tenacity import (
@@ -19,7 +20,12 @@ from tenacity import (
     wait_exponential,
 )
 
-from blue_horizon.agents.exceptions import OperationalError, ThreadCustomerMismatchError
+from blue_horizon.agents._lifecycle import require
+from blue_horizon.agents.exceptions import (
+    ConfigurationError,
+    OperationalError,
+    ThreadCustomerMismatchError,
+)
 from blue_horizon.agents.orchestration.factory import build_orchestration_agent
 from blue_horizon.agents.orchestration.formatting import format_chat_response
 from blue_horizon.agents.orchestration.resources import OrchestrationResources
@@ -51,6 +57,41 @@ _NODE_TO_STAGE: dict[str, tuple[str, str]] = {
 
 logger = logging.getLogger(__name__)
 
+# Guest-facing copy for the FAILED readiness state. Not yet a config value:
+# step 16 of the failure-handling plan promotes this into
+# `[orchestration.messages].failed` alongside a full rewrite of `.error` and
+# `.unavailable`; until then it lives here as the one guest-visible string
+# this module needs that config does not yet define.
+_FAILED_MESSAGE: Final[str] = (
+    "Sorry - the system hit a problem that will not resolve on its own. "
+    "Please check back later."
+)
+
+
+class Readiness(enum.Enum):
+    """Orchestration agent readiness, as seen by `/v1/health` and `/v1/chat`.
+
+    Attributes:
+        READY: The compiled agent is built; requests are served normally.
+        STARTING: No agent yet, and the last attempt (if any) failed for a
+            reason classified transient (`OperationalError`, or anything
+            unclassified -- see `OrchestrationManager._before_sleep`). The
+            init loop keeps retrying; the guest sees a "waking up" message
+            with no instruction, since the system is expected to recover on
+            its own.
+        FAILED: No agent yet, and the last attempt failed for a reason
+            classified permanent (`ConfigurationError`). The init loop still
+            keeps retrying -- an externally-fixed dependency (e.g. a
+            corrected database role) should still recover without an
+            operator restart -- but the guest is told this will not resolve
+            on its own, with no retry affordance.
+
+    """
+
+    READY = "ready"
+    STARTING = "starting"
+    FAILED = "failed"
+
 
 class OrchestrationManager:
     """Operational wrapper around resources + compiled graph.
@@ -71,6 +112,7 @@ class OrchestrationManager:
         "_init_task",
         "_llm_semaphore",
         "_lock",
+        "_readiness",
         "_resources",
         "_stop_event",
         "_thread_customers",
@@ -78,6 +120,7 @@ class OrchestrationManager:
 
     _resources: OrchestrationResources
     _agent: CompiledStateGraph | None
+    _readiness: Readiness
     _init_task: asyncio.Task[None] | None
     _llm_semaphore: asyncio.Semaphore
     _lock: asyncio.Lock
@@ -114,6 +157,7 @@ class OrchestrationManager:
         llm_concurrency = self._resources.config.orchestration.llm_concurrency
         self._llm_semaphore = asyncio.Semaphore(llm_concurrency)
         self._agent = None
+        self._readiness = Readiness.STARTING
         self._init_task = None
         self._lock = asyncio.Lock()
         self._stop_event = asyncio.Event()
@@ -127,7 +171,22 @@ class OrchestrationManager:
             True if the compiled orchestration graph has been built.
 
         """
-        return self._agent is not None
+        return self._readiness is Readiness.READY
+
+    @property
+    def readiness(self) -> Readiness:
+        """Return the current readiness state.
+
+        Callers that only need a yes/no answer should use `is_ready`
+        instead; this is for callers that need to distinguish `STARTING`
+        from `FAILED`, such as the `/v1/chat` readiness gate deciding what
+        to tell the guest.
+
+        Returns:
+            Readiness: `READY`, `STARTING`, or `FAILED`.
+
+        """
+        return self._readiness
 
     async def start(self) -> None:
         """Start background initialization with retries."""
@@ -217,11 +276,9 @@ class OrchestrationManager:
         """Invoke the orchestration agent with MemorySaver-backed history.
 
         Behavior:
-            - If the orchestration agent is not ready, returns an assistant message
-              with the configured "unavailable" text.
-            - Otherwise, sends only the new user message. The MemorySaver
-              checkpointer loads prior history for the given thread_id and
-              persists the updated history after the run.
+            - Sends only the new user message. The MemorySaver checkpointer
+              loads prior history for the given thread_id and persists the
+              updated history after the run.
             - Any proposal still pending for this thread is invalidated before
               the turn runs: a dialog must never be confirmable once the
               conversation has moved past it.
@@ -244,13 +301,16 @@ class OrchestrationManager:
         Raises:
             ThreadCustomerMismatchError: If `thread_id` is already bound to a
                 different `customer_id`.
+            RuntimeError: If the orchestration agent is not ready. Callers
+                are expected to check `is_ready` (or `readiness`) first --
+                `api.app.chat`'s readiness gate is what actually stands
+                between a not-ready manager and this method in production,
+                so reaching this from there would be a bug in that gate, not
+                an expected outcome to render as a chat reply.
 
         """
         self.bind_thread_customer(thread_id=thread_id, customer_id=customer_id)
-
-        if self._agent is None:
-            msg = self.get_unavailable_message()
-            return {"messages": [AIMessage(content=[{"type": "text", "text": msg}])]}
+        agent = require(self._agent, "Orchestration agent")
 
         self.get_booking_resources().proposals.invalidate_thread(thread_id)
 
@@ -269,7 +329,7 @@ class OrchestrationManager:
         async with self._llm_semaphore:
             return cast(
                 "dict[str, Any]",
-                await self._agent.ainvoke(
+                await agent.ainvoke(
                     state,
                     config=config,
                 ),
@@ -309,13 +369,14 @@ class OrchestrationManager:
         Raises:
             ThreadCustomerMismatchError: If `thread_id` is already bound to a
                 different `customer_id`.
+            RuntimeError: If the orchestration agent is not ready. Callers
+                are expected to check `is_ready` (or `readiness`) first --
+                `api.app.chat`'s readiness gate is what actually stands
+                between a not-ready manager and this method in production.
 
         """
         self.bind_thread_customer(thread_id=thread_id, customer_id=customer_id)
-
-        if self._agent is None:
-            yield {"type": "done", "response": self.get_unavailable_message()}
-            return
+        agent = require(self._agent, "Orchestration agent")
 
         booking_resources = self.get_booking_resources()
         booking_resources.proposals.invalidate_thread(thread_id)
@@ -328,7 +389,7 @@ class OrchestrationManager:
         emitted_stages: set[str] = set()
         finalize_output: dict[str, Any] | None = None
         async with self._llm_semaphore:
-            async for event in self._agent.astream_events(
+            async for event in agent.astream_events(
                 state,
                 config=config,
                 version="v2",
@@ -369,13 +430,20 @@ class OrchestrationManager:
         )
         yield {"type": "done", "response": response_text}
 
-    def get_unavailable_message(self) -> str:
-        """Return the configured "unavailable" message.
+    def get_readiness_message(self) -> str:
+        """Return guest-facing copy for the current non-ready readiness state.
+
+        Only meaningful while `is_ready` is False; callers own deciding
+        whether to show it at all (e.g. the `/v1/chat` readiness gate).
 
         Returns:
-            User-facing message to return when the system is not initialized.
+            str: The configured "still starting" message while `readiness`
+            is `STARTING`, or a fixed "will not resolve on its own" message
+            while it is `FAILED`.
 
         """
+        if self._readiness is Readiness.FAILED:
+            return _FAILED_MESSAGE
         return self._resources.config.messages.unavailable
 
     async def _init_loop(self) -> None:
@@ -406,7 +474,17 @@ class OrchestrationManager:
                 raise asyncio.CancelledError
 
         def _before_sleep(retry_state: RetryCallState) -> None:
-            """Reset state and log the failure before the next retry.
+            """Reset state, classify the failure, and log before the next retry.
+
+            Classification drives `readiness`: `ConfigurationError` means
+            retrying will not help, so the guest is told this will not
+            resolve on its own (`FAILED`); everything else -- including an
+            exception type this function does not recognise -- defaults to
+            `STARTING`, so a misclassification degrades to bad copy rather
+            than a guest being told a transient outage is permanent. The
+            loop itself keeps retrying either way (`stop_never`): an
+            externally-fixed dependency should still recover without an
+            operator restart.
 
             Args:
                 retry_state: Tenacity retry call state carrying the last outcome.
@@ -415,14 +493,21 @@ class OrchestrationManager:
             self._resources.reset_runtime_state()
             self._agent = None
             exc = retry_state.outcome.exception() if retry_state.outcome else None
-            if isinstance(exc, OperationalError):
+            if isinstance(exc, ConfigurationError):
+                self._readiness = Readiness.FAILED
+                logger.error(
+                    "Initialization failed (permanent): %s", repr(exc), exc_info=exc,
+                )
+            elif isinstance(exc, OperationalError):
+                self._readiness = Readiness.STARTING
                 logger.warning(
                     "Initialization failed (operational): %s",
                     repr(exc),
                     exc_info=exc,
                 )
             else:
-                logger.error("Initialization failed", exc_info=exc)
+                self._readiness = Readiness.STARTING
+                logger.error("Initialization failed (unclassified)", exc_info=exc)
 
         async for attempt in AsyncRetrying(
             retry=retry_if_exception_type(Exception),
@@ -444,6 +529,7 @@ class OrchestrationManager:
                         self._agent = build_orchestration_agent(
                             resources=self._resources,
                         )
+                        self._readiness = Readiness.READY
                         logger.info("Orchestration agent ready")
 
         await self._stop_event.wait()

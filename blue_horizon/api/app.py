@@ -30,7 +30,11 @@ from blue_horizon.agents.booking import proposals as proposals_module
 from blue_horizon.agents.booking import write_ops
 from blue_horizon.agents.booking.receipts import receipt_message, serialize_write_result
 from blue_horizon.agents.exceptions import ThreadCustomerMismatchError
-from blue_horizon.agents.orchestration import OrchestrationManager, format_chat_response
+from blue_horizon.agents.orchestration import (
+    OrchestrationManager,
+    Readiness,
+    format_chat_response,
+)
 from blue_horizon.config import load_app_config
 
 load_dotenv()
@@ -43,6 +47,11 @@ _KEEPALIVE_INTERVAL_S = 15.0
 # BookingUnavailableError. Deliberately short: the dominant cause is a Neon
 # compute resume, normally a few hundred milliseconds, not a lengthy outage.
 _CONFIRM_RETRY_AFTER_S = 5
+# How long a client should wait before retrying a /v1/chat request made
+# while the orchestrator is not ready. Same rationale as above, and shared
+# across the STARTING and FAILED readiness states: the loop keeps retrying
+# in both, so there is no basis yet for a longer interval in the FAILED case.
+_CHAT_RETRY_AFTER_S = 5
 
 
 class ChatPayload(BaseModel):
@@ -133,21 +142,91 @@ def _error_message(exc: Exception) -> str:
     return load_app_config().orchestration.messages.error
 
 
+# Maps an exception type this module can specifically recognise to the
+# additive `code` on a mid-turn `error` SSE event. Anything else falls back
+# to "internal" in `_error_event`: it cannot be a genuine programming defect
+# this module already knows how to name, but it is also not one of the
+# codes worth a guest-visible distinction yet. `"unavailable"`, `"failed"`,
+# and `"timeout"` from docs/api.md's full code enum are not reachable here
+# today -- an unready agent is stopped by the readiness gate before
+# _event_stream ever starts, and a node-level timeout is already absorbed
+# into a normal `done` event's `messages.error` text inside the graph
+# itself, never raised as a Python exception this pump would see.
+_MID_TURN_ERROR_CODE_BY_EXCEPTION: dict[type[Exception], str] = {
+    ThreadCustomerMismatchError: "thread_mismatch",
+}
+
+
+def _error_event(exc: Exception) -> dict[str, Any]:
+    """Build a mid-turn SSE `error` event for a chat-stream exception.
+
+    Unlike the pre-stream readiness gate (`_not_ready_response`), this
+    cannot be an HTTP status: the 200 and the SSE headers are already
+    committed by the time a turn in progress can fail. The same kind of
+    signal is instead carried as an additive `code` field on the event body,
+    so a client that only reads `message` still gets identical behavior to
+    before this field existed.
+
+    Args:
+        exc: Exception raised while streaming a chat turn.
+
+    Returns:
+        dict[str, Any]: `{"type": "error", "message": str, "code": str}`.
+
+    """
+    return {
+        "type": "error",
+        "message": _error_message(exc),
+        "code": _MID_TURN_ERROR_CODE_BY_EXCEPTION.get(type(exc), "internal"),
+    }
+
+
+def _not_ready_response() -> JSONResponse:
+    """Build the 503 response for a `/v1/chat` request while not ready.
+
+    Used for both content-negotiated branches: an SSE client gets this same
+    plain JSON body instead of a stream, since there is nothing to stream
+    yet and `raise_for_status()` on the client side does not care which
+    content type came with the 503.
+
+    Returns:
+        JSONResponse: 503, a `Retry-After` header, and a body of
+        ``{"status": "starting" | "failed", "message": str, "retry_after_s":
+        int}``.
+
+    """
+    status = "failed" if orchestrator.readiness is Readiness.FAILED else "starting"
+    body = {
+        "status": status,
+        "message": orchestrator.get_readiness_message(),
+        "retry_after_s": _CHAT_RETRY_AFTER_S,
+    }
+    return JSONResponse(
+        body,
+        status_code=503,
+        headers={"Retry-After": str(_CHAT_RETRY_AFTER_S)},
+    )
+
+
 @router.get("/health")
 async def health() -> JSONResponse:
     """Return the readiness status of the orchestrator.
 
     Returns HTTP 200 when the orchestrator is ready to serve requests, or
-    HTTP 503 while it is still initializing.
+    HTTP 503 while it is still initializing or permanently failed -- either
+    way, the init loop keeps retrying in the background (see
+    `OrchestrationManager.readiness`), so this can only ever report today's
+    snapshot, not a promise about whether it will change.
 
     Returns:
-        JSONResponse with ``{"status": "ok"}`` on 200 or
-        ``{"status": "starting"}`` on 503.
+        JSONResponse with ``{"status": "ok"}`` on 200, or
+        ``{"status": "starting" | "failed"}`` on 503.
 
     """
     if orchestrator.is_ready:
         return JSONResponse({"status": "ok"})
-    return JSONResponse({"status": "starting"}, status_code=503)
+    status = "failed" if orchestrator.readiness is Readiness.FAILED else "starting"
+    return JSONResponse({"status": status}, status_code=503)
 
 
 @router.get("/customers")
@@ -158,13 +237,25 @@ async def list_customers() -> list[dict[str, Any]]:
         list[dict[str, Any]]: One `{customer_id, first_name, last_name}` per
         guest.
 
+    Raises:
+        HTTPException: 503 if the booking database is not yet initialized
+            (the startup window), with a `Retry-After` header.
+
     """
     resources = orchestrator.get_booking_resources()
+    try:
+        write_pool = resources.get_write_pool()
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=orchestrator.get_readiness_message(),
+            headers={"Retry-After": str(_CHAT_RETRY_AFTER_S)},
+        ) from exc
     seeded_customer_count = (
         load_app_config().load_data.booking_pgsql.seeded_customer_count
     )
     customers = await write_ops.list_customers(
-        resources.get_write_pool(), seeded_customer_count=seeded_customer_count,
+        write_pool, seeded_customer_count=seeded_customer_count,
     )
     return [
         {
@@ -186,6 +277,10 @@ async def list_bookings(customer_id: int) -> dict[str, Any]:
     Returns:
         dict[str, Any]: `{"bookings": [...]}`, most recent first.
 
+    Raises:
+        HTTPException: 503 if the booking database is not yet initialized
+            (the startup window), with a `Retry-After` header.
+
     Note:
         Unauthenticated: any seeded `customer_id` (currently 1-15, see
         `seeded_customer_count`) can be queried. Acceptable for a demo where
@@ -194,9 +289,15 @@ async def list_bookings(customer_id: int) -> dict[str, Any]:
 
     """
     resources = orchestrator.get_booking_resources()
-    bookings = await write_ops.list_bookings(
-        resources.get_write_pool(), customer_id=customer_id,
-    )
+    try:
+        write_pool = resources.get_write_pool()
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=orchestrator.get_readiness_message(),
+            headers={"Retry-After": str(_CHAT_RETRY_AFTER_S)},
+        ) from exc
+    bookings = await write_ops.list_bookings(write_pool, customer_id=customer_id)
     return {"bookings": [write_ops.serialize_booking(b) for b in bookings]}
 
 
@@ -215,13 +316,21 @@ async def chat(payload: ChatPayload, request: Request) -> Response:
 
     Returns:
         StreamingResponse with ``Content-Type: text/event-stream`` if
-        requested, otherwise a JSONResponse.
+        requested, otherwise a JSONResponse. Either becomes a 503 JSON
+        response with a `Retry-After` header instead, if the orchestrator is
+        not ready -- checked here, before either branch commits to a
+        response, since that is the one point where 503 is still an option
+        for the streaming branch too (a `StreamingResponse` commits its 200
+        as soon as it starts).
 
     Raises:
         HTTPException: 409 if `thread_id` is already bound to a different
             `customer_id`.
 
     """
+    if not orchestrator.is_ready:
+        return _not_ready_response()
+
     if _SSE_MEDIA_TYPE in request.headers.get("accept", ""):
         return StreamingResponse(_event_stream(payload), media_type=_SSE_MEDIA_TYPE)
 
@@ -275,7 +384,7 @@ async def _event_stream(payload: ChatPayload) -> AsyncGenerator[str]:
                 await queue.put(event)
         except Exception as exc:
             logger.warning("chat stream failed: %s", exc, exc_info=True)
-            await queue.put({"type": "error", "message": _error_message(exc)})
+            await queue.put(_error_event(exc))
         finally:
             await queue.put(None)
 

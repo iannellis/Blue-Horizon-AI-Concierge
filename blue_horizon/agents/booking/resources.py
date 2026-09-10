@@ -39,7 +39,7 @@ from blue_horizon.agents.booking.db_utils import (
 )
 from blue_horizon.agents.booking.guardrails import validate_sql
 from blue_horizon.agents.booking.proposals import ProposalStore
-from blue_horizon.agents.exceptions import OperationalError
+from blue_horizon.agents.exceptions import ConfigurationError, OperationalError
 from blue_horizon.agents.prompt_utils import load_prompt_template, prompt_resource_path
 
 if TYPE_CHECKING:
@@ -51,6 +51,29 @@ logger = logging.getLogger(__name__)
 # role is actually refused write privileges at startup. Never mutates data
 # even if the assertion this guards against has already failed.
 _READ_ONLY_PROBE_SQL = "UPDATE room_availability SET status = status WHERE id = -1"
+
+
+def _require_url(url: str, env_var: str) -> None:
+    """Raise if a required database URL is missing or blank.
+
+    An empty string passes ordinary Pydantic `str` validation, so this
+    catches the case that gets through config loading but can never
+    establish a connection. Deliberately raised as `ConfigurationError`,
+    not `OperationalError`: this process's environment will not change
+    without an operator restarting it, so retrying is pointless.
+
+    Args:
+        url: The URL value to check.
+        env_var: Name of the environment variable it came from, for the
+            error message.
+
+    Raises:
+        ConfigurationError: If `url` is empty or all whitespace.
+
+    """
+    if not url or not url.strip():
+        msg = f"{env_var} is missing or blank."
+        raise ConfigurationError(msg)
 
 
 def _sql_error_result(error: str) -> dict[str, Any]:
@@ -145,17 +168,24 @@ class BookingSqlResources:
         renders the final system prompt.
 
         Raises:
-            OperationalError: If resources cannot be initialized, or if the
-                read-only pool's role is not actually read-only -- treated as
-                a fatal misconfiguration rather than a warning, since a
-                silently-writable "read-only" pool is exactly the guarantee
-                this design depends on.
+            ConfigurationError: If either database URL is missing or blank,
+                or if the read-only pool's role is not actually read-only --
+                treated as a fatal misconfiguration rather than a warning,
+                since a silently-writable "read-only" pool is exactly the
+                guarantee this design depends on. None of these resolve by
+                retrying, so they are kept out of `OperationalError`.
+            OperationalError: If resources cannot be initialized for a
+                transient reason (e.g. the database is unreachable).
 
         """
         try:
+            _require_url(self.pgsql_ro_db_url, "PGSQL_RO_DB_URL")
+            _require_url(self.pgsql_rw_db_url, "PGSQL_RW_DB_URL")
             await self._open_pools()
             await self._assert_read_pool_is_read_only()
             await self._render_system_prompt()
+        except ConfigurationError:
+            raise
         except OperationalError:
             raise
         except Exception as exc:
@@ -452,8 +482,14 @@ class BookingSqlResources:
         be gone with nothing to notice.
 
         Raises:
-            OperationalError: If the probe write is not refused, or if this
-                is called before `_open_pools()`.
+            OperationalError: If this is called before `_open_pools()`, or if
+                the probe itself cannot be run (e.g. the database is
+                unreachable) -- both transient, from this method's point of
+                view.
+            ConfigurationError: If the probe write is not refused. This is
+                `PGSQL_RO_DB_URL` pointed at a writable role, which no retry
+                fixes; only a corrected environment variable and a restart
+                do.
 
         """
         if self.pool is None:
@@ -472,13 +508,18 @@ class BookingSqlResources:
             "role with no write privileges (bh_agent_ro) -- refusing to "
             "start with the read-only guarantee unverified."
         )
-        raise OperationalError(msg)
+        raise ConfigurationError(msg)
 
     async def _render_system_prompt(self) -> None:
         """Render and store the system prompt.
 
         Raises:
-            OperationalError: If prompt rendering fails.
+            ConfigurationError: If the packaged prompt template is missing or
+                unreadable -- propagated from `load_prompt_template()`
+                unchanged, since wrapping it as `OperationalError` would
+                make a missing file look retryable when it is not.
+            OperationalError: If prompt rendering fails for any other
+                reason (e.g. the database is unreachable for metadata).
 
         """
         try:
@@ -499,6 +540,8 @@ class BookingSqlResources:
                 view_types=view_types,
             )
 
+        except ConfigurationError:
+            raise
         except Exception as exc:
             msg = "Failed to render booking system prompt"
             raise OperationalError(msg) from exc

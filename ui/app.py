@@ -111,6 +111,18 @@ def _init_session_state() -> None:
         st.session_state.messages = []
     if "pending_proposal" not in st.session_state:
         st.session_state.pending_proposal = None
+    if "pending_resend" not in st.session_state:
+        # The guest's own text from a chat turn that failed to complete, so
+        # "Send again" can replay it verbatim instead of asking them to
+        # retype -- see ChatTurnResult and _render_pending_resend.
+        st.session_state.pending_resend = None
+    if "pending_resend_message" not in st.session_state:
+        st.session_state.pending_resend_message = None
+    if "api_online" not in st.session_state:
+        # Refreshed by _render_sidebar() every rerun, before _render_chat()
+        # reads it. The optimistic default only matters for the one render
+        # that happens before _render_sidebar() has run once.
+        st.session_state.api_online = True
 
 
 def _reset_session() -> None:
@@ -118,11 +130,14 @@ def _reset_session() -> None:
 
     Generates a fresh ``thread_id``, empties the message history, and
     dismisses any pending proposal -- a dialog from a conversation that no
-    longer exists must not still be confirmable.
+    longer exists must not still be confirmable. Also drops any pending
+    resend, since it holds text addressed to the conversation just ending.
     """
     _dismiss_pending_proposal()
     st.session_state.thread_id = str(uuid.uuid4())
     st.session_state.messages = []
+    st.session_state.pending_resend = None
+    st.session_state.pending_resend_message = None
 
 
 # ============================
@@ -183,15 +198,17 @@ def _fetch_customers() -> list[dict[str, Any]]:
         return []
 
 
-def _fetch_bookings(customer_id: int) -> list[dict[str, Any]]:
+def _fetch_bookings(customer_id: int) -> list[dict[str, Any]] | None:
     """Fetch one guest's bookings for the reservations panel.
 
     Args:
         customer_id: Guest whose bookings to fetch.
 
     Returns:
-        list[dict[str, Any]]: Booking summaries, or an empty list if the API
-        could not be reached.
+        list[dict[str, Any]] | None: Booking summaries, or ``None`` if the
+        API could not be reached. Deliberately distinct from an empty list,
+        which means the guest genuinely has no reservations -- collapsing
+        the two would render a backend outage as "No reservations yet.".
 
     """
     try:
@@ -208,7 +225,7 @@ def _fetch_bookings(customer_id: int) -> list[dict[str, Any]]:
             customer_id,
             exc_info=True,
         )
-        return []
+        return None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -248,6 +265,30 @@ _CONFIRM_STATUS_BY_HTTP_CODE: dict[int, str] = {
 }
 
 
+def _response_field(response: httpx2.Response, field: str) -> str | None:
+    """Best-effort extraction of one string field from a JSON response body.
+
+    Args:
+        response: An HTTP response that may or may not carry a JSON object
+            body.
+        field: The key to read (e.g. ``"detail"`` for a FastAPI
+            ``HTTPException``, ``"message"`` for the ``/v1/chat`` readiness
+            gate's own body shape).
+
+    Returns:
+        str | None: The field's string value, or ``None`` if the body was
+        not JSON, was not an object, or the field was missing or not a
+        string.
+
+    """
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    value = body.get(field) if isinstance(body, dict) else None
+    return value if isinstance(value, str) else None
+
+
 def _response_detail(response: httpx2.Response) -> str | None:
     """Best-effort extraction of a JSON error body's ``detail`` field.
 
@@ -260,12 +301,7 @@ def _response_detail(response: httpx2.Response) -> str | None:
         JSON, was not an object, or had no `detail` key.
 
     """
-    try:
-        body = response.json()
-    except ValueError:
-        return None
-    detail = body.get("detail") if isinstance(body, dict) else None
-    return detail if isinstance(detail, str) else None
+    return _response_field(response, "detail")
 
 
 def _confirm_proposal(proposal_id: str, customer_id: int) -> ConfirmOutcome:
@@ -589,9 +625,12 @@ def _render_reservations() -> None:
     if customer_id is None:
         return
 
-    bookings = [
-        b for b in _fetch_bookings(customer_id) if b["status"] != "cancelled"
-    ]
+    raw_bookings = _fetch_bookings(customer_id)
+    if raw_bookings is None:
+        st.caption("Could not load your reservations right now.")
+        return
+
+    bookings = [b for b in raw_bookings if b["status"] != "cancelled"]
     if not bookings:
         st.caption("No reservations yet.")
         return
@@ -638,7 +677,12 @@ def _render_sidebar() -> None:
         _render_guest_assignment()
         st.divider()
 
-        if _check_health():
+        # Published to session state so _render_pending_resend() (rendered
+        # later, in _render_chat()) can gate "Send again" on it without a
+        # second /v1/health round trip of its own.
+        online = _check_health()
+        st.session_state.api_online = online
+        if online:
             st.success("Chatbot: Online")
             _render_online_poll()
         else:
@@ -685,11 +729,39 @@ def _parse_sse_line(line: str) -> dict[str, Any] | None:
         return None
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class ChatTurnResult:
+    """Outcome of one `_stream_message` call.
+
+    Attributes:
+        ok: Whether the assistant actually produced a reply. False for
+            every failure this module can classify -- an `error` SSE event,
+            a non-2xx HTTP response, a timeout, or an unreachable API --
+            since none of those means the turn is safe to treat as answered.
+            These are Tier B failures in the failure-handling tiering: the
+            system never auto-retries a chat turn server-side (it may
+            already have mutated the proposal store or the conversation
+            checkpoint, and it always consumes LLM tokens), but a
+            guest-initiated resend of the exact same text is always safe,
+            which is what `_render_pending_resend` offers when `ok` is
+            False.
+        text: The assistant's reply on success, or guest-facing failure copy
+            on failure. Never raw exception text either way.
+        proposal: A pending proposal dict, if the turn created one. Always
+            `None` when `ok` is False.
+
+    """
+
+    ok: bool
+    text: str
+    proposal: dict[str, Any] | None
+
+
 def _handle_stream_event(
     event: dict[str, Any],
     status: DeltaGenerator,
     pending_proposal: dict[str, Any] | None,
-) -> tuple[dict[str, Any] | None, tuple[str, dict[str, Any] | None] | None]:
+) -> tuple[dict[str, Any] | None, ChatTurnResult | None]:
     """Apply one SSE event to the status widget.
 
     Args:
@@ -710,25 +782,33 @@ def _handle_stream_event(
         status.update(label=event["label"], state="running")
     elif event_type == "error":
         status.update(label="Error", state="error")
-        return pending_proposal, (
-            str(event.get("message", "Something went wrong.")), None,
-        )
+        message = str(event.get("message", "Something went wrong."))
+        return pending_proposal, ChatTurnResult(ok=False, text=message, proposal=None)
     elif event_type == "done":
         status.update(label="Done", state="complete")
         response_text = str(event.get("response", "No response received."))
-        return pending_proposal, (response_text, pending_proposal)
+        return pending_proposal, ChatTurnResult(
+            ok=True, text=response_text, proposal=pending_proposal,
+        )
     elif event_type == "proposal":
-        pending_proposal = {
-            "proposal_id": event["proposal_id"],
-            "action": event["action"],
-            "summary": event["summary"],
-        }
+        # `.get()`, not indexing: a malformed event must not crash the turn
+        # with a bare KeyError that the generic exception handler below
+        # would otherwise report as an unhelpful "Could not reach the API".
+        proposal_id = event.get("proposal_id")
+        action = event.get("action")
+        summary = event.get("summary")
+        if proposal_id is None or action is None or summary is None:
+            logger.warning("Malformed proposal event, ignoring: %r", event)
+        else:
+            pending_proposal = {
+                "proposal_id": proposal_id,
+                "action": action,
+                "summary": summary,
+            }
     return pending_proposal, None
 
 
-def _stream_message(
-    thread_id: str, customer_id: int, text: str,
-) -> tuple[str, dict[str, Any] | None]:
+def _stream_message(thread_id: str, customer_id: int, text: str) -> ChatTurnResult:
     """Stream a chat turn from the unified endpoint and display live progress.
 
     Connects to ``POST /v1/chat`` with ``Accept: text/event-stream`` and
@@ -743,9 +823,8 @@ def _stream_message(
         text: The user's message text.
 
     Returns:
-        tuple[str, dict[str, Any] | None]: The assistant's reply text (or a
-        user-facing error message), and a pending proposal dict if the turn
-        created one.
+        ChatTurnResult: The assistant's reply, or a failure the guest can
+        retry with "Send again".
 
     """
     status = st.status("Routing your request…", state="running")
@@ -774,13 +853,16 @@ def _stream_message(
         error_message = (
             "The request timed out. The agent may be busy — please try again."
         )
-    except Exception as exc:  # noqa: BLE001
-        error_message = f"Could not reach the API: {exc}"
+    except Exception:
+        logger.warning("Chat request failed unexpectedly.", exc_info=True)
+        error_message = "Could not reach the concierge. Please try again."
     else:
-        return "No response received.", pending_proposal
+        return ChatTurnResult(
+            ok=True, text="No response received.", proposal=pending_proposal,
+        )
 
     status.update(label="Error", state="error")
-    return error_message, None
+    return ChatTurnResult(ok=False, text=error_message, proposal=None)
 
 
 def _http_error_message(exc: httpx2.HTTPStatusError) -> str:
@@ -794,7 +876,14 @@ def _http_error_message(exc: httpx2.HTTPStatusError) -> str:
 
     """
     if exc.response.status_code == _HTTP_SERVICE_UNAVAILABLE:
-        return "The system is still starting up. Please try again in a moment."
+        # The readiness gate's own body carries `message`, already picked
+        # between "still starting up" and "won't resolve on its own" server
+        # side -- see api.app._not_ready_response. The fallback only fires
+        # if that body could not be parsed at all.
+        message = _response_field(exc.response, "message")
+        return message or (
+            "The system is still starting up. Please try again in a moment."
+        )
     return (
         f"The server returned an error ({exc.response.status_code}). "
         "Please try again."
@@ -918,11 +1007,66 @@ def _render_proposal_dialog(proposal: dict[str, Any]) -> None:
         st.rerun()
 
 
+def _submit_chat_message(prompt: str) -> None:
+    """Send one chat turn and fold the outcome into session state.
+
+    On success, appends the assistant's reply to history and stores any
+    pending proposal. On failure, the guest's own message (already in
+    history by the time this is called) is left standing alone -- nothing
+    is fabricated to look like an assistant reply -- and the text plus
+    failure copy are stashed for `_render_pending_resend` instead.
+
+    Must be called inside a ``st.chat_message("assistant")`` context so a
+    successful reply renders inside the assistant bubble.
+
+    Args:
+        prompt: The guest's message text for this turn.
+
+    """
+    result = _stream_message(
+        st.session_state.thread_id, st.session_state.customer_id, prompt,
+    )
+    if result.ok:
+        _md(result.text)
+        st.session_state.messages.append(
+            {"role": "assistant", "content": result.text},
+        )
+        st.session_state.pending_proposal = result.proposal
+        st.session_state.pending_resend = None
+        st.session_state.pending_resend_message = None
+    else:
+        st.session_state.pending_resend = prompt
+        st.session_state.pending_resend_message = result.text
+
+
+def _render_pending_resend() -> None:
+    """Render the system-state block for a chat turn that failed to complete.
+
+    Shown as its own block rather than an assistant bubble, since nothing
+    was actually said -- the guest's own message stays in history as-is,
+    and this is what offers the resend instead of a bare "try again"
+    sentence. "Send again" replays the exact same text and stays disabled
+    until `_render_sidebar` observes the API healthy again, wiring the
+    already-existing recovery poll to this control for the first time.
+    """
+    prompt = st.session_state.pending_resend
+    if prompt is None:
+        return
+    st.warning(st.session_state.pending_resend_message)
+    online = st.session_state.api_online
+    if st.button("Send again", disabled=not online, use_container_width=True):
+        with st.chat_message("assistant"):
+            _submit_chat_message(prompt)
+        st.rerun()
+
+
 def _render_chat() -> None:
     """Render the chat message history, pending proposal, and new user input."""
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             _md(msg["content"])
+
+    _render_pending_resend()
 
     if st.session_state.pending_proposal is not None:
         _render_proposal_dialog(st.session_state.pending_proposal)
@@ -932,19 +1076,17 @@ def _render_chat() -> None:
         placeholder, disabled=st.session_state.customer_id is None,
     ):
         _dismiss_pending_proposal()
+        # A new message supersedes any resend still offered for an earlier,
+        # failed one -- typing past it means the guest has moved on.
+        st.session_state.pending_resend = None
+        st.session_state.pending_resend_message = None
 
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             _md(prompt)
 
         with st.chat_message("assistant"):
-            reply, proposal = _stream_message(
-                st.session_state.thread_id, st.session_state.customer_id, prompt,
-            )
-            _md(reply)
-
-        st.session_state.messages.append({"role": "assistant", "content": reply})
-        st.session_state.pending_proposal = proposal
+            _submit_chat_message(prompt)
         st.rerun()
 
 

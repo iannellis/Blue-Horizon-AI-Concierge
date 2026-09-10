@@ -3,7 +3,8 @@
 Covers the pure/semi-pure functions in ui/app.py that do not require a live
 Streamlit runtime: health polling, the unified chat stream (including
 its `proposal` and `error` events), SSE line parsing, HTTP error translation,
-and the proposal-summary renderers that back the confirmation dialog.
+the proposal-summary renderers that back the confirmation dialog, and
+`_fetch_bookings`'s None/empty-list distinction.
 
 Not covered here: `st.dialog`-decorated flows, session-state-driven widgets
 (`_render_customer_picker`, `_render_reservations`, `_render_chat`,
@@ -30,8 +31,10 @@ streamlit = pytest.importorskip("streamlit", reason="streamlit not installed")
 
 from ui.app import (  # noqa: E402
     _GUEST_CLAIM_TTL_S,
+    ChatTurnResult,
     _check_health,
     _confirm_proposal,
+    _fetch_bookings,
     _guest_claims,
     _GuestClaim,
     _handle_stream_event,
@@ -92,6 +95,52 @@ class TestCheckHealth:
             side_effect=httpx2.TimeoutException("timeout"),
         ):
             assert _check_health() is False
+
+
+# ---------------------------------------------------------------------------
+# _fetch_bookings
+# ---------------------------------------------------------------------------
+
+
+class TestFetchBookings:
+    """_fetch_bookings distinguishes "could not load" from "genuinely none".
+
+    `None` and `[]` are deliberately different return values -- collapsing
+    them would render a backend outage in `_render_reservations` as "No
+    reservations yet.", indistinguishable from a guest with no bookings.
+    """
+
+    def test_returns_list_on_success(self) -> None:
+        """A successful response returns its bookings list, even if empty."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {"bookings": [{"booking_id": 1}]}
+        with patch("ui.app.httpx2.get", return_value=mock_response):
+            assert _fetch_bookings(7) == [{"booking_id": 1}]
+
+    def test_returns_empty_list_when_guest_has_no_bookings(self) -> None:
+        """A successful response with no bookings returns `[]`, not `None`."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {"bookings": []}
+        with patch("ui.app.httpx2.get", return_value=mock_response):
+            assert _fetch_bookings(7) == []
+
+    def test_returns_none_on_connection_error(self) -> None:
+        """A network failure returns `None`, distinct from an empty list."""
+        with patch(
+            "ui.app.httpx2.get", side_effect=httpx2.ConnectError("refused"),
+        ):
+            assert _fetch_bookings(7) is None
+
+    def test_returns_none_on_http_error(self) -> None:
+        """A non-2xx response returns `None`, distinct from an empty list."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status.side_effect = httpx2.HTTPStatusError(
+            "error", request=MagicMock(), response=mock_response,
+        )
+        with patch("ui.app.httpx2.get", return_value=mock_response):
+            assert _fetch_bookings(7) is None
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +209,22 @@ class TestHandleStreamEvent:
         }
         assert result is None
 
+    def test_malformed_proposal_event_is_ignored(self) -> None:
+        """A proposal event missing a required key is dropped, not indexed raw.
+
+        A raw `event["proposal_id"]` index would raise `KeyError`, which the
+        generic exception handler in `_stream_message` would otherwise report
+        as an unhelpful "Could not reach the API".
+        """
+        status = MagicMock()
+        pending, result = _handle_stream_event(
+            {"type": "proposal", "action": "book", "summary": {}},
+            status,
+            None,
+        )
+        assert pending is None
+        assert result is None
+
     def test_done_event_returns_response_and_pending_proposal(self) -> None:
         """A done event ends the turn, returning the response and any proposal."""
         status = MagicMock()
@@ -169,7 +234,7 @@ class TestHandleStreamEvent:
         )
         status.update.assert_called_with(label="Done", state="complete")
         assert pending == proposal
-        assert result == ("All set.", proposal)
+        assert result == ChatTurnResult(ok=True, text="All set.", proposal=proposal)
 
     def test_done_event_without_proposal(self) -> None:
         """A done event with no prior proposal returns None as the proposal half."""
@@ -177,7 +242,7 @@ class TestHandleStreamEvent:
         _pending, result = _handle_stream_event(
             {"type": "done", "response": "Hi!"}, status, None,
         )
-        assert result == ("Hi!", None)
+        assert result == ChatTurnResult(ok=True, text="Hi!", proposal=None)
 
     def test_error_event_ends_the_turn(self) -> None:
         """An error event marks the status widget as errored and ends the turn."""
@@ -187,7 +252,9 @@ class TestHandleStreamEvent:
         )
         status.update.assert_called_with(label="Error", state="error")
         assert pending is None
-        assert result == ("Something broke.", None)
+        assert result == ChatTurnResult(
+            ok=False, text="Something broke.", proposal=None,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +328,7 @@ class TestStreamMessage:
             patch("ui.app.st.status", return_value=MagicMock()),
         ):
             result = _stream_message("thread-1", 7, "hi")
-        assert result == ("Hello!", None)
+        assert result == ChatTurnResult(ok=True, text="Hello!", proposal=None)
 
     def test_proposal_event_is_returned_alongside_response(self) -> None:
         """A proposal captured mid-stream is returned with the done response."""
@@ -277,9 +344,12 @@ class TestStreamMessage:
             patch("ui.app.st.status", return_value=MagicMock()),
         ):
             result = _stream_message("thread-1", 7, "book it")
-        assert result == (
-            "Review below.",
-            {"proposal_id": "p1", "action": "book", "summary": {"total": "100.00"}},
+        assert result == ChatTurnResult(
+            ok=True,
+            text="Review below.",
+            proposal={
+                "proposal_id": "p1", "action": "book", "summary": {"total": "100.00"},
+            },
         )
 
     def test_error_event_returns_message_with_no_proposal(self) -> None:
@@ -292,7 +362,10 @@ class TestStreamMessage:
             patch("ui.app.st.status", return_value=MagicMock()),
         ):
             result = _stream_message("thread-1", 7, "hi")
-        assert result == ("Something went wrong.", None)
+        assert result == ChatTurnResult(
+            ok=False, text="Something went wrong.", proposal=None,
+        )
+        assert result.ok is False
 
     def test_request_body_includes_customer_id(self) -> None:
         """The POST body carries thread_id, customer_id, and text."""
@@ -356,7 +429,7 @@ class TestStreamMessage:
             patch("ui.app.st.status", return_value=MagicMock()),
         ):
             result = _stream_message("thread-1", 7, "hi")
-        assert result == ("ok", None)
+        assert result == ChatTurnResult(ok=True, text="ok", proposal=None)
 
     def test_malformed_json_lines_skipped(self) -> None:
         """Lines with invalid JSON are skipped without raising."""
@@ -369,7 +442,7 @@ class TestStreamMessage:
             patch("ui.app.st.status", return_value=MagicMock()),
         ):
             result = _stream_message("thread-1", 7, "hi")
-        assert result == ("ok", None)
+        assert result == ChatTurnResult(ok=True, text="ok", proposal=None)
 
     def test_returns_fallback_when_stream_ends_without_done(self) -> None:
         """If the stream ends before a done event the fallback string is returned."""
@@ -381,12 +454,20 @@ class TestStreamMessage:
             patch("ui.app.st.status", return_value=MagicMock()),
         ):
             result = _stream_message("thread-1", 7, "hi")
-        assert result == ("No response received.", None)
+        assert result == ChatTurnResult(
+            ok=True, text="No response received.", proposal=None,
+        )
 
     def test_503_returns_starting_up_message(self) -> None:
-        """HTTP 503 returns the 'still starting up' message."""
+        """HTTP 503 returns the 'still starting up' message, and is not ok.
+
+        Not `ok` is what tells `_submit_chat_message` to keep the guest's own
+        message standing alone in history rather than appending a fabricated
+        assistant reply -- see `_render_pending_resend`.
+        """
         mock_response = MagicMock()
         mock_response.status_code = 503
+        mock_response.json.side_effect = ValueError("not JSON")
         exc = httpx2.HTTPStatusError(
             "Service Unavailable",
             request=MagicMock(),
@@ -398,8 +479,9 @@ class TestStreamMessage:
             patch("ui.app.st.status", return_value=MagicMock()),
         ):
             result = _stream_message("thread-1", 7, "hi")
-        assert "starting up" in result[0].lower()
-        assert result[1] is None
+        assert result.ok is False
+        assert "starting up" in result.text.lower()
+        assert result.proposal is None
 
     def test_other_http_error_returns_server_error_message(self) -> None:
         """Non-503 HTTP errors return a generic message containing the status code."""
@@ -416,7 +498,8 @@ class TestStreamMessage:
             patch("ui.app.st.status", return_value=MagicMock()),
         ):
             result = _stream_message("thread-1", 7, "hi")
-        assert "500" in result[0]
+        assert result.ok is False
+        assert "500" in result.text
 
     def test_timeout_returns_timeout_message(self) -> None:
         """A TimeoutException returns the timeout user message."""
@@ -428,19 +511,22 @@ class TestStreamMessage:
             patch("ui.app.st.status", return_value=MagicMock()),
         ):
             result = _stream_message("thread-1", 7, "hi")
-        assert "timed out" in result[0].lower() or "timeout" in result[0].lower()
+        assert result.ok is False
+        assert "timed out" in result.text.lower() or "timeout" in result.text.lower()
 
     def test_connection_error_returns_api_unreachable_message(self) -> None:
-        """Network errors return the 'could not reach the API' message."""
+        """Network errors return fixed copy, never the raw exception text."""
         ctx = MagicMock()
-        ctx.__enter__.side_effect = httpx2.ConnectError("refused")
+        ctx.__enter__.side_effect = httpx2.ConnectError("some raw socket detail")
         ctx.__exit__.return_value = False
         with (
             patch("ui.app.httpx2.stream", return_value=ctx),
             patch("ui.app.st.status", return_value=MagicMock()),
         ):
             result = _stream_message("thread-1", 7, "hi")
-        assert "api" in result[0].lower() or "reach" in result[0].lower()
+        assert result.ok is False
+        assert "reach" in result.text.lower()
+        assert "some raw socket detail" not in result.text
 
     def test_error_branch_marks_status_error(self) -> None:
         """All error paths set the status widget to the error state."""

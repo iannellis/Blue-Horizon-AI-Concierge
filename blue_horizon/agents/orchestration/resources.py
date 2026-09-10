@@ -10,7 +10,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from blue_horizon.agents._lifecycle import require
 from blue_horizon.agents._llm import build_chat_model
 from blue_horizon.agents.booking import BookingSqlResources, build_booking_agent
-from blue_horizon.agents.exceptions import OperationalError
+from blue_horizon.agents.exceptions import ConfigurationError, OperationalError
 from blue_horizon.agents.information import InfoRagResources, build_info_agent
 from blue_horizon.agents.orchestration.models import RouteDecision
 from blue_horizon.agents.prompt_utils import load_packaged_text, prompt_resource_path
@@ -140,8 +140,14 @@ class OrchestrationResources:
         each sub-resource startup check, and builds the compiled info/rooms agents.
 
         Raises:
-            OperationalError: If startup fails for a reason that should be treated
-                as transient and retried (e.g., dependency outage).
+            ConfigurationError: If startup fails for a reason that will not
+                resolve on retry -- a missing packaged prompt file, or a
+                permanent misconfiguration surfaced by a sub-resource (e.g.
+                `BookingSqlResources`'s read-only-role guard). Propagated
+                unchanged rather than folded into `OperationalError`, so the
+                manager's retry loop can stop pretending it will recover.
+            OperationalError: If startup fails for a reason that should be
+                treated as transient and retried (e.g., dependency outage).
 
         """
         try:
@@ -159,6 +165,8 @@ class OrchestrationResources:
                 resources=self.booking_resources,
             )
 
+        except ConfigurationError:
+            raise
         except OperationalError:
             raise
         except Exception as exc:

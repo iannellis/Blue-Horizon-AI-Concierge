@@ -5,6 +5,8 @@ from functools import lru_cache
 from string import Template
 from typing import Final
 
+from blue_horizon.agents.exceptions import ConfigurationError
+
 DEFAULT_PACKAGE: Final[str] = "blue_horizon"
 
 
@@ -44,7 +46,9 @@ def load_prompt_template(
         Parsed string.Template for the prompt.
 
     Raises:
-        RuntimeError: If the template content cannot be loaded.
+        ConfigurationError: If the template content cannot be loaded. A
+            missing or unreadable packaged prompt file is a deployment
+            defect, not something a retry can fix.
 
     """
     text = load_packaged_text(relative_path, base_package=base_package)
@@ -67,7 +71,10 @@ def load_packaged_text(
         The decoded text content of the resource.
 
     Raises:
-        RuntimeError: If the resource cannot be found or read.
+        ConfigurationError: If the resource cannot be found or read. This is
+            a packaging defect (a prompt file missing from the shipped
+            image), not a dependency outage, so it is deliberately not an
+            `OperationalError`: retrying will not make the file appear.
 
     """
     try:
@@ -75,7 +82,7 @@ def load_packaged_text(
         return traversable.read_text(encoding="utf-8")
     except FileNotFoundError as exc:
         msg = f"Resource not found: {base_package}/{relative_path}"
-        raise RuntimeError(msg) from exc
+        raise ConfigurationError(msg) from exc
     except OSError as exc:
         msg = f"Failed to read resource: {base_package}/{relative_path}"
-        raise RuntimeError(msg) from exc
+        raise ConfigurationError(msg) from exc

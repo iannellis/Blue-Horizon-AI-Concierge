@@ -1,23 +1,34 @@
 """Tests for OrchestrationManager.
 
 Unit tests cover only the pure-logic branches that do not require a running
-LangGraph agent: the not-ready guard in ``ainvoke_stream`` and the stage
-deduplication logic driven by ``_NODE_TO_STAGE``.
+LangGraph agent: the not-ready guard in ``ainvoke``/``ainvoke_stream``, the
+stage deduplication logic driven by ``_NODE_TO_STAGE``, and -- driving
+``_init_loop`` for real, against a stubbed ``startup_check`` -- the
+readiness classification the failure-handling rework depends on.
 """
 
 from __future__ import annotations
 
 # ruff: noqa: S101
 import asyncio
-from typing import TYPE_CHECKING, Any
-from unittest.mock import MagicMock
+from typing import TYPE_CHECKING, Any, cast
+from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from langchain_core.messages import AIMessage
 
-from blue_horizon.agents.orchestration.manager import OrchestrationManager
+from blue_horizon.agents.exceptions import ConfigurationError, OperationalError
+from blue_horizon.agents.orchestration.manager import OrchestrationManager, Readiness
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from collections.abc import AsyncGenerator, Callable
+
+# Long enough that a passing test never hits it under normal machine load,
+# short enough that a hung test (the loop wedged, or a readiness transition
+# that never happens) fails fast instead of joining the suite's stalled
+# tests.
+_POLL_TIMEOUT_S = 2.0
+_POLL_INTERVAL_S = 0.005
 
 
 # ---------------------------------------------------------------------------
@@ -32,12 +43,16 @@ def _make_manager(
 ) -> OrchestrationManager:
     """Create an OrchestrationManager with minimal mocked internals.
 
-    Bypasses ``__init__`` so that no real resources are created.
+    Bypasses ``__init__`` so that no real resources are created. Suitable
+    for tests that call ``ainvoke``/``ainvoke_stream`` directly; it never
+    starts ``_init_loop``, so it is not suitable for readiness-transition
+    tests -- see ``_make_uninitialized_manager`` for those.
 
     Args:
         agent: Value to assign to the ``_agent`` slot.  ``None`` simulates
             the not-ready state; a MagicMock simulates a compiled graph.
-        unavailable: Text returned by ``get_unavailable_message()``.
+        unavailable: Text returned by ``get_readiness_message()`` while
+            ``STARTING``.
 
     Returns:
         Configured OrchestrationManager instance.
@@ -45,6 +60,9 @@ def _make_manager(
     """
     manager = OrchestrationManager.__new__(OrchestrationManager)
     manager._agent = agent  # type: ignore[assignment]  # noqa: SLF001
+    manager._readiness = (  # noqa: SLF001
+        Readiness.READY if agent is not None else Readiness.STARTING
+    )
     manager._llm_semaphore = asyncio.Semaphore(1)  # noqa: SLF001
     manager._thread_customers = {}  # noqa: SLF001
     mock_resources = MagicMock()
@@ -55,6 +73,71 @@ def _make_manager(
     booking_resources.proposals.get_pending_for_thread.return_value = None
     manager._resources = mock_resources  # noqa: SLF001
     return manager
+
+
+def _make_uninitialized_manager(
+    *,
+    startup_check_side_effect: object,
+    init_retry_base_s: float = 0.001,
+    init_retry_max_s: float = 0.001,
+) -> OrchestrationManager:
+    """Build a manager that drives the real ``_init_loop``.
+
+    Bypasses ``__init__`` (no real resources), but -- unlike
+    ``_make_manager`` -- sets up every field ``start()``/``_init_loop``
+    touch: ``_lock``, ``_stop_event``, and a stubbed async
+    ``startup_check()``. Backoff defaults to near-zero so a multi-attempt
+    test does not sit through real exponential delays.
+
+    Args:
+        startup_check_side_effect: Passed straight to
+            ``AsyncMock(side_effect=...)`` for
+            ``resources.startup_check``: an exception (or exception class)
+            to raise every call, or a list consumed one entry per call
+            (each entry either an exception to raise or ``None`` to
+            succeed).
+        init_retry_base_s: Backoff base passed through the mocked config.
+        init_retry_max_s: Backoff cap passed through the mocked config.
+
+    Returns:
+        An OrchestrationManager ready for ``await manager.start()``.
+
+    """
+    manager = OrchestrationManager.__new__(OrchestrationManager)
+    manager._agent = None  # noqa: SLF001
+    manager._readiness = Readiness.STARTING  # noqa: SLF001
+    manager._llm_semaphore = asyncio.Semaphore(1)  # noqa: SLF001
+    manager._thread_customers = {}  # noqa: SLF001
+    manager._init_task = None  # noqa: SLF001
+    manager._lock = asyncio.Lock()  # noqa: SLF001
+    manager._stop_event = asyncio.Event()  # noqa: SLF001
+
+    mock_resources = MagicMock()
+    mock_resources.startup_check = AsyncMock(side_effect=startup_check_side_effect)
+    mock_resources.config.orchestration.init_retry_base_s = init_retry_base_s
+    mock_resources.config.orchestration.init_retry_max_s = init_retry_max_s
+    manager._resources = mock_resources  # noqa: SLF001
+    return manager
+
+
+async def _wait_until(condition: Callable[[], bool]) -> None:
+    """Poll ``condition()`` until it is truthy, or fail after a timeout.
+
+    Args:
+        condition: Zero-argument callable checked every `_POLL_INTERVAL_S`.
+
+    Raises:
+        AssertionError: If `condition()` is never truthy within
+            `_POLL_TIMEOUT_S`.
+
+    """
+    elapsed = 0.0
+    while elapsed < _POLL_TIMEOUT_S:
+        if condition():
+            return
+        await asyncio.sleep(_POLL_INTERVAL_S)
+        elapsed += _POLL_INTERVAL_S
+    pytest.fail(f"condition not met within {_POLL_TIMEOUT_S}s")
 
 
 async def _collect(gen: AsyncGenerator[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -147,31 +230,48 @@ def _mock_agent(
 
 
 # ---------------------------------------------------------------------------
-# ainvoke_stream — not-ready guard
+# ainvoke / ainvoke_stream — not-ready guard
+#
+# A not-ready manager used to paint over the gap with a fake `done` event
+# carrying the "unavailable" message -- delivered as HTTP 200, so it landed
+# in the transcript as something the concierge said. That path is removed:
+# both methods now require an agent and raise if there is not one, and
+# `api.app.chat`'s readiness gate is what actually keeps a not-ready
+# manager from reaching either method in production (see api/app.py).
 # ---------------------------------------------------------------------------
 
 
-class TestAinvokeStreamNotReady:
-    """ainvoke_stream yields a single done event when the agent is not ready."""
+class TestAinvokeRequiresReady:
+    """`ainvoke` raises rather than fabricating a reply when not ready."""
 
-    def test_yields_single_done_event(self) -> None:
-        """Only one event is emitted: a done event."""
+    def test_raises_when_agent_is_none(self) -> None:
+        """A not-ready manager raises instead of returning a fake reply."""
         manager = _make_manager(agent=None)
-        events = asyncio.run(_run_stream(manager))
-        assert len(events) == 1
-        assert events[0]["type"] == "done"
+        with pytest.raises(RuntimeError, match="Orchestration agent"):
+            asyncio.run(
+                manager.ainvoke(thread_id="t1", user_text="hi", customer_id=1),
+            )
 
-    def test_done_event_contains_unavailable_message(self) -> None:
-        """The done event's response carries the configured unavailable message."""
-        manager = _make_manager(agent=None, unavailable="Sorry, not ready.")
-        events = asyncio.run(_run_stream(manager))
-        assert events[0]["response"] == "Sorry, not ready."
 
-    def test_no_stage_events_emitted(self) -> None:
-        """No stage events are emitted before the done event."""
+class TestAinvokeStreamRequiresReady:
+    """`ainvoke_stream` raises rather than yielding a fake done event."""
+
+    def test_raises_when_agent_is_none(self) -> None:
+        """A not-ready manager raises instead of yielding any event."""
         manager = _make_manager(agent=None)
-        events = asyncio.run(_run_stream(manager))
-        assert all(e["type"] != "stage" for e in events)
+        with pytest.raises(RuntimeError, match="Orchestration agent"):
+            asyncio.run(_run_stream(manager))
+
+    def test_yields_no_events_before_raising(self) -> None:
+        """Draining the generator by hand confirms it is empty, not just short."""
+        manager = _make_manager(agent=None)
+        gen = manager.ainvoke_stream(thread_id="t1", user_text="hi", customer_id=1)
+
+        async def _first_item() -> dict[str, Any]:
+            return await gen.__anext__()
+
+        with pytest.raises(RuntimeError):
+            asyncio.run(_first_item())
 
 
 # ---------------------------------------------------------------------------
@@ -272,3 +372,165 @@ class TestAinvokeStreamStages:
         assert len(stage_labels) == 5  # noqa: PLR2004
         assert stage_labels[0] == "Routing your request\u2026"
         assert stage_labels[-1] == "Generating response\u2026"
+
+
+# ---------------------------------------------------------------------------
+# _init_loop — readiness classification
+#
+# Drives the real _init_loop against a stubbed startup_check(), which is
+# also, incidentally, the first coverage this loop has had at all: nothing
+# previously touched _init_loop, startup_check's retry, or stop_never, so
+# the unbounded-retry behavior the archived-branch design in the
+# failure-handling plan depends on was unpinned before this.
+# ---------------------------------------------------------------------------
+
+
+class TestInitLoopReadinessClassification:
+    """`_init_loop` sets `readiness` from the exception `startup_check` raises."""
+
+    def test_configuration_error_sets_failed(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A permanent misconfiguration is reported as FAILED, not STARTING."""
+        monkeypatch.setattr(
+            "blue_horizon.agents.orchestration.manager.build_orchestration_agent",
+            MagicMock(),
+        )
+        manager = _make_uninitialized_manager(
+            startup_check_side_effect=ConfigurationError("bad role"),
+        )
+
+        async def _run() -> None:
+            await manager.start()
+            try:
+                await _wait_until(lambda: manager.readiness is Readiness.FAILED)
+                assert manager.is_ready is False
+            finally:
+                await manager.stop()
+
+        asyncio.run(_run())
+
+    def test_operational_error_sets_starting(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A transient dependency outage is reported as STARTING, not FAILED."""
+        monkeypatch.setattr(
+            "blue_horizon.agents.orchestration.manager.build_orchestration_agent",
+            MagicMock(),
+        )
+        manager = _make_uninitialized_manager(
+            startup_check_side_effect=OperationalError("db unreachable"),
+        )
+
+        async def _run() -> None:
+            await manager.start()
+            try:
+                # Already STARTING at construction; give the loop a few
+                # failed attempts to prove it is *staying* STARTING, not
+                # merely starting there before its first attempt runs.
+                await asyncio.sleep(0.05)
+                assert manager.readiness is Readiness.STARTING
+                assert manager.is_ready is False
+            finally:
+                await manager.stop()
+
+        asyncio.run(_run())
+
+    def test_unclassified_error_defaults_to_starting(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """An exception type this module does not recognise still degrades safely.
+
+        A misclassification should degrade to bad copy (STARTING), never to
+        a guest being told a possibly-transient failure will never recover.
+        """
+        monkeypatch.setattr(
+            "blue_horizon.agents.orchestration.manager.build_orchestration_agent",
+            MagicMock(),
+        )
+        manager = _make_uninitialized_manager(
+            startup_check_side_effect=ValueError("unexpected bug"),
+        )
+
+        async def _run() -> None:
+            await manager.start()
+            try:
+                await asyncio.sleep(0.05)
+                assert manager.readiness is Readiness.STARTING
+            finally:
+                await manager.stop()
+
+        asyncio.run(_run())
+
+    def test_failed_state_still_retries_and_can_recover(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """FAILED does not stop the loop: a later success still reaches READY."""
+        monkeypatch.setattr(
+            "blue_horizon.agents.orchestration.manager.build_orchestration_agent",
+            MagicMock(),
+        )
+        manager = _make_uninitialized_manager(
+            startup_check_side_effect=[
+                ConfigurationError("bad role"),
+                ConfigurationError("bad role"),
+                None,
+            ],
+        )
+
+        async def _run() -> None:
+            await manager.start()
+            try:
+                await _wait_until(lambda: manager.readiness is Readiness.FAILED)
+                await _wait_until(lambda: manager.is_ready)
+                assert manager.readiness is Readiness.READY
+            finally:
+                await manager.stop()
+
+        asyncio.run(_run())
+
+
+class TestInitLoopSimulatedSlowStartup:
+    """Substitute for an archived Neon branch, which cannot be produced on demand.
+
+    The readiness state machine does not care *why* startup is slow, so
+    driving `startup_check` to fail or block repeatedly exercises the same
+    behavior a slow unarchive would.
+    """
+
+    def test_stays_starting_through_repeated_failures_then_recovers(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Readiness stays STARTING across many failed attempts, then recovers."""
+        monkeypatch.setattr(
+            "blue_horizon.agents.orchestration.manager.build_orchestration_agent",
+            MagicMock(),
+        )
+        attempts = 20
+        manager = _make_uninitialized_manager(
+            startup_check_side_effect=[
+                OperationalError("still resuming") for _ in range(attempts)
+            ]
+            + [None],
+        )
+
+        async def _run() -> None:
+            await manager.start()
+            try:
+                # Poll across several retry cycles without ever observing
+                # FAILED or READY too early -- the loop must keep retrying
+                # on its own, with no caller intervention, per stop_never.
+                for _ in range(attempts * 3):
+                    assert manager.readiness in (Readiness.STARTING, Readiness.READY)
+                    if manager.is_ready:
+                        break
+                    await asyncio.sleep(_POLL_INTERVAL_S)
+                assert manager.is_ready is True
+                startup_check = cast(
+                    "AsyncMock", manager._resources.startup_check,  # noqa: SLF001
+                )
+                assert startup_check.await_count >= attempts + 1
+            finally:
+                await manager.stop()
+
+        asyncio.run(_run())

@@ -10,13 +10,19 @@
 #      docs/design-decisions.md and AGENTS.md's module-boundaries note on
 #      in-process state lifecycle.
 #
-# The branch reset also has a side effect worth relying on deliberately: it
-# accesses the branch, so Neon's 24-hour archive clock never expires and the
-# branch cannot archive out from under the live process. See
-# docs/architecture/orchestration.md#readiness for why an archived branch is
-# a startup-time concern (absorbed by the unbounded init retry loop and the
-# 503 readiness gate) rather than a request-time one, and why that decision
-# depends on this job actually running every night.
+# The restart step below has a side effect worth relying on deliberately: it
+# forces the Space's process to restart, and startup_check() opens real
+# database connections during init, so Neon's 24-hour archive clock never
+# expires and the branch cannot archive out from under the live process. The
+# reset step above does not provide this by itself: eval.neon.reset_branch
+# only calls Neon's management API (branch lookup, restore, operation
+# polling) and never opens a database connection, confirmed by watching an
+# archived branch stay archived through two resets and only unarchive on a
+# real connection. See docs/architecture/orchestration.md#readiness for why
+# an archived branch is a startup-time concern (absorbed by the unbounded
+# init retry loop and the 503 readiness gate) rather than a request-time
+# one, and why that decision depends on this job actually running every
+# night.
 #
 # A dead man's switch (https://healthchecks.io or equivalent) is pinged on
 # success, and explicitly on failure too. This is the piece neither a failed

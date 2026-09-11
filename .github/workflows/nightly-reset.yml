@@ -28,17 +28,24 @@
 # no-op depending on how it fails. A watchdog that expects a daily ping and
 # alerts on its absence catches both.
 #
-# Required repository/environment secrets (CI environment):
-#   NEON_API_KEY          - Neon management API key for the branch reset.
-#   HF_TOKEN               - HuggingFace write token, for the Space restart.
-#   HEALTHCHECK_PING_URL   - Dead man's switch ping URL (healthchecks.io or
-#                            equivalent). Not a repo constant: anyone who can
-#                            read a public workflow file can ping it, and a
-#                            forged success ping would defeat its purpose, so
-#                            it is kept a secret rather than hardcoded here.
+# Secrets this job reads:
+#   NEON_API_KEY         - Neon management API key for the branch reset. This one
+#                          is repository level rather than environment scoped: it
+#                          is the only secret both the Testing and Production
+#                          environments need, and a second copy would have to be
+#                          rotated in two places, which is how the copies drift.
+#   HF_TOKEN             - HuggingFace write token, for the Space restart.
+#                          Production environment.
+#   HEALTHCHECK_PING_URL - Dead man's switch ping URL (healthchecks.io or
+#                          equivalent). Production environment. Not a repo
+#                          constant: anyone who can read a public workflow file
+#                          can ping it, and a forged success ping would defeat
+#                          its purpose, so it is kept a secret rather than
+#                          hardcoded here.
 #
-# Required repository/environment variables (CI environment):
+# Variables this job reads:
 #   HF_SPACE - HuggingFace Space identifier, e.g. "username/blue-horizon".
+#              Production environment.
 
 name: Nightly Production reset
 
@@ -53,7 +60,7 @@ jobs:
   nightly-reset:
     name: Reset Production branch and restart Space
     runs-on: ubuntu-latest
-    environment: CI
+    environment: Production
 
     steps:
       - uses: actions/checkout@v5

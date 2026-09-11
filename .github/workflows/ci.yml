@@ -19,18 +19,22 @@
 #      the eval each either passed or were skipped: push the repo to the
 #      HuggingFace Docker Space so HF rebuilds the container automatically.
 #
-# Required repository/environment secrets (CI environment):
-#   LANGSMITH_API_KEY   – LangSmith API key for dataset loading and tracing.
-#   GEMINI_API_KEY      – Google Gemini API key for the agent, judge, and Ragas.
-#   OPENAI_API_KEY      – OpenAI API key for the information agent and embeddings.
-#   NEON_API_KEY        – Neon management API key for branch reset.
-#   PGSQL_RW_EVAL_DB_URL – Read-write (bh_agent_rw) PostgreSQL connection string
+# Secrets and variables, grouped by the scope that holds them. Each job declares
+# the environment it needs, so a job can only read the secrets belonging to its
+# own half of the work: the DB and eval jobs cannot reach the HuggingFace deploy
+# token, and the deploy job cannot reach the database URLs.
+#
+# Testing environment, read by db-integration-tests and the smoke eval:
+#   LANGSMITH_API_KEY    - LangSmith API key for dataset loading and tracing.
+#   GEMINI_API_KEY       - Google Gemini API key for the agent, judge, and Ragas.
+#   OPENAI_API_KEY       - OpenAI API key for the information agent and embeddings.
+#   PGSQL_RW_EVAL_DB_URL - Read-write (bh_agent_rw) PostgreSQL connection string
 #                          for the Development database. Reused by the
 #                          db-integration-tests job as PGSQL_RW_DB_URL.
-#   PGSQL_RO_EVAL_DB_URL – Read-only (bh_agent_ro) PostgreSQL connection string
+#   PGSQL_RO_EVAL_DB_URL - Read-only (bh_agent_ro) PostgreSQL connection string
 #                          for the Development database. Reused by the
 #                          db-integration-tests job as PGSQL_RO_DB_URL.
-#   PGSQL_ROOT_EVAL_DB_URL – Schema-owner PostgreSQL connection string for the
+#   PGSQL_ROOT_EVAL_DB_URL - Schema-owner PostgreSQL connection string for the
 #                          Development database. Reused by the
 #                          db-integration-tests job as PGSQL_ROOT_DB_URL, for
 #                          the one test in test_db_invariants.py that needs
@@ -42,13 +46,23 @@
 #                          booking_pgsql.reload_sql_tables reads and which
 #                          must only ever point at the Parent branch, never
 #                          Development.
-#   REDIS_URL           – Redis connection URL for the agent's cache.
-#   HF_TOKEN            – HuggingFace write token (Settings → Access Tokens).
+#   REDIS_URL            - Redis connection URL for the agent's cache.
 #
-# Required repository/environment variables (CI environment):
-#   LANGSMITH_TRACING   – Set to "true" to enable LangSmith tracing.
-#   LANGCHAIN_PROJECT   – LangSmith project name for trace grouping.
-#   HF_SPACE            – HuggingFace Space identifier, e.g. "username/blue-horizon".
+# Production environment, read by the deploy job only:
+#   HF_TOKEN - HuggingFace write token (Settings > Access Tokens).
+#   HF_SPACE - HuggingFace Space identifier, e.g. "username/blue-horizon".
+#              A variable, not a secret.
+#
+# Repository level, readable by every job regardless of environment:
+#   NEON_API_KEY - Neon management API key for branch reset. Deliberately not
+#                  environment scoped: it is the only secret both Testing and
+#                  Production need, and a second copy would have to be rotated
+#                  in two places, which is how copies drift apart.
+#
+# LANGSMITH_TRACING and LANGCHAIN_PROJECT are not secret and differ per eval
+# workflow, so they are set in the eval job's env: block below rather than
+# stored as environment variables. That keeps Testing purely about secret
+# access.
 
 name: CI / Deploy
 
@@ -137,7 +151,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.eval == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    environment: CI
+    environment: Testing
 
     steps:
       - uses: actions/checkout@v5
@@ -181,7 +195,7 @@ jobs:
       (needs.changes.outputs.eval == 'true' || github.event_name == 'workflow_dispatch') &&
       (needs.db-integration-tests.result == 'success' || needs.db-integration-tests.result == 'skipped')
     runs-on: ubuntu-latest
-    environment: CI
+    environment: Testing
 
     steps:
       - uses: actions/checkout@v5
@@ -202,8 +216,11 @@ jobs:
       - name: Run smoke eval
         env:
           
-          LANGSMITH_TRACING: ${{ vars.LANGSMITH_TRACING }}
-          LANGCHAIN_PROJECT: ${{ vars.LANGCHAIN_PROJECT }}
+          # Not secret, and the value differs per eval workflow, so it is set
+          # here rather than as an environment variable. That keeps the Testing
+          # environment purely about which secrets a job may read.
+          LANGSMITH_TRACING: "false"
+          LANGCHAIN_PROJECT: github-evals-small
           LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
@@ -249,7 +266,7 @@ jobs:
       (needs.db-integration-tests.result == 'success' || needs.db-integration-tests.result == 'skipped') &&
       (needs.eval.result == 'success' || needs.eval.result == 'skipped')
     runs-on: ubuntu-latest
-    environment: CI
+    environment: Production
 
     steps:
       - uses: actions/checkout@v5

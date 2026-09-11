@@ -4,20 +4,23 @@
 # Runs 50 concurrent simulated users against the Neon development branch,
 # checks DB invariants, and uploads logs and results as artifacts.
 #
-# Required repository/environment secrets (Full Eval environment):
-#   LANGSMITH_API_KEY   – LangSmith API key for tracing.
-#   GEMINI_API_KEY      – Google Gemini API key for the agent.
-#   OPENAI_API_KEY      – OpenAI API key for the information agent and embeddings.
-#   NEON_API_KEY        – Neon management API key for branch reset.
-#   PGSQL_RW_EVAL_DB_URL – Read-write (bh_agent_rw) PostgreSQL connection string
+# Secrets this workflow reads, all scoped to the Testing environment:
+#   LANGSMITH_API_KEY    - LangSmith API key for tracing.
+#   GEMINI_API_KEY       - Google Gemini API key for the agent.
+#   OPENAI_API_KEY       - OpenAI API key for the information agent and embeddings.
+#   PGSQL_RW_EVAL_DB_URL - Read-write (bh_agent_rw) PostgreSQL connection string
 #                          for the eval database.
-#   PGSQL_RO_EVAL_DB_URL – Read-only (bh_agent_ro) PostgreSQL connection string
+#   PGSQL_RO_EVAL_DB_URL - Read-only (bh_agent_ro) PostgreSQL connection string
 #                          for the eval database.
-#   REDIS_URL           – Redis connection URL for the agent's cache.
+#   REDIS_URL            - Redis connection URL for the agent's cache.
 #
-# Required repository/environment variables (Full Eval environment):
-#   LANGSMITH_TRACING   – Set to "true" to enable LangSmith tracing.
-#   LANGCHAIN_PROJECT   – LangSmith project name for trace grouping.
+# NEON_API_KEY (branch reset) is repository level rather than environment scoped.
+# It is the only secret both the Testing and Production environments need, and a
+# second copy would have to be rotated in two places, which is how copies drift.
+#
+# LANGSMITH_TRACING and LANGCHAIN_PROJECT are not secret and differ per eval
+# workflow, so they are set in the job's env: block below rather than stored as
+# environment variables. That keeps Testing purely about secret access.
 
 name: Stress test
 
@@ -28,7 +31,7 @@ jobs:
   stress:
     name: Stress test (50 users)
     runs-on: ubuntu-latest
-    environment: Full Eval
+    environment: Testing
 
     steps:
       - uses: actions/checkout@v5
@@ -48,8 +51,11 @@ jobs:
 
       - name: Run stress test
         env:
-          LANGSMITH_TRACING: ${{ vars.LANGSMITH_TRACING }}
-          LANGCHAIN_PROJECT: ${{ vars.LANGCHAIN_PROJECT }}
+          # Not secret, and the value differs per eval workflow, so it is set
+          # here rather than as an environment variable. That keeps the Testing
+          # environment purely about which secrets a job may read.
+          LANGSMITH_TRACING: "false"
+          LANGCHAIN_PROJECT: github-evals-full
           LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}

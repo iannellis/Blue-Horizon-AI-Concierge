@@ -144,6 +144,7 @@ jobs:
           REDIS_URL: redis://localhost:6379
           PGSQL_RW_DB_URL: postgresql://user:pass@localhost/db
           PGSQL_RO_DB_URL: postgresql://user:pass@localhost/db
+          OPENAI_API_KEY: sk-test-not-a-real-key
         run: python -m pytest tests/ -m "not db_integration" -q
 
   db-integration-tests:

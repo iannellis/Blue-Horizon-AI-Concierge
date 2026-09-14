@@ -160,7 +160,7 @@ def _check_health() -> bool:
         return False
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=300, show_spinner=False)
 def _fetch_customers_uncached() -> list[dict[str, Any]]:
     """Fetch the guest list backing automated guest assignment.
 

@@ -502,7 +502,11 @@ class TestStreamMessage:
         assert "500" in result.text
 
     def test_timeout_returns_timeout_message(self) -> None:
-        """A TimeoutException returns the timeout user message."""
+        """A TimeoutException returns the timeout copy, with no retry instruction.
+
+        The copy renders above the "Send again" button, which is the retry
+        affordance, so the text itself must not tell the guest to try again.
+        """
         ctx = MagicMock()
         ctx.__enter__.side_effect = httpx2.TimeoutException("timed out")
         ctx.__exit__.return_value = False
@@ -512,7 +516,8 @@ class TestStreamMessage:
         ):
             result = _stream_message("thread-1", 7, "hi")
         assert result.ok is False
-        assert "timed out" in result.text.lower() or "timeout" in result.text.lower()
+        assert "too long" in result.text.lower()
+        assert "try again" not in result.text.lower()
 
     def test_connection_error_returns_api_unreachable_message(self) -> None:
         """Network errors return fixed copy, never the raw exception text."""

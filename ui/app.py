@@ -853,13 +853,13 @@ def _stream_message(thread_id: str, customer_id: int, text: str) -> ChatTurnResu
                     return result
     except httpx2.HTTPStatusError as exc:
         error_message = _http_error_message(exc)
+    # None of the failure copy below tells the guest to try again: it is
+    # rendered above the "Send again" button, which is that instruction.
     except httpx2.TimeoutException:
-        error_message = (
-            "The request timed out. The agent may be busy — please try again."
-        )
+        error_message = "The concierge took too long to reply."
     except Exception:
         logger.warning("Chat request failed unexpectedly.", exc_info=True)
-        error_message = "Could not reach the concierge. Please try again."
+        error_message = "Could not reach the concierge."
     else:
         return ChatTurnResult(
             ok=True, text="No response received.", proposal=pending_proposal,
@@ -885,12 +885,9 @@ def _http_error_message(exc: httpx2.HTTPStatusError) -> str:
         # side -- see api.app._not_ready_response. The fallback only fires
         # if that body could not be parsed at all.
         message = _response_field(exc.response, "message")
-        return message or (
-            "The system is still starting up. Please try again in a moment."
-        )
+        return message or "The concierge is still starting up."
     return (
-        f"The server returned an error ({exc.response.status_code}). "
-        "Please try again."
+        f"Something went wrong on our side (error {exc.response.status_code})."
     )
 
 
@@ -1062,6 +1059,8 @@ def _render_pending_resend() -> None:
         with st.chat_message("assistant"):
             _submit_chat_message(prompt)
         st.rerun()
+    if not online:
+        st.caption("Send again will be available once the service is back.")
 
 
 def _render_chat() -> None:

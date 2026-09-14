@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Literal, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 from langgraph.graph import MessagesState
 from pydantic import BaseModel, Field
 
+if TYPE_CHECKING:
+    from blue_horizon.config import MessagesConfig
+
 type RouteStep = Literal["info", "booking", "refuse", "error"]
-type TurnErrorCode = Literal["timeout", "internal"]
+type TurnErrorCode = Literal["timeout", "internal", "unavailable"]
 
 
 class RouteDecision(BaseModel):
@@ -38,7 +41,8 @@ class ConversationState(MessagesState, total=False):
         route: Router decision.
         turn_error: Why the current turn failed, or ``None`` if it has not.
             ``"timeout"`` when the router or a sub-agent exceeded its
-            wall-clock cap, ``"internal"`` for any other failure, including a
+            wall-clock cap, ``"unavailable"`` when the booking agent could not
+            reach its database, ``"internal"`` for any other failure, including a
             turn that produced no reply. The router resets it at the start of
             every turn, so a value from an earlier turn never leaks forward.
             A failed turn is reported to the client as an ``error`` event, not
@@ -61,3 +65,23 @@ def _route_from_state(state: ConversationState) -> RouteStep:
 
     """
     return cast("RouteStep", state.get("route") or "error")
+
+
+def turn_error_message(messages: MessagesConfig, turn_error: str) -> str:
+    """Return the guest-facing copy for a failed turn.
+
+    Shared by the streaming ``error`` event and the JSON branch's failure
+    body, so the two cannot drift apart.
+
+    Args:
+        messages: Configured orchestration message strings.
+        turn_error: The failed turn's code.
+
+    Returns:
+        ``messages.database_unavailable`` for ``"unavailable"``, otherwise
+        ``messages.error``.
+
+    """
+    if turn_error == "unavailable":
+        return messages.database_unavailable
+    return messages.error

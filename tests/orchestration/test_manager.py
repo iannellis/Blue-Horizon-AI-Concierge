@@ -69,6 +69,7 @@ def _make_manager(
     mock_resources = MagicMock()
     mock_resources.config.messages.unavailable = unavailable
     mock_resources.config.messages.error = "Could not complete."
+    mock_resources.config.messages.database_unavailable = "Database unreachable."
     # No proposal pending by default, so stage tests don't see a spurious
     # "proposal" event mixed into their stage/done assertions.
     booking_resources = mock_resources.booking_resources
@@ -636,6 +637,18 @@ class TestFailedTurn:
             "code": "timeout",
             "message": "Could not complete.",
         }
+
+    def test_unavailable_turn_uses_database_copy(self) -> None:
+        """A database outage carries its own copy, not the generic error."""
+        manager = _make_manager(agent=_mock_agent([], turn_error="unavailable"))
+        events = asyncio.run(_run_stream(manager))
+        assert events == [
+            {
+                "type": "error",
+                "code": "unavailable",
+                "message": "Database unreachable.",
+            },
+        ]
 
     def test_stream_invalidates_proposal_and_emits_none(self) -> None:
         """A proposal left by a failed turn is invalidated, never surfaced."""

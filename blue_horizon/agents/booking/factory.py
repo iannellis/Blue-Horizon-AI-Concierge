@@ -12,10 +12,12 @@ neither see nor set them.
 from __future__ import annotations
 
 import datetime as dt
+import json
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Required, TypedDict
 
 from langchain.agents import create_agent
+from langchain_core.messages import HumanMessage, ToolMessage
 
 # Kept out of the TYPE_CHECKING block despite TC002: `@tool` resolves its
 # schema at runtime via `get_type_hints()`, which needs `RunnableConfig` to
@@ -30,11 +32,17 @@ from blue_horizon.agents._llm import build_chat_model
 from blue_horizon.agents.booking import write_ops
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from langchain_core.messages import BaseMessage
     from langgraph.graph.state import CompiledStateGraph
     from psycopg_pool import AsyncConnectionPool
 
     from blue_horizon.agents.booking.resources import BookingSqlResources
     from blue_horizon.config import BookingSqlConfig
+
+# `@tool` names a tool after its function, so this matches `run_sql` below.
+_RUN_SQL_TOOL_NAME = "run_sql"
 
 
 class BookingRoomRequest(TypedDict):
@@ -334,6 +342,55 @@ def build_booking_agent(
         ],
         system_prompt=system_prompt,
     )
+
+
+def database_unavailable_this_turn(messages: Sequence[BaseMessage]) -> bool:
+    """Report whether this turn's `run_sql` found the database unreachable.
+
+    Scans back from the end of the history to the most recent
+    `HumanMessage`, so an outage in an earlier turn is not counted again. A
+    `run_sql` result reaches the history as a `ToolMessage` whose content is
+    the tool's return dict encoded as JSON. Its `error_kind` is what is
+    checked, never the model's prose.
+
+    Args:
+        messages: Message history returned by the booking agent.
+
+    Returns:
+        bool: True if any `run_sql` result since the last guest message
+        carries ``error_kind == "unavailable"``.
+
+    """
+    for message in reversed(messages):
+        if isinstance(message, HumanMessage):
+            return False
+        if (
+            isinstance(message, ToolMessage)
+            and message.name == _RUN_SQL_TOOL_NAME
+            and _error_kind(message.content) == "unavailable"
+        ):
+            return True
+    return False
+
+
+def _error_kind(content: object) -> object:
+    """Read `error_kind` from a `run_sql` tool message's JSON content.
+
+    Args:
+        content: The tool message content.
+
+    Returns:
+        object: The decoded `error_kind`, or None if the content is not a
+        JSON object carrying one.
+
+    """
+    if not isinstance(content, str):
+        return None
+    try:
+        payload = json.loads(content)
+    except ValueError:
+        return None
+    return payload.get("error_kind") if isinstance(payload, dict) else None
 
 
 async def _room_id_for_number(pool: Any, room_number: int) -> int:  # noqa: ANN401

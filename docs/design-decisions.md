@@ -422,6 +422,27 @@ says "Service: Running", which readiness can honestly claim, and an outage durin
 conversation surfaces through the failed turn itself. See
 [Orchestration](architecture/orchestration.md#failed-turns) for the mechanism.
 
+### The model's own account of a database outage reached the guest
+
+**Status:** adopted.
+
+Manual verification with the booking database blocked produced "The booking system is
+temporarily unavailable, so I couldn't check which Presidential Suites are available for
+February 21, 2025 (1 night). Please try again shortly." The `run_sql` retry and its
+`DATABASE_UNAVAILABLE` tool result worked as designed. The reply did not: the model added
+the retry request itself, and the turn completed normally, so the guest saw an ordinary
+answer with no Send again button.
+
+**The reply is discarded, not reworded.** A prompt rule forbidding retry language was
+rejected: it depends on the model complying on every run, and it would still leave an
+outage looking like an answer. Instead the booking dispatch node reads the `error_kind` of
+the turn's `run_sql` results and, on `unavailable`, records a `turn_error` of
+`unavailable`. The outage then takes the same failed-turn path as a timeout, with
+application-authored copy and a JSON `503`. The cost is that a turn which found
+something useful before the outage loses that answer, which is acceptable for a turn the
+guest has to resend anyway. See
+[Orchestration](architecture/orchestration.md#failed-turns) for the mechanism.
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

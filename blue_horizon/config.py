@@ -426,6 +426,9 @@ class MessagesConfig(FrozenModel):
         error: Response for a chat turn that failed mid-flight (router or
             sub-agent timeout/exception, an empty turn). The guest can send
             the message again; nothing here asserts that doing so will help.
+        database_unavailable: Replaces `error` for a booking turn that failed
+            because `run_sql` could not reach the database. Names the cause
+            and, like `error`, invites a resend without promising it helps.
         unavailable: Message shown while readiness is `STARTING`: the system
             is initializing and expected to recover on its own, so this
             carries no retry instruction.
@@ -438,6 +441,7 @@ class MessagesConfig(FrozenModel):
 
     refusal: str
     error: str
+    database_unavailable: str
     unavailable: str
     failed: str
 

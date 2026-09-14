@@ -9,11 +9,12 @@ and short timeouts. No model provider, Redis, or Postgres is involved.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import MemorySaver
 
 from blue_horizon.agents.orchestration.factory import (
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
     from langgraph.graph.state import CompiledStateGraph
 
+    from blue_horizon.agents.orchestration.models import RouteStep
     from blue_horizon.agents.orchestration.resources import OrchestrationResources
 
 _FACTORY_LOGGER = "blue_horizon.agents.orchestration.factory"
@@ -35,10 +37,11 @@ _HANG_S = 5.0
 
 
 class _FakeRouter:
-    """Router stub that routes to `info`, raises, or hangs past its timeout."""
+    """Router stub that routes to a fixed step, raises, or hangs past its timeout."""
 
     def __init__(self) -> None:
         """Start as a router that routes every message to `info`."""
+        self.step: RouteStep = "info"
         self.fail = False
         self.hang = False
 
@@ -49,7 +52,7 @@ class _FakeRouter:
             _messages: Ignored router input.
 
         Returns:
-            RouteDecision: Always the `info` step.
+            RouteDecision: The configured `step`.
 
         Raises:
             ConnectionError: When `fail` is set, standing in for an
@@ -61,7 +64,7 @@ class _FakeRouter:
         if self.fail:
             msg = "network unreachable"
             raise ConnectionError(msg)
-        return RouteDecision(step="info")
+        return RouteDecision(step=self.step)
 
 
 class _FakeSubAgent:
@@ -73,6 +76,7 @@ class _FakeSubAgent:
         self.fail = False
         self.fail_with_cause: OSError | None = None
         self.hang = False
+        self.tool_results: list[BaseMessage] = []
 
     async def ainvoke(self, _state: object, **_kwargs: object) -> dict[str, Any]:
         """Return a state patch, or misbehave as configured.
@@ -82,8 +86,8 @@ class _FakeSubAgent:
             **_kwargs: Ignored keyword arguments, such as `config`.
 
         Returns:
-            dict[str, Any]: A patch with the reply, or with no messages when
-            `reply` is `None`.
+            dict[str, Any]: A patch with any `tool_results` followed by the
+            reply, or with no messages when `reply` is `None`.
 
         Raises:
             RuntimeError: When `fail` is set, or raised from
@@ -100,7 +104,7 @@ class _FakeSubAgent:
             raise RuntimeError(msg)
         if self.reply is None:
             return {"messages": []}
-        return {"messages": [AIMessage(content=self.reply)]}
+        return {"messages": [*self.tool_results, AIMessage(content=self.reply)]}
 
 
 def _build_graph(router: _FakeRouter, sub_agent: _FakeSubAgent) -> CompiledStateGraph:
@@ -167,6 +171,22 @@ def _contents(state: dict[str, Any]) -> list[object]:
     """
     messages = cast("list[BaseMessage]", state["messages"])
     return [msg.content for msg in messages]
+
+
+def _run_sql_result(error_kind: str) -> ToolMessage:
+    """Build a failed `run_sql` tool result as the booking agent records it.
+
+    Args:
+        error_kind: The result's `error_kind`.
+
+    Returns:
+        ToolMessage: The tool result, its content encoded as JSON.
+
+    """
+    payload = {"status": "error", "error": "failed", "error_kind": error_kind}
+    return ToolMessage(
+        content=json.dumps(payload), name="run_sql", tool_call_id="call-1",
+    )
 
 
 class TestFailureLogging:
@@ -286,6 +306,36 @@ class TestFailedTurn:
         state = _run_turn(graph, "Hello")
         assert state["turn_error"] == "internal"
         assert _contents(state) == []
+
+    def test_booking_database_outage_records_unavailable(self) -> None:
+        """A booking reply written after a database outage is discarded."""
+        router = _FakeRouter()
+        router.step = "booking"
+        sub_agent = _FakeSubAgent()
+        sub_agent.tool_results = [_run_sql_result("unavailable")]
+        graph = _build_graph(router, sub_agent)
+        state = _run_turn(graph, "Any suites free?")
+        assert state["turn_error"] == "unavailable"
+        assert _contents(state) == []
+
+    def test_booking_sql_error_completes_normally(self) -> None:
+        """A query error the model recovered from is not an outage."""
+        router = _FakeRouter()
+        router.step = "booking"
+        sub_agent = _FakeSubAgent()
+        sub_agent.tool_results = [_run_sql_result("sql")]
+        graph = _build_graph(router, sub_agent)
+        state = _run_turn(graph, "Any suites free?")
+        assert state.get("turn_error") is None
+        assert _contents(state)[-1] == "Here you go."
+
+    def test_info_turn_is_not_checked_for_outages(self) -> None:
+        """Only the booking dispatch node discards a reply on an outage."""
+        sub_agent = _FakeSubAgent()
+        sub_agent.tool_results = [_run_sql_result("unavailable")]
+        graph = _build_graph(_FakeRouter(), sub_agent)
+        state = _run_turn(graph, "Any suites free?")
+        assert state.get("turn_error") is None
 
     def test_failure_keeps_earlier_completed_turns(self) -> None:
         """Only the failed turn is dropped; earlier history survives."""

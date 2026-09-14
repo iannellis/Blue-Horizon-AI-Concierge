@@ -17,6 +17,7 @@ from langchain_core.messages import (
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
+from blue_horizon.agents.booking import database_unavailable_this_turn
 from blue_horizon.agents.orchestration.models import (
     ConversationState,
     RouteStep,
@@ -65,6 +66,7 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
         agent_name: str,
         get_agent: Callable[[], CompiledStateGraph],
         timeout_s: float,
+        failure_check: Callable[[dict[str, Any]], TurnErrorCode | None] | None = None,
     ) -> Callable[..., Awaitable[dict[str, Any]]]:
         """Create a dispatch node for a sub-agent.
 
@@ -72,6 +74,9 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
             agent_name: Human-readable name for logging.
             get_agent: Callable returning the compiled sub-agent.
             timeout_s: Wall-clock timeout in seconds.
+            failure_check: Optional inspection of the sub-agent's completed
+                result, returning a ``turn_error`` code when its reply must be
+                discarded even though the sub-agent returned normally.
 
         Returns:
             Async node function suitable for LangGraph.
@@ -89,8 +94,9 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
                 config: LangGraph runnable config.
 
             Returns:
-                State patch from the sub-agent, or a ``turn_error`` on failure.
-                A failure writes no message: see `finalize_node` for why.
+                State patch from the sub-agent, or a ``turn_error`` on failure,
+                including one ``failure_check`` reports. A failure writes no
+                message: see `finalize_node` for why.
 
             """
             logger.info("Dispatching to %s agent", agent_name)
@@ -109,7 +115,12 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
             except Exception as exc:  # noqa: BLE001
                 _log_turn_failure(f"{agent_name} agent", exc)
                 return {"turn_error": "internal"}
-            return cast("dict[str, Any]", result)
+            patch = cast("dict[str, Any]", result)
+            if failure_check is not None:
+                turn_error = failure_check(patch)
+                if turn_error is not None:
+                    return {"turn_error": turn_error}
+            return patch
 
         _node.__name__ = _node.__qualname__ = f"{agent_name}_node"
         return _node
@@ -158,6 +169,7 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
         "booking",
         resources.get_booking_agent,
         cfg.orchestration.booking_timeout_s,
+        failure_check=_booking_turn_failure,
     )
 
     def refuse_node(state: ConversationState) -> dict[str, Any]:  # noqa: ARG001
@@ -270,6 +282,29 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
     graph.add_edge("finalize", END)
 
     return graph.compile(checkpointer=resources.checkpointer)
+
+
+def _booking_turn_failure(result: dict[str, Any]) -> TurnErrorCode | None:
+    """Fail a booking turn whose `run_sql` could not reach the database.
+
+    The booking agent returns normally after such an outage, with a reply the
+    model wrote itself. That reply would reach the guest as an ordinary
+    answer, free to invite a retry in its own words, and with no Send again
+    button. Discarding it routes the outage through the failed-turn path
+    instead, where both the copy and the resend belong to the application.
+
+    Args:
+        result: The booking agent's completed state.
+
+    Returns:
+        ``"unavailable"`` if a `run_sql` call this turn found the database
+        unreachable, otherwise ``None``.
+
+    """
+    if not database_unavailable_this_turn(result.get("messages", [])):
+        return None
+    logger.warning("booking agent could not reach the database; reply discarded")
+    return "unavailable"
 
 
 def _log_turn_failure(source: str, exc: BaseException) -> None:

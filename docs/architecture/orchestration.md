@@ -66,8 +66,9 @@ on the first failed attempt only, then one line per retry.
 ## Failed turns
 
 A turn fails when the router or a sub-agent exceeds its timeout above, raises, or the
-turn ends without a reply. Every failure site records a `turn_error` of `"timeout"` or
-`"internal"` in the graph state instead of writing a reply:
+turn ends without a reply, or when the booking agent could not reach its database. Every
+failure site records a `turn_error` of `"timeout"`, `"unavailable"`, or `"internal"` in
+the graph state instead of writing a reply:
 
 | Site | Records |
 |---|---|
@@ -75,13 +76,21 @@ turn ends without a reply. Every failure site records a `turn_error` of `"timeou
 | Router exception, or the router choosing the `error` step | `internal` |
 | Sub-agent timeout (`info_timeout_s`, `booking_timeout_s`) | `timeout` |
 | Sub-agent exception | `internal` |
+| Booking agent returned, but a `run_sql` result this turn carried `error_kind` `unavailable` | `unavailable` |
 | No final assistant message for the turn | `internal`, set by `finalize` |
 
 `finalize` then removes the failed turn from history entirely. The manager reads
 `turn_error` from `finalize`'s own output, emits an `error` event instead of `done`, and
 invalidates any proposal the turn created. The router clears `turn_error` at the start
 of every turn, so a failure still held in the checkpoint from an earlier turn is never
-reported again.
+reported again. The event's message is `[orchestration.messages].database_unavailable`
+for `unavailable` and `[orchestration.messages].error` for the other codes.
+
+The `unavailable` row discards a reply the booking agent did produce. After a database
+outage the model writes its own account of it, which would reach the guest as an
+ordinary answer, free to invite a retry in its own words, and without the Send again
+button. The booking dispatch node reads the `error_kind` of the turn's `run_sql` results,
+never the reply text, and only results since the turn's own guest message count.
 
 A router or sub-agent exception whose cause chain contains a network failure (a
 LangChain `ModelConnectionError` or `ModelTimeoutError`, or any `OSError` such as a

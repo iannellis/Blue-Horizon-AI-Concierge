@@ -98,6 +98,12 @@ written into conversation history, so the UI can offer its Send again button. A 
 is a genuinely safe next step here, so the string invites one, without claiming the
 retry will succeed.
 
+**`[orchestration.messages].database_unavailable`** replaces `.error` when a booking turn
+fails because `run_sql` could not reach the database. It is delivered the same way (a
+JSON `503` body carries it too), names the cause, and invites a resend without asking
+the guest to wait or retry on a schedule. See
+[Orchestration](../architecture/orchestration.md#failed-turns).
+
 **`[orchestration.messages].failed`** is shown while readiness is `FAILED`: the last
 startup attempt was classified permanent. Unlike `.unavailable` (shown for `STARTING`,
 carrying no retry instruction because recovery is expected on its own), this string must

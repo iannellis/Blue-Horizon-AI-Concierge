@@ -28,6 +28,7 @@ from blue_horizon.agents.exceptions import (
 )
 from blue_horizon.agents.orchestration.factory import build_orchestration_agent
 from blue_horizon.agents.orchestration.formatting import format_chat_response
+from blue_horizon.agents.orchestration.models import turn_error_message
 from blue_horizon.agents.orchestration.resources import OrchestrationResources
 
 if TYPE_CHECKING:
@@ -352,7 +353,8 @@ class OrchestrationManager:
         The proposal event has the form ``{"type": "proposal", "proposal_id":
         str, "action": str, "summary": dict}``. The done event has the form
         ``{"type": "done", "response": str}``. The error event has the form
-        ``{"type": "error", "code": "timeout" | "internal", "message": str}``.
+        ``{"type": "error", "code": str, "message": str}``, where ``code`` is
+        a ``TurnErrorCode``.
         A failed turn yields no proposal, and any proposal it created is
         invalidated, since the guest is told the request did not complete.
 
@@ -423,7 +425,9 @@ class OrchestrationManager:
             yield {
                 "type": "error",
                 "code": turn_error,
-                "message": self._resources.config.messages.error,
+                "message": turn_error_message(
+                    self._resources.config.messages, turn_error,
+                ),
             }
             return
 

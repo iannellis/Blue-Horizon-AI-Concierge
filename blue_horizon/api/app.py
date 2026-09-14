@@ -34,6 +34,7 @@ from blue_horizon.agents.orchestration import (
     OrchestrationManager,
     Readiness,
     format_chat_response,
+    turn_error_message,
 )
 from blue_horizon.config import load_app_config
 
@@ -140,12 +141,12 @@ def _error_message(exc: Exception) -> str:
 # Maps an exception type this module can specifically recognise to the
 # additive `code` on a mid-turn `error` SSE event raised by the pump itself.
 # Anything else falls back to "internal" in `_error_event`. A turn that
-# failed inside the graph (a router or sub-agent timeout or exception, or an
-# empty turn) never reaches this map: the orchestrator yields its own
-# `error` event carrying `"timeout"` or `"internal"`, which the pump forwards
-# unchanged. `"unavailable"` and `"failed"` are not reachable mid-stream at
-# all, since an unready agent is stopped by the readiness gate before
-# _event_stream ever starts.
+# failed inside the graph never reaches this map: the orchestrator yields its
+# own `error` event carrying the turn's `TurnErrorCode` (`"timeout"`,
+# `"internal"`, or `"unavailable"` when the booking agent could not reach its
+# database), which the pump forwards unchanged. A readiness `"failed"` is not
+# reachable mid-stream at all, since an unready agent is stopped by the
+# readiness gate before _event_stream ever starts.
 _MID_TURN_ERROR_CODE_BY_EXCEPTION: dict[type[Exception], str] = {
     ThreadCustomerMismatchError: "thread_mismatch",
 }
@@ -176,14 +177,15 @@ def _error_event(exc: Exception) -> dict[str, Any]:
 
 
 def _chat_retry_after_s() -> int:
-    """Return the `Retry-After` seconds for a `/v1/chat` 503 while not ready.
+    """Return the `Retry-After` seconds for a 503 from a chat or read endpoint.
 
     Returns:
         int: The configured
         `[orchestration.orchestration].unavailable_retry_after_s`, shared
         across the STARTING and FAILED readiness states -- the init loop
         keeps retrying in both, so there is no basis yet for a longer
-        interval in the FAILED case.
+        interval in the FAILED case -- and a chat turn whose booking
+        database was unreachable.
 
     """
     return int(
@@ -364,7 +366,8 @@ async def chat(payload: ChatPayload, request: Request) -> Response:
         for the streaming branch too (a `StreamingResponse` commits its 200
         as soon as it starts). On the JSON branch, a turn that failed inside
         the graph returns `_failed_turn_response` instead: 504 for a timeout,
-        502 otherwise.
+        503 with `Retry-After` for an unreachable booking database, 502
+        otherwise.
 
     Raises:
         HTTPException: 409 if `thread_id` is already bound to a different
@@ -463,22 +466,32 @@ def _failed_turn_response(turn_error: str) -> JSONResponse:
     a `200` carrying an apology the client cannot tell apart from a reply.
 
     Args:
-        turn_error: The orchestrator's failure code, `"timeout"` or
-            `"internal"`.
+        turn_error: The orchestrator's failure code, `"timeout"`,
+            `"unavailable"`, or `"internal"`.
 
     Returns:
-        JSONResponse: 504 for `"timeout"`, 502 otherwise, with a body of
-        ``{"code": str, "message": str}`` matching the SSE `error` event.
+        JSONResponse: 504 for `"timeout"`, 502 for `"internal"`, and 503 with
+        a `Retry-After` header for `"unavailable"`, a database outage the
+        guest can wait out. The body is ``{"code": str, "message": str}``
+        matching the SSE `error` event, plus ``retry_after_s`` on a 503.
 
     """
+    body: dict[str, Any] = {
+        "code": turn_error,
+        "message": turn_error_message(
+            load_app_config().orchestration.messages, turn_error,
+        ),
+    }
+    if turn_error == "unavailable":
+        retry_after_s = _chat_retry_after_s()
+        body["retry_after_s"] = retry_after_s
+        return JSONResponse(
+            body,
+            status_code=503,
+            headers={"Retry-After": str(retry_after_s)},
+        )
     status_code = 504 if turn_error == "timeout" else 502
-    return JSONResponse(
-        {
-            "code": turn_error,
-            "message": load_app_config().orchestration.messages.error,
-        },
-        status_code=status_code,
-    )
+    return JSONResponse(body, status_code=status_code)
 
 
 @router.post("/booking/confirm")

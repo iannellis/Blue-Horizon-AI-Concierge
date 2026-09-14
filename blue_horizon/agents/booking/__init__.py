@@ -10,7 +10,10 @@ from blue_horizon.agents.booking.config import (
     render_system_prompt,
 )
 from blue_horizon.agents.booking.db_utils import ENUM_TYPES, fetch_rooms_metadata
-from blue_horizon.agents.booking.factory import build_booking_agent
+from blue_horizon.agents.booking.factory import (
+    build_booking_agent,
+    database_unavailable_this_turn,
+)
 from blue_horizon.agents.booking.guardrails import validate_sql
 from blue_horizon.agents.booking.proposals import (
     Proposal,
@@ -32,6 +35,7 @@ __all__ = [
     "ProposalOwnershipError",
     "ProposalStore",
     "build_booking_agent",
+    "database_unavailable_this_turn",
     "fetch_rooms_metadata",
     "load_booking_config",
     "render_system_prompt",

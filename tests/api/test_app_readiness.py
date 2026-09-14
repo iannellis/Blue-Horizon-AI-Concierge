@@ -269,6 +269,29 @@ class TestChatFailedTurn:
         assert response.status_code == _HTTP_BAD_GATEWAY
         assert response.json()["code"] == "internal"
 
+    def test_json_branch_unavailable_returns_503_with_retry_after(
+        self, client: TestClient, mock_orchestrator: MagicMock,
+    ) -> None:
+        """A turn a database outage failed is a 503 the client can wait out."""
+        mock_orchestrator.is_ready = True
+        mock_orchestrator.ainvoke = AsyncMock(
+            return_value={"messages": [], "turn_error": "unavailable"},
+        )
+
+        response = client.post(
+            "/v1/chat",
+            json={"thread_id": "t1", "customer_id": 1, "text": "hi"},
+        )
+
+        assert response.status_code == _HTTP_SERVICE_UNAVAILABLE
+        assert response.headers["retry-after"]
+        body = response.json()
+        assert body["code"] == "unavailable"
+        assert body["message"] == (
+            app_module.load_app_config().orchestration.messages.database_unavailable
+        )
+        assert body["retry_after_s"] > 0
+
     def test_sse_branch_forwards_error_event_without_done(
         self, client: TestClient, mock_orchestrator: MagicMock,
     ) -> None:

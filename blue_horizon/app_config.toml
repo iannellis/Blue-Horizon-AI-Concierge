@@ -23,7 +23,7 @@ info_timeout_s = 60
 booking_timeout_s = 60
 # Maximum concurrent LLM pipeline executions
 llm_concurrency = 15
-# Retry-After seconds on a 503 while the orchestrator is not ready
+# Retry-After seconds on a 503 while not ready or the database is unreachable
 unavailable_retry_after_s = 5.0
 
 [orchestration.prompts]
@@ -37,6 +37,8 @@ orchestration_prompt_filename = "orchestration.txt"
 refusal = "I'm sorry, I cannot help with that query. I can only provide information about the hotel and help with room bookings."
 # Shown when a chat turn fails mid-flight
 error = "Sorry - that request could not be completed. You can send it again."
+# Shown when a booking turn fails because the database was unreachable
+database_unavailable = "Sorry - the booking system could not be reached, so that request could not be completed. You can send it again."
 # Shown while readiness is STARTING
 unavailable = "The system is starting up and should be ready again shortly. No action is needed on your part."
 # Shown while readiness is FAILED

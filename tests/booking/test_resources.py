@@ -21,6 +21,7 @@ message-pattern tests in `tests/booking/test_db_utils.py`).
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -61,6 +62,7 @@ _BOOKING_CONFIG_DICT: dict[str, Any] = {
     "proposals": {"ttl_s": 1800.0},
 }
 
+_RESOURCES_LOGGER = "blue_horizon.agents.booking.resources"
 _SELECT_QUERY = "SELECT room_number FROM rooms"
 
 
@@ -221,6 +223,26 @@ class TestExecuteSqlTransientRetry:
         assert result["error_kind"] == "unavailable"
         assert result["error"].startswith("DATABASE_UNAVAILABLE:")
         assert resources.pool.connection.call_count == max_retries + 1
+
+    def test_retries_exhausted_logs_one_line_without_traceback(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """An unreachable database logs one warning naming the error, no traceback."""
+        max_retries = _BOOKING_CONFIG_DICT["db"]["retry"]["max_transient_retries"]
+        outcomes: list[BaseException | None] = [
+            PoolTimeout("couldn't get a connection in time"),
+        ] * (max_retries + 1)
+        resources = _make_resources()
+        resources.pool = _fake_pool_with_outcomes(outcomes)
+
+        with caplog.at_level(logging.WARNING, logger=_RESOURCES_LOGGER):
+            asyncio.run(resources.execute_sql(_SELECT_QUERY))
+
+        [record] = [
+            r for r in caplog.records if "after retries" in r.getMessage()
+        ]
+        assert "couldn't get a connection in time" in record.getMessage()
+        assert record.exc_info is None
 
     def test_non_retryable_error_is_not_retried(self) -> None:
         """A plain SQL error isn't transient, so only one attempt is made."""

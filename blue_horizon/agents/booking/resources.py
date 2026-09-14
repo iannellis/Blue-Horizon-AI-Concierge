@@ -384,8 +384,10 @@ class BookingSqlResources:
                 with attempt:
                     return await self._execute_once(query)
 
-        except _conn_errors:
-            logger.warning("run_sql connection error after retries", exc_info=True)
+        except _conn_errors as exc:
+            # One line, no traceback: the stack under a pool checkout is
+            # psycopg_pool internals and says nothing the exception does not.
+            logger.warning("run_sql connection error after retries: %r", exc)
             error_message = _tool_error_message_for_model()
             error_kind = "unavailable"
 

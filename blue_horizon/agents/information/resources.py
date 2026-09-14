@@ -18,6 +18,7 @@ from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.vector_stores.redis import RedisVectorStore
 from redis.asyncio import Redis as AsyncRedis
 from redis.backoff import ExponentialBackoff
+from redis.exceptions import AuthenticationError as RedisAuthenticationError
 from redis.exceptions import BusyLoadingError
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
@@ -26,7 +27,7 @@ from redisvl.index import AsyncSearchIndex
 from redisvl.redis.connection import convert_index_info_to_schema
 
 from blue_horizon.agents._lifecycle import require
-from blue_horizon.agents.exceptions import OperationalError
+from blue_horizon.agents.exceptions import ConfigurationError, OperationalError
 from blue_horizon.agents.information.config import build_system_prompt
 from blue_horizon.agents.information.models import RetrievalItem, Source
 from blue_horizon.agents.information.retrieval import build_information_index_schemas
@@ -267,12 +268,21 @@ class InfoRagResources:
         """Validate Redis connectivity, retriever capability, and index schema.
 
         Raises:
+            ConfigurationError: If Redis rejects the credentials in
+                `REDIS_URL`. Kept out of `OperationalError` because a wrong
+                password does not fix itself by retrying, so the guest must
+                not be told the system is merely starting up.
             OperationalError: If Redis is unreachable, retrievers do not support
                 async retrieval, or the index schema does not match configuration.
 
         """
         try:
             await self.redis_async.ping()
+        except RedisAuthenticationError as exc:
+            # Checked before the generic branch: redis-py makes
+            # AuthenticationError a subclass of ConnectionError.
+            msg = "Redis rejected the credentials in REDIS_URL"
+            raise ConfigurationError(msg) from exc
         except Exception as exc:
             msg = "Redis ping failed"
             raise OperationalError(msg) from exc

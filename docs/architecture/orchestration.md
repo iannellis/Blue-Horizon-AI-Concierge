@@ -58,7 +58,10 @@ rather than a few waiting their turn.
 
 Initialization uses `tenacity` with exponential backoff between `init_retry_base_s` and
 `init_retry_max_s`, so a cold Redis or a suspended Neon compute delays startup instead
-of failing it.
+of failing it. A pending wait is not cut short when a dependency comes back, so
+`init_retry_max_s` (10 seconds) is also the worst-case delay between a dependency
+recovering and the API becoming ready. A dependency that stays down logs its traceback
+on the first failed attempt only, then one line per retry.
 
 ## Failed turns
 
@@ -114,7 +117,12 @@ init attempt raised:
   `except OperationalError` handlers do not swallow it) marks the failure permanent and
   sets `FAILED`. Raised only from genuinely unrecoverable sites: `startup_check`'s
   read-only-role guard (see [Booking agent](booking-agent.md#1-two-database-roles)),
-  a missing packaged prompt file, a missing or blank required database URL.
+  a missing packaged prompt file, a missing or blank required database URL, Redis
+  rejecting the credentials in `REDIS_URL`, and Postgres rejecting the password in
+  either database URL. The Postgres check opens one direct connection per URL before
+  the pools, because a pool retries a rejected password internally and a checkout
+  only ever reports `PoolTimeout`, which looks the same as an outage. libpq gives that
+  rejection no SQLSTATE, so it is matched by its message.
 - Everything else - `OperationalError`, or an exception type the classifier does not
   recognise - sets `STARTING`. Defaulting an unrecognised exception to `STARTING`
   rather than `FAILED` is deliberate: a misclassification then degrades to bad copy

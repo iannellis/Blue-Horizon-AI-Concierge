@@ -11,6 +11,7 @@ from __future__ import annotations
 
 # ruff: noqa: S101
 import asyncio
+import logging
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -495,6 +496,74 @@ class TestInitLoopReadinessClassification:
                 await manager.stop()
 
         asyncio.run(_run())
+
+
+class TestInitLoopLogging:
+    """A dependency that stays down logs its traceback once, not every retry."""
+
+    def test_repeated_failure_logs_traceback_only_once(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Identical consecutive failures carry `exc_info` on the first log only."""
+        monkeypatch.setattr(
+            "blue_horizon.agents.orchestration.manager.build_orchestration_agent",
+            MagicMock(),
+        )
+        failures = 3
+        manager = _make_uninitialized_manager(
+            startup_check_side_effect=[
+                OperationalError("db unreachable") for _ in range(failures)
+            ]
+            + [None],
+        )
+        caplog.set_level(
+            logging.WARNING, logger="blue_horizon.agents.orchestration.manager",
+        )
+
+        async def _run() -> None:
+            await manager.start()
+            try:
+                await _wait_until(lambda: manager.is_ready)
+            finally:
+                await manager.stop()
+
+        asyncio.run(_run())
+
+        records = [r for r in caplog.records if "Initialization failed" in r.message]
+        assert len(records) == failures
+        assert records[0].exc_info is not None
+        assert all(r.exc_info is None for r in records[1:])
+
+    def test_changed_failure_logs_traceback_again(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A different failure is logged in full even right after another."""
+        monkeypatch.setattr(
+            "blue_horizon.agents.orchestration.manager.build_orchestration_agent",
+            MagicMock(),
+        )
+        manager = _make_uninitialized_manager(
+            startup_check_side_effect=[
+                OperationalError("db unreachable"),
+                OperationalError("redis unreachable"),
+                None,
+            ],
+        )
+        caplog.set_level(
+            logging.WARNING, logger="blue_horizon.agents.orchestration.manager",
+        )
+
+        async def _run() -> None:
+            await manager.start()
+            try:
+                await _wait_until(lambda: manager.is_ready)
+            finally:
+                await manager.stop()
+
+        asyncio.run(_run())
+
+        records = [r for r in caplog.records if "Initialization failed" in r.message]
+        assert [r.exc_info is not None for r in records] == [True, True]
 
 
 class TestInitLoopSimulatedSlowStartup:

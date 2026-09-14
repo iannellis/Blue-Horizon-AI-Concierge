@@ -28,7 +28,11 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
-from blue_horizon.agents.booking.resources import BookingSqlResources
+from blue_horizon.agents.booking.resources import (
+    BookingSqlResources,
+    _check_credentials,
+)
+from blue_horizon.agents.exceptions import ConfigurationError
 from blue_horizon.config import BookingSqlConfig
 
 _BOOKING_CONFIG_DICT: dict[str, Any] = {
@@ -361,3 +365,60 @@ class TestConnectFailureSurfacesAsPoolTimeout:
 
         with pytest.raises(PoolTimeout):
             asyncio.run(_checkout_once())
+
+
+# ---------------------------------------------------------------------------
+# Startup credential check: a rejected password is permanent, not transient
+# ---------------------------------------------------------------------------
+
+
+class TestCheckCredentials:
+    """`_check_credentials` separates a rejected password from an outage.
+
+    Through the pool both look like `PoolTimeout`, so without this a wrong
+    password left the guest told the system was merely starting up.
+    """
+
+    def test_rejected_password_raises_configuration_error(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A password rejection reported by libpq becomes `ConfigurationError`."""
+        rejected = psycopg.OperationalError(
+            'connection to server failed: FATAL:  password authentication failed '
+            'for user "bh_agent_ro"',
+        )
+        monkeypatch.setattr(
+            psycopg.AsyncConnection, "connect", AsyncMock(side_effect=rejected),
+        )
+        with pytest.raises(ConfigurationError, match="PGSQL_RO_DB_URL"):
+            asyncio.run(
+                _check_credentials("postgresql://x", "PGSQL_RO_DB_URL", timeout_s=1.0),
+            )
+
+    def test_unreachable_database_propagates_unchanged(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Any other connect failure stays a `psycopg.OperationalError`."""
+        unreachable = psycopg.OperationalError("connection timeout expired")
+        monkeypatch.setattr(
+            psycopg.AsyncConnection, "connect", AsyncMock(side_effect=unreachable),
+        )
+        with pytest.raises(psycopg.OperationalError) as exc_info:
+            asyncio.run(
+                _check_credentials("postgresql://x", "PGSQL_RO_DB_URL", timeout_s=1.0),
+            )
+        assert exc_info.value is unreachable
+
+    def test_success_closes_the_connection(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A successful check leaves no connection open."""
+        conn = MagicMock()
+        conn.close = AsyncMock()
+        monkeypatch.setattr(
+            psycopg.AsyncConnection, "connect", AsyncMock(return_value=conn),
+        )
+        asyncio.run(
+            _check_credentials("postgresql://x", "PGSQL_RO_DB_URL", timeout_s=1.0),
+        )
+        conn.close.assert_awaited_once()

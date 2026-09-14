@@ -29,7 +29,7 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
         },
         "orchestration": {
             "init_retry_base_s": 2.0,
-            "init_retry_max_s": 60.0,
+            "init_retry_max_s": 10.0,
             "router_timeout_s": 30.0,
             "info_timeout_s": 60,
             "booking_timeout_s": 60,

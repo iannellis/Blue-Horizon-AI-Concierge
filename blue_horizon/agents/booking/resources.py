@@ -57,6 +57,10 @@ _READ_ONLY_PROBE_SQL = "UPDATE room_availability SET status = status WHERE id = 
 # matching prose that guest-facing or model-facing copy changes could move.
 SqlErrorKind = Literal["unavailable", "sql", "guardrail", "privilege", "unexpected"]
 
+# libpq reports a rejected password with no SQLSTATE at connection time, so
+# this message fragment is the only signal available.
+_AUTH_REJECTED_FRAGMENT = "password authentication failed"
+
 
 def _require_url(url: str, env_var: str) -> None:
     """Raise if a required database URL is missing or blank.
@@ -79,6 +83,39 @@ def _require_url(url: str, env_var: str) -> None:
     if not url or not url.strip():
         msg = f"{env_var} is missing or blank."
         raise ConfigurationError(msg)
+
+
+async def _check_credentials(url: str, env_var: str, *, timeout_s: float) -> None:
+    """Raise `ConfigurationError` if the database rejects a URL's password.
+
+    Opens one direct connection instead of going through the pool, because
+    the pool retries a rejected password internally and a checkout only ever
+    reports `PoolTimeout`, which is indistinguishable from an outage. Any
+    other failure propagates unchanged, for `startup_check` to treat as
+    transient.
+
+    Args:
+        url: The database URL to authenticate with.
+        env_var: Name of the environment variable it came from, for the
+            error message.
+        timeout_s: Connection timeout in seconds.
+
+    Raises:
+        ConfigurationError: If the server rejects the password.
+        psycopg.OperationalError: If the connection fails for any other
+            reason, such as the database being unreachable.
+
+    """
+    try:
+        conn = await psycopg.AsyncConnection.connect(
+            url, connect_timeout=max(1, int(timeout_s)),
+        )
+    except psycopg.OperationalError as exc:
+        if _AUTH_REJECTED_FRAGMENT in str(exc):
+            msg = f"{env_var} was rejected: password authentication failed."
+            raise ConfigurationError(msg) from exc
+        raise
+    await conn.close()
 
 
 def _sql_error_result(error: str, *, error_kind: SqlErrorKind) -> dict[str, Any]:
@@ -176,8 +213,9 @@ class BookingSqlResources:
         renders the final system prompt.
 
         Raises:
-            ConfigurationError: If either database URL is missing or blank,
-                or if the read-only pool's role is not actually read-only --
+            ConfigurationError: If either database URL is missing, blank, or
+                has its password rejected, or if the read-only pool's role is
+                not actually read-only --
                 treated as a fatal misconfiguration rather than a warning,
                 since a silently-writable "read-only" pool is exactly the
                 guarantee this design depends on. None of these resolve by
@@ -189,6 +227,13 @@ class BookingSqlResources:
         try:
             _require_url(self.pgsql_ro_db_url, "PGSQL_RO_DB_URL")
             _require_url(self.pgsql_rw_db_url, "PGSQL_RW_DB_URL")
+            timeout_s = self.config.db.pool.timeout_s
+            await _check_credentials(
+                self.pgsql_ro_db_url, "PGSQL_RO_DB_URL", timeout_s=timeout_s,
+            )
+            await _check_credentials(
+                self.pgsql_rw_db_url, "PGSQL_RW_DB_URL", timeout_s=timeout_s,
+            )
             await self._open_pools()
             await self._assert_read_pool_is_read_only()
             await self._render_system_prompt()

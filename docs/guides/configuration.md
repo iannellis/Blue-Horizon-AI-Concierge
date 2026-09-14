@@ -27,6 +27,11 @@ which otherwise fails every in-flight request at once rather than making a few w
 serverless compute suspends at roughly 300 seconds, so the pool does not hand out
 connections the server has already killed.
 
+**`[orchestration.orchestration].init_retry_max_s`** (default 10) caps the wait between
+startup attempts while a dependency such as Redis or Postgres is unreachable. A pending
+wait is not cut short when the dependency returns, so this is also the worst-case delay
+before the API becomes ready. An attempt is cheap, so a short cap costs little.
+
 **`[booking.db.pool].reconnect_timeout_s`** (default 30) bounds how long a pool retries a
 failed background connect before giving up. The retry delays double each time, and
 while one is pending a new request does not start a fresh attempt; it just waits out

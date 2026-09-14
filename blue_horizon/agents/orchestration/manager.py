@@ -471,6 +471,11 @@ class OrchestrationManager:
 
         """
         cfg = self._resources.config.orchestration
+        # Identity of the previous failure, so a dependency that stays down
+        # logs its traceback once rather than on every retry.
+        last_failure: (
+            tuple[type[BaseException], str, type[BaseException] | None] | None
+        ) = None
 
         async def _interruptible_sleep(wait: float) -> None:
             """Sleep for *wait* seconds or until the stop event fires.
@@ -500,28 +505,50 @@ class OrchestrationManager:
             externally-fixed dependency should still recover without an
             operator restart.
 
+            The traceback is logged only when the failure differs from the
+            previous one (by exception type, message, and cause type); a
+            repeat logs one line with the attempt number.
+
             Args:
                 retry_state: Tenacity retry call state carrying the last outcome.
 
             """
+            nonlocal last_failure
             self._resources.reset_runtime_state()
             self._agent = None
             exc = retry_state.outcome.exception() if retry_state.outcome else None
+            failure = None if exc is None else (
+                type(exc),
+                str(exc),
+                None if exc.__cause__ is None else type(exc.__cause__),
+            )
+            traceback = None if failure == last_failure else exc
+            last_failure = failure
+            attempt = retry_state.attempt_number
             if isinstance(exc, ConfigurationError):
                 self._readiness = Readiness.FAILED
                 logger.error(
-                    "Initialization failed (permanent): %s", repr(exc), exc_info=exc,
+                    "Initialization failed (permanent, attempt %d): %r",
+                    attempt,
+                    exc,
+                    exc_info=traceback,
                 )
             elif isinstance(exc, OperationalError):
                 self._readiness = Readiness.STARTING
                 logger.warning(
-                    "Initialization failed (operational): %s",
-                    repr(exc),
-                    exc_info=exc,
+                    "Initialization failed (operational, attempt %d): %r",
+                    attempt,
+                    exc,
+                    exc_info=traceback,
                 )
             else:
                 self._readiness = Readiness.STARTING
-                logger.error("Initialization failed (unclassified)", exc_info=exc)
+                logger.error(
+                    "Initialization failed (unclassified, attempt %d): %r",
+                    attempt,
+                    exc,
+                    exc_info=traceback,
+                )
 
         async for attempt in AsyncRetrying(
             retry=retry_if_exception_type(Exception),

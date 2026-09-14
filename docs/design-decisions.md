@@ -443,6 +443,24 @@ something useful before the outage loses that answer, which is acceptable for a 
 guest has to resend anyway. See
 [Orchestration](architecture/orchestration.md#failed-turns) for the mechanism.
 
+### A booking tool's database outage was reported as an internal failure
+
+**Status:** adopted.
+
+The entry above covered `run_sql`, which returns its outage as a result. The other
+booking tools raise instead: `list_my_bookings` raised `BookingUnavailableError`, and the
+`propose_*` tools, whose pricing queries were not wrapped at all, raised a raw
+`PoolTimeout`. `create_agent` does not catch tool exceptions, so each escaped the booking
+agent and was recorded as `internal`. The guest got generic copy, a JSON client got `502`
+instead of `503`, and the log got a full traceback, since `PoolTimeout` is a
+`psycopg.OperationalError` rather than one of the network errors the log shortens.
+
+**Every booking-database outage now takes one path.** The remaining queries are wrapped so
+they raise `BookingUnavailableError` like every other `write_ops` read, and a failed node
+whose cause chain holds that error records `unavailable` and logs one line. Catching the
+error inside each tool and returning an error result was rejected: it would hand the
+model an outage to narrate, which is the problem the entry above removed.
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

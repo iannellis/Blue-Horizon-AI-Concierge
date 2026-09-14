@@ -16,7 +16,9 @@ from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import MemorySaver
+from psycopg_pool import PoolTimeout
 
+from blue_horizon.agents.booking.write_ops import BookingUnavailableError
 from blue_horizon.agents.orchestration.factory import (
     _group_turns,
     build_orchestration_agent,
@@ -77,6 +79,7 @@ class _FakeSubAgent:
         self.fail_with_cause: OSError | None = None
         self.hang = False
         self.tool_results: list[BaseMessage] = []
+        self.raise_exc: Exception | None = None
 
     async def ainvoke(self, _state: object, **_kwargs: object) -> dict[str, Any]:
         """Return a state patch, or misbehave as configured.
@@ -92,10 +95,13 @@ class _FakeSubAgent:
         Raises:
             RuntimeError: When `fail` is set, or raised from
                 `fail_with_cause` when that is set.
+            Exception: `raise_exc`, raised as is, when that is set.
 
         """
         if self.hang:
             await asyncio.sleep(_HANG_S)
+        if self.raise_exc is not None:
+            raise self.raise_exc
         if self.fail_with_cause is not None:
             msg = "Connection error."
             raise RuntimeError(msg) from self.fail_with_cause
@@ -189,6 +195,20 @@ def _run_sql_result(error_kind: str) -> ToolMessage:
     )
 
 
+def _booking_unavailable() -> BookingUnavailableError:
+    """Build the error a booking tool raises when its pool cannot connect.
+
+    Returns:
+        BookingUnavailableError: Chained from a `PoolTimeout`, as `write_ops`
+        raises it.
+
+    """
+    msg = "Could not reach the database to complete this request."
+    error = BookingUnavailableError(msg)
+    error.__cause__ = PoolTimeout("couldn't get a connection after 10.00 sec")
+    return error
+
+
 class TestFailureLogging:
     """A network failure logs one line; any other failure keeps its traceback."""
 
@@ -222,6 +242,22 @@ class TestFailureLogging:
         assert len(records) == 1
         assert records[0].exc_info is None
         assert "getaddrinfo failed" in records[0].getMessage()
+
+    def test_booking_database_outage_logs_one_line(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A booking tool that could not reach the database logs one warning."""
+        sub_agent = _FakeSubAgent()
+        sub_agent.raise_exc = _booking_unavailable()
+        graph = _build_graph(_FakeRouter(), sub_agent)
+        with caplog.at_level(logging.WARNING, logger=_FACTORY_LOGGER):
+            _run_turn(graph, "Show my bookings.")
+        records = _failure_records(caplog)
+        assert len(records) == 1
+        assert records[0].levelno == logging.WARNING
+        assert records[0].exc_info is None
+        assert "couldn't get a connection" in records[0].getMessage()
 
     def test_other_failure_keeps_traceback(
         self,
@@ -328,6 +364,17 @@ class TestFailedTurn:
         state = _run_turn(graph, "Any suites free?")
         assert state.get("turn_error") is None
         assert _contents(state)[-1] == "Here you go."
+
+    def test_booking_tool_outage_records_unavailable(self) -> None:
+        """A booking tool raising `BookingUnavailableError` records `unavailable`."""
+        router = _FakeRouter()
+        router.step = "booking"
+        sub_agent = _FakeSubAgent()
+        sub_agent.raise_exc = _booking_unavailable()
+        graph = _build_graph(router, sub_agent)
+        state = _run_turn(graph, "Show my bookings.")
+        assert state["turn_error"] == "unavailable"
+        assert _contents(state) == []
 
     def test_info_turn_is_not_checked_for_outages(self) -> None:
         """Only the booking dispatch node discards a reply on an outage."""

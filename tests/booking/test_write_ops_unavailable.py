@@ -1,7 +1,7 @@
 """Tests for `write_ops`'s pool-acquisition failure handling.
 
 No real database connection is required: `pool.connection()` is mocked to
-raise directly, exercising `_reraise_operational_as_unavailable` without a
+raise directly, exercising `reraise_operational_as_unavailable` without a
 live Postgres. See `test_write_ops.py` for the `db_integration`-marked tests
 that exercise these same functions against a real database.
 """
@@ -52,7 +52,7 @@ def _pool_with_no_available_nights() -> MagicMock:
     Connects successfully, opens a transaction and cursor successfully, but
     `fetchall()` always returns no rows, so `_price_one_room` raises
     `write_ops.BookingWriteError` before any write is attempted. Used to
-    confirm `_reraise_operational_as_unavailable` leaves that exception
+    confirm `reraise_operational_as_unavailable` leaves that exception
     alone rather than converting it.
 
     Returns:
@@ -155,7 +155,7 @@ class TestPoolAcquisitionFailureIsUnavailable:
 
 
 class TestBookingWriteErrorNotSwallowed:
-    """`_reraise_operational_as_unavailable` leaves a real refusal alone."""
+    """`reraise_operational_as_unavailable` leaves a real refusal alone."""
 
     def test_commit_booking_write_error_propagates_unchanged(self) -> None:
         """An ordinary refusal (no nights available) is not reported as unavailable."""

@@ -99,7 +99,7 @@ is a genuinely safe next step here, so the string invites one, without claiming 
 retry will succeed.
 
 **`[orchestration.messages].database_unavailable`** replaces `.error` when a booking turn
-fails because `run_sql` could not reach the database. It is delivered the same way (a
+fails because a booking tool could not reach the database. It is delivered the same way (a
 JSON `503` body carries it too), names the cause, and invites a resend without asking
 the guest to wait or retry on a schedule. See
 [Orchestration](../architecture/orchestration.md#failed-turns).

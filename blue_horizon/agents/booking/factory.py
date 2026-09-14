@@ -405,13 +405,16 @@ async def _room_id_for_number(pool: Any, room_number: int) -> int:  # noqa: ANN4
 
     Raises:
         write_ops.BookingWriteError: If no room has that number.
+        write_ops.BookingUnavailableError: If the database could not be
+            reached.
 
     """
-    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-        await cur.execute(
-            "SELECT room_id FROM rooms WHERE room_number = %s", (room_number,),
-        )
-        row = await cur.fetchone()
+    with write_ops.reraise_operational_as_unavailable():
+        async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                "SELECT room_id FROM rooms WHERE room_number = %s", (room_number,),
+            )
+            row = await cur.fetchone()
     if row is None:
         msg = f"Room {room_number} does not exist."
         raise write_ops.BookingWriteError(msg)
@@ -538,6 +541,8 @@ async def _refund_preview(
     Raises:
         write_ops.BookingWriteError: If the instruction would leave a
             mid-stay hole.
+        write_ops.BookingUnavailableError: If the database could not be
+            reached.
 
     """
     trim = write_ops.resolve_trim(
@@ -546,16 +551,17 @@ async def _refund_preview(
     if trim is None:
         return row.total_amount
 
-    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-        await cur.execute(
-            """
-            SELECT COALESCE(SUM(price), 0) AS refund
-            FROM room_availability
-            WHERE room_id = %s AND date >= %s AND date < %s
-            """,
-            (row.room_id, trim.released_start, trim.released_end),
-        )
-        result = await cur.fetchone()
+    with write_ops.reraise_operational_as_unavailable():
+        async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT COALESCE(SUM(price), 0) AS refund
+                FROM room_availability
+                WHERE room_id = %s AND date >= %s AND date < %s
+                """,
+                (row.room_id, trim.released_start, trim.released_end),
+            )
+            result = await cur.fetchone()
     return result["refund"]
 
 

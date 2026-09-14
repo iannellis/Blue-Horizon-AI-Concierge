@@ -102,7 +102,7 @@ reachable codes are:
 |---|---|
 | `timeout` | The router or a sub-agent exceeded its wall-clock cap |
 | `internal` | Any other failure, including an unreachable model provider or a turn with no reply |
-| `unavailable` | The booking agent's `run_sql` could not reach the database; the model's reply is discarded |
+| `unavailable` | A booking tool (`run_sql`, `list_my_bookings`, or a `propose_*` tool) could not reach the database; any reply the model wrote is discarded |
 | `thread_mismatch` | The `thread_id` is bound to a different `customer_id` |
 
 `unavailable` here means the database, not readiness. A readiness `"failed"` is not

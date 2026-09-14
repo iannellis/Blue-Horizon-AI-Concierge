@@ -18,6 +18,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
 from blue_horizon.agents.booking import database_unavailable_this_turn
+from blue_horizon.agents.booking.write_ops import BookingUnavailableError
 from blue_horizon.agents.orchestration.models import (
     ConversationState,
     RouteStep,
@@ -113,8 +114,9 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
                 )
                 return {"turn_error": "timeout"}
             except Exception as exc:  # noqa: BLE001
-                _log_turn_failure(f"{agent_name} agent", exc)
-                return {"turn_error": "internal"}
+                return {
+                    "turn_error": _record_turn_failure(f"{agent_name} agent", exc),
+                }
             patch = cast("dict[str, Any]", result)
             if failure_check is not None:
                 turn_error = failure_check(patch)
@@ -153,8 +155,7 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
             )
             return {"route": "error", "turn_error": "timeout"}
         except Exception as exc:  # noqa: BLE001
-            _log_turn_failure("Router", exc)
-            return {"route": "error", "turn_error": "internal"}
+            return {"route": "error", "turn_error": _record_turn_failure("Router", exc)}
 
         step = cast("RouteStep", getattr(decision, "step", "error"))
         logger.info("Router decision: %s", step)
@@ -307,21 +308,36 @@ def _booking_turn_failure(result: dict[str, Any]) -> TurnErrorCode | None:
     return "unavailable"
 
 
-def _log_turn_failure(source: str, exc: BaseException) -> None:
-    """Log a node failure, without a traceback when the network is the cause.
+def _record_turn_failure(source: str, exc: BaseException) -> TurnErrorCode:
+    """Log a node failure and return the ``turn_error`` code it records.
 
-    An unreachable model provider or dependency raises through several layers
-    of client library, each chaining the last, so its traceback runs to well
-    over a hundred lines and says nothing the root cause does not. Such a
-    failure is logged as one warning line naming the root cause. Anything
-    else is a genuine defect and keeps its full traceback.
+    A booking tool that could not reach its database raises
+    `BookingUnavailableError`, which records ``"unavailable"``: the same code
+    a `run_sql` outage records, so every booking-database outage reaches the
+    guest the same way. An unreachable model provider or dependency raises
+    through several layers of client library, each chaining the last, so its
+    traceback runs to well over a hundred lines and says nothing the root
+    cause does not. Both are logged as one warning line naming the root
+    cause. Anything else is a genuine defect and keeps its full traceback.
 
     Args:
         source: What failed, such as ``"Router"`` or ``"info agent"``.
         exc: The exception the node caught.
 
+    Returns:
+        ``"unavailable"`` for a booking database outage, otherwise
+        ``"internal"``.
+
     """
     chain = _cause_chain(exc)
+    if any(isinstance(link, BookingUnavailableError) for link in chain):
+        logger.warning(
+            "%s failed: booking database unreachable: %r (root cause: %r)",
+            source,
+            exc,
+            chain[-1],
+        )
+        return "unavailable"
     if any(isinstance(link, _NETWORK_ERRORS) for link in chain):
         logger.warning(
             "%s failed: network unreachable: %r (root cause: %r)",
@@ -329,8 +345,9 @@ def _log_turn_failure(source: str, exc: BaseException) -> None:
             exc,
             chain[-1],
         )
-        return
+        return "internal"
     logger.error("%s failed", source, exc_info=exc)
+    return "internal"
 
 
 def _cause_chain(exc: BaseException) -> list[BaseException]:

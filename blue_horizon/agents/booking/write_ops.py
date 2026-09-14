@@ -334,10 +334,12 @@ async def price_rooms(
     Raises:
         BookingWriteError: If any requested night is not `Available` with a
             price set.
+        BookingUnavailableError: If the database could not be reached.
 
     """
-    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-        return [await _price_one_room(cur, room, lock=False) for room in rooms]
+    with reraise_operational_as_unavailable():
+        async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            return [await _price_one_room(cur, room, lock=False) for room in rooms]
 
 
 async def price_modification_room(
@@ -372,6 +374,7 @@ async def price_modification_room(
     Raises:
         BookingWriteError: If any replacement night is neither `Available`
             nor already held by this room-stay, or has no price set.
+        BookingUnavailableError: If the database could not be reached.
 
     """
     owned = _OwnedRange(
@@ -379,8 +382,9 @@ async def price_modification_room(
         check_in=existing_check_in,
         check_out=existing_check_out,
     )
-    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-        return await _price_one_room(cur, request, lock=False, owned=owned)
+    with reraise_operational_as_unavailable():
+        async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            return await _price_one_room(cur, request, lock=False, owned=owned)
 
 
 async def commit_booking(
@@ -409,10 +413,10 @@ async def commit_booking(
             availability). No partial writes are made either way.
         BookingUnavailableError: If the database could not be reached at
             all. No statement was necessarily sent, so a retry is a clean
-            first attempt (see `_reraise_operational_as_unavailable`).
+            first attempt (see `reraise_operational_as_unavailable`).
 
     """
-    with _reraise_operational_as_unavailable():
+    with reraise_operational_as_unavailable():
         async with pool.connection() as conn:
             async with conn.transaction(), conn.cursor(row_factory=dict_row) as cur:
                 priced = [
@@ -483,10 +487,10 @@ async def cancel_booking(
             are made.
         BookingUnavailableError: If the database could not be reached at
             all. No statement was necessarily sent, so a retry is a clean
-            first attempt (see `_reraise_operational_as_unavailable`).
+            first attempt (see `reraise_operational_as_unavailable`).
 
     """
-    with _reraise_operational_as_unavailable():
+    with reraise_operational_as_unavailable():
         async with pool.connection() as conn, conn.transaction(), conn.cursor(
             row_factory=dict_row,
         ) as cur:
@@ -559,10 +563,10 @@ async def modify_booking(
             way.
         BookingUnavailableError: If the database could not be reached at
             all. No statement was necessarily sent, so a retry is a clean
-            first attempt (see `_reraise_operational_as_unavailable`).
+            first attempt (see `reraise_operational_as_unavailable`).
 
     """
-    with _reraise_operational_as_unavailable():
+    with reraise_operational_as_unavailable():
         async with pool.connection() as conn, conn.transaction(), conn.cursor(
             row_factory=dict_row,
         ) as cur:
@@ -659,7 +663,7 @@ async def list_bookings(
             the API can answer 503 instead of an uncaught 500.
 
     """
-    with _reraise_operational_as_unavailable():
+    with reraise_operational_as_unavailable():
         async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
                 """
@@ -761,7 +765,7 @@ async def find_booking_for_rooms(
     if not rooms:
         return None
 
-    with _reraise_operational_as_unavailable():
+    with reraise_operational_as_unavailable():
         async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             booking_ids: set[int] = set()
             matched: list[PricedRoomStay] = []
@@ -839,7 +843,7 @@ async def list_customers(
             the API can answer 503 instead of an uncaught 500.
 
     """
-    with _reraise_operational_as_unavailable():
+    with reraise_operational_as_unavailable():
         async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
                 "SELECT customer_id, first_name, last_name "
@@ -1004,11 +1008,13 @@ async def _price_one_room(
 
 
 @contextmanager
-def _reraise_operational_as_unavailable() -> Iterator[None]:
+def reraise_operational_as_unavailable() -> Iterator[None]:
     """Translate a pool/driver-level failure into `BookingUnavailableError`.
 
     Wraps the pool-acquisition boundary of every write function
-    (`commit_booking`, `cancel_booking`, `modify_booking`). Before this, a
+    (`commit_booking`, `cancel_booking`, `modify_booking`), of the reads and
+    pricing previews behind the API and the booking tools, and of the
+    booking factory's own queries. Before this, a
     Neon compute suspend/resume, an exhausted pool, or a connection that
     died mid-transaction escaped uncaught all the way to the API layer as a
     500. `BookingWriteError` is deliberately not among the caught types: it

@@ -267,10 +267,12 @@ class BookingDbConfig(FrozenModel):
     """Combined database configuration for the booking agent.
 
     Note:
-        Statement timeout and search_path are set at the database role level
-        (``ALTER ROLE ... SET ...``) rather than in code, so they apply
-        consistently under connection pooling without any per-connection
-        ``SET`` commands.
+        ``statement_timeout`` is set at the database role level
+        (``ALTER ROLE ... SET ...``) rather than in code, so it applies
+        consistently under connection pooling, where a per-connection ``SET``
+        would not reliably survive. ``search_path`` is not: it is left at the
+        PostgreSQL default of ``"$user", public``, and the paths that depend
+        on it set it on their own connections.
 
     Attributes:
         pool: Client-side pool settings.

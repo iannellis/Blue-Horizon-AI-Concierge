@@ -268,11 +268,13 @@ class BookingSqlResources:
     async def execute_sql(self, query: str) -> dict[str, Any]:
         """Execute a single read-only SQL statement and return rows.
 
-        Each attempt borrows a connection from the read-only pool
-        (``search_path`` and ``statement_timeout`` are expected to be set at
-        the database role level rather than in code) and executes *query*
-        directly. All SQL through this path is a read, so it is always safe
-        to retry on a transient connection error.
+        Each attempt borrows a connection from the read-only pool and executes
+        *query* directly. ``statement_timeout`` is set at the database role
+        level rather than in code, so it bounds this model-authored SQL
+        without a per-connection ``SET``; ``search_path`` relies on the
+        PostgreSQL default of ``"$user", public``. All SQL through this path
+        is a read, so it is always safe to retry on a transient connection
+        error.
 
         Args:
             query: One SQL statement (no semicolons). Must be SELECT.
@@ -432,10 +434,16 @@ class BookingSqlResources:
     async def _open_pools(self) -> None:
         """Open the read-only and read-write async connection pools.
 
-        ``search_path`` and ``statement_timeout`` are expected to be set at
-        the database role level (``ALTER ROLE … SET …``) so they apply
-        consistently under PgBouncer transaction pooling without any
-        per-connection ``SET`` commands.
+        ``statement_timeout`` is set at the database role level
+        (``ALTER ROLE … SET …``) so it applies consistently under PgBouncer
+        transaction pooling, where a per-connection ``SET`` would not
+        reliably survive. ``regrant_booking_agent_role.sql`` sets it on
+        Parent, and a branch reset carries it to child branches. It takes
+        effect only on newly established connections, so an already open
+        pool keeps the old value until its connections are recycled.
+        ``search_path`` is left at the PostgreSQL default of
+        ``"$user", public``, which resolves to ``public``; the paths that need
+        certainty set it explicitly on their own connections.
 
         A health-check (``SELECT 1``) is run each time a connection is
         checked out from either pool so stale connections are discarded

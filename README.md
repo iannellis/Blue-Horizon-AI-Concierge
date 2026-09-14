@@ -126,6 +126,11 @@ Full documentation is at
 Requires Python 3.13, Redis, and a PostgreSQL database with the `bh_agent_rw` and
 `bh_agent_ro` roles created.
 
+Before running anything below, set the environment variables described in
+[Configuration](https://iannellis.github.io/Blue-Horizon-AI-Concierge/guides/configuration/)
+in a `.env` file at the project root. The load scripts, the API, and the UI all read it,
+and each fails without it.
+
 ```bash
 uv sync --group ui
 
@@ -138,9 +143,10 @@ fastapi run blue_horizon/api/app.py --port 8000
 streamlit run ui/app.py
 ```
 
-See
+On Windows, add `--reload` to the `fastapi run` command, or every database connection
+fails with a `ProactorEventLoop` error. See
 [Running Locally](https://iannellis.github.io/Blue-Horizon-AI-Concierge/guides/running-locally/)
-for the environment variables and the role grant step.
+for why, plus the role grant step.
 
 ## License
 

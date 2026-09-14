@@ -53,13 +53,18 @@ carrying no retry instruction because recovery is expected on its own), this str
 not offer a retry affordance the guest cannot act on - the process itself keeps
 retrying regardless, but nothing the guest does changes that.
 
-**`statement_timeout` and `search_path` are not in this file.** They are set at the
-database role level, so that they apply correctly under PgBouncer transaction pooling:
+**`statement_timeout` is not in this file.** It is set at the database role level, with
+`ALTER ROLE`, so that it applies under PgBouncer transaction pooling, where a
+per-connection `SET` would not reliably survive. It bounds every statement the booking
+agent issues, including the model-authored SQL that `run_sql` runs as `bh_agent_ro`. It is
+applied by `blue_horizon/load_data/regrant_booking_agent_role.sql`, which the data loader
+runs on Parent, and a branch reset carries it to every child branch along with the
+grants. See [Running Locally](running-locally.md#2-create-the-database-roles).
 
-```sql
-ALTER ROLE <role> SET statement_timeout = '10s';
-ALTER ROLE <role> SET search_path = public;
-```
+**`search_path` is not set at the role level.** The agent roles use the PostgreSQL
+default of `"$user", public`, which resolves to `public` because no schema is named after
+either role. Code paths that depend on it, such as `db_utils` and the loader, issue
+`SET search_path TO public` on their own connections.
 
 ## Environment variables
 
@@ -78,9 +83,10 @@ covers both processes when running locally.
 
 !!! warning "The roles are not created automatically"
     `bh_agent_rw` and `bh_agent_ro` must already exist in the database with passwords
-    set before these URLs will work. See
-    [Running Locally](running-locally.md#3-grant-the-database-roles) for the one-time
-    grant step.
+    set before these URLs will work, and on Neon they must exist on **every branch**
+    these URLs point at, since a role belongs to a branch rather than to the project.
+    See [Running Locally](running-locally.md#2-create-the-database-roles) for the
+    creation step and the per-branch trap.
 
     Pointing both URLs at the same role silently defeats the read-only guarantee, which
     is why `startup_check` refuses to start if a trial write through the read-only URL

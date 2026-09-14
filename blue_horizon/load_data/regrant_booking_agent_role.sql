@@ -26,6 +26,13 @@
 --          `write_ops.cancel_booking`)
 --        - USAGE on the `customers`, `bookings`, `booking_rooms` identity
 --          sequences and on the `booking_status` enum
+-- 5. Sets a role-level `statement_timeout` of 10s on both roles. A role
+--    default rather than a per-connection SET, so it survives PgBouncer
+--    transaction pooling. It bounds every statement either role issues,
+--    including the model-authored SQL `run_sql` executes as `bh_agent_ro`.
+--    Like the grants, it lives in the branch's catalog, so a branch reset
+--    carries it from Parent down to every child branch. It takes effect on
+--    newly established connections only.
 --
 -- Usage:
 -- - `blue_horizon/load_data/booking_pgsql.py`'s `reload_sql_tables()` now runs
@@ -119,4 +126,8 @@ BEGIN
         'GRANT USAGE ON SEQUENCE public.booking_rooms_booking_room_id_seq TO %I',
         rw_role
     );
+
+    -- --- Role-level session defaults (see header item 5) ------------------
+    EXECUTE format('ALTER ROLE %I SET statement_timeout = %L', ro_role, '10s');
+    EXECUTE format('ALTER ROLE %I SET statement_timeout = %L', rw_role, '10s');
 END $$;

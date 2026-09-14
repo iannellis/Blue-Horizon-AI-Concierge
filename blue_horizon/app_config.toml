@@ -152,10 +152,13 @@ max_rows = 50
 # Restrict queries to known hotel tables. Good safety belt.
 allow_only_hotel_tables = true
 
-# NOTE: statement_timeout and search_path are set at the database role level:
-#   ALTER ROLE <role> SET statement_timeout = '10s';
-#   ALTER ROLE <role> SET search_path = public;
-# This ensures they apply correctly under PgBouncer transaction pooling.
+# NOTE: statement_timeout (10s) is set at the database role level by
+# blue_horizon/load_data/regrant_booking_agent_role.sql, which the loader runs
+# on Parent; a branch reset carries it to child branches along with the grants.
+# This ensures it applies under PgBouncer transaction pooling, where a
+# per-connection SET would not reliably survive. search_path is NOT set this
+# way: the roles use the PostgreSQL default of "$user", public, which already
+# resolves to public, and the code paths that care set it per connection.
 
 [booking.db.retry]
 # Retries for transient connection errors like connection closed unexpectedly.

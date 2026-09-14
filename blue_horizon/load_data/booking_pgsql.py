@@ -883,6 +883,11 @@ def regrant_booking_agent_role(conn: psycopg.Connection) -> None:
     header for the full per-role rationale); this just executes it so the
     grants can never drift out of sync with a reload again.
 
+    The same script also sets both roles' `statement_timeout` default. A
+    rebuild does not drop that, but keeping it here means Parent always
+    carries it, and a branch reset copies it to every child branch along
+    with the grants.
+
     Args:
         conn: Active database connection, authenticated as a role with
             GRANT/REVOKE privileges on the affected tables (i.e. the same

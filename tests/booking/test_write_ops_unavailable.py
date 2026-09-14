@@ -179,6 +179,31 @@ class TestBookingWriteErrorNotSwallowed:
 
 
 # ---------------------------------------------------------------------------
+# The reservations-panel reads share the same handling
+# ---------------------------------------------------------------------------
+
+
+class TestListReadsPoolAcquisitionFailure:
+    """`list_bookings` and `list_customers` report a dead pool as unavailable.
+
+    Without this, a network outage reached `/v1/bookings` and
+    `/v1/customers` as an uncaught `PoolTimeout` and a 500.
+    """
+
+    def test_list_bookings_raises_unavailable(self) -> None:
+        """A checkout timeout in `list_bookings` becomes `BookingUnavailableError`."""
+        pool = _pool_that_fails_to_connect(PoolTimeout("couldn't get a connection"))
+        with pytest.raises(write_ops.BookingUnavailableError):
+            asyncio.run(write_ops.list_bookings(pool, customer_id=1))
+
+    def test_list_customers_raises_unavailable(self) -> None:
+        """A checkout timeout in `list_customers` becomes `BookingUnavailableError`."""
+        pool = _pool_that_fails_to_connect(PoolTimeout("couldn't get a connection"))
+        with pytest.raises(write_ops.BookingUnavailableError):
+            asyncio.run(write_ops.list_customers(pool, seeded_customer_count=15))
+
+
+# ---------------------------------------------------------------------------
 # find_booking_for_rooms shares the same pool-acquisition failure handling
 # ---------------------------------------------------------------------------
 

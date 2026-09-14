@@ -178,6 +178,52 @@ class TestDataEndpointsNotReady:
         assert response.json()["detail"] == "Still starting up."
 
 
+class TestDataEndpointsDatabaseUnreachable:
+    """`/v1/customers` and `/v1/bookings` return 503 when the database is unreachable.
+
+    The pool exists (startup finished) but a connection cannot be obtained,
+    as during a network outage. Previously an uncaught 500.
+    """
+
+    _UNREACHABLE = "Could not reach the database to complete this request."
+
+    def test_list_customers_returns_503(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """An unreachable database is reported as 503 with `Retry-After`."""
+        monkeypatch.setattr(
+            app_module.write_ops,
+            "list_customers",
+            AsyncMock(side_effect=app_module.write_ops.BookingUnavailableError(
+                self._UNREACHABLE,
+            )),
+        )
+
+        response = client.get("/v1/customers")
+
+        assert response.status_code == _HTTP_SERVICE_UNAVAILABLE
+        assert response.headers["retry-after"]
+        assert response.json()["detail"] == self._UNREACHABLE
+
+    def test_list_bookings_returns_503(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """An unreachable database is reported as 503 with `Retry-After`."""
+        monkeypatch.setattr(
+            app_module.write_ops,
+            "list_bookings",
+            AsyncMock(side_effect=app_module.write_ops.BookingUnavailableError(
+                self._UNREACHABLE,
+            )),
+        )
+
+        response = client.get("/v1/bookings", params={"customer_id": 1})
+
+        assert response.status_code == _HTTP_SERVICE_UNAVAILABLE
+        assert response.headers["retry-after"]
+        assert response.json()["detail"] == self._UNREACHABLE
+
+
 # ---------------------------------------------------------------------------
 # /v1/chat failed turns
 # ---------------------------------------------------------------------------

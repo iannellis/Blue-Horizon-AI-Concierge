@@ -215,6 +215,11 @@ class DbPoolConfig(FrozenModel):
             discarded.  Set below the hosting provider's compute-suspend
             threshold (e.g. ``240`` for Neon's 300-second window) so stale
             connections are removed before the server drops them.
+        reconnect_timeout_s: Seconds the pool keeps retrying a failed
+            background connect, with doubling delays, before giving up. The
+            next checkout then starts a fresh attempt immediately. Kept short
+            so that after an outage the pool is never sitting out a long
+            backoff delay once the database is reachable again.
 
     """
 
@@ -222,6 +227,7 @@ class DbPoolConfig(FrozenModel):
     max_size: int
     timeout_s: float
     max_idle_s: float
+    reconnect_timeout_s: float
 
 
 class DbGuardrailsConfig(FrozenModel):

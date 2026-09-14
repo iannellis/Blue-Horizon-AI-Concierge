@@ -27,6 +27,15 @@ which otherwise fails every in-flight request at once rather than making a few w
 serverless compute suspends at roughly 300 seconds, so the pool does not hand out
 connections the server has already killed.
 
+**`[booking.db.pool].reconnect_timeout_s`** (default 30) bounds how long a pool retries a
+failed background connect before giving up. The retry delays double each time, and
+while one is pending a new request does not start a fresh attempt; it just waits out
+`timeout_s` and fails. With psycopg_pool's own default of 300 seconds, a pool could
+still be sitting out a delay of a minute or more after the database became reachable
+again. Once the pool gives up, the next request starts a fresh attempt immediately.
+This does not change how long a single request waits for a connection; that is
+`timeout_s`.
+
 **`[booking.db.pool].min_size`** is 0, so no connections are held proactively. This
 means the first query after an idle stretch pays a cold-start cost, which is why UI data
 fetches use a 20-second timeout rather than the health check's 3 seconds.

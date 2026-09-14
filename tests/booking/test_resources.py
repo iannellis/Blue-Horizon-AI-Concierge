@@ -44,7 +44,13 @@ _BOOKING_CONFIG_DICT: dict[str, Any] = {
         "system_prompt_filename": "rooms_sql_prompt.txt",
     },
     "db": {
-        "pool": {"min_size": 0, "max_size": 10, "timeout_s": 5.0, "max_idle_s": 240.0},
+        "pool": {
+            "min_size": 0,
+            "max_size": 10,
+            "timeout_s": 5.0,
+            "max_idle_s": 240.0,
+            "reconnect_timeout_s": 30.0,
+        },
         "guardrails": {"max_rows": 50, "allow_only_hotel_tables": True},
         "retry": {"max_transient_retries": 2, "transient_retry_backoff_s": 0.001},
     },

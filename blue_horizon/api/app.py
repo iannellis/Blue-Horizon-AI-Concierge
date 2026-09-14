@@ -249,8 +249,9 @@ async def list_customers() -> list[dict[str, Any]]:
         guest.
 
     Raises:
-        HTTPException: 503 if the booking database is not yet initialized
-            (the startup window), with a `Retry-After` header.
+        HTTPException: 503 with a `Retry-After` header if the booking
+            database is not yet initialized (the startup window) or could
+            not be reached.
 
     """
     resources = orchestrator.get_booking_resources()
@@ -265,9 +266,12 @@ async def list_customers() -> list[dict[str, Any]]:
     seeded_customer_count = (
         load_app_config().load_data.booking_pgsql.seeded_customer_count
     )
-    customers = await write_ops.list_customers(
-        write_pool, seeded_customer_count=seeded_customer_count,
-    )
+    try:
+        customers = await write_ops.list_customers(
+            write_pool, seeded_customer_count=seeded_customer_count,
+        )
+    except write_ops.BookingUnavailableError as exc:
+        raise _database_unreachable(exc) from exc
     return [
         {
             "customer_id": c.customer_id,
@@ -289,8 +293,9 @@ async def list_bookings(customer_id: int) -> dict[str, Any]:
         dict[str, Any]: `{"bookings": [...]}`, most recent first.
 
     Raises:
-        HTTPException: 503 if the booking database is not yet initialized
-            (the startup window), with a `Retry-After` header.
+        HTTPException: 503 with a `Retry-After` header if the booking
+            database is not yet initialized (the startup window) or could
+            not be reached.
 
     Note:
         Unauthenticated: any seeded `customer_id` (currently 1-15, see
@@ -308,8 +313,33 @@ async def list_bookings(customer_id: int) -> dict[str, Any]:
             detail=orchestrator.get_readiness_message(),
             headers={"Retry-After": str(_chat_retry_after_s())},
         ) from exc
-    bookings = await write_ops.list_bookings(write_pool, customer_id=customer_id)
+    try:
+        bookings = await write_ops.list_bookings(write_pool, customer_id=customer_id)
+    except write_ops.BookingUnavailableError as exc:
+        raise _database_unreachable(exc) from exc
     return {"bookings": [write_ops.serialize_booking(b) for b in bookings]}
+
+
+def _database_unreachable(exc: write_ops.BookingUnavailableError) -> HTTPException:
+    """Build the 503 for a read endpoint whose database could not be reached.
+
+    Distinct from the startup-window 503 above only in its `detail`: the
+    pool exists, but a connection could not be obtained (a network outage,
+    or a Neon compute resuming). A read is idempotent, so the client may
+    simply ask again after `Retry-After`.
+
+    Args:
+        exc: The unavailability error raised by `write_ops`.
+
+    Returns:
+        HTTPException: 503 carrying the error's app-authored message.
+
+    """
+    return HTTPException(
+        status_code=503,
+        detail=str(exc),
+        headers={"Retry-After": str(_chat_retry_after_s())},
+    )
 
 
 @router.post("/chat")

@@ -108,6 +108,7 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
                 "max_size": 10,
                 "timeout_s": 10.0,
                 "max_idle_s": 240.0,
+                "reconnect_timeout_s": 30.0,
             },
             "guardrails": {
                 "max_rows": EXPECTED_MAX_ROWS,

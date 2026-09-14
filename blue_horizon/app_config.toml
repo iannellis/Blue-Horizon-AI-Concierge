@@ -147,6 +147,12 @@ timeout_s = 10.0
 # compute after ~300 s of inactivity; 240 s keeps us safely under that
 # threshold so stale connections are dropped before the server kills them.
 max_idle_s = 240.0
+# How long a failed background connect keeps retrying (delays double: 1, 2,
+# 4, 8, 16 s) before the pool gives up and lets the next checkout start
+# afresh. psycopg_pool's own default is 300 s, which after an outage can
+# leave the pool waiting out a delay of a minute or more while the database
+# is already reachable again.
+reconnect_timeout_s = 30.0
 
 [booking.db.guardrails]
 # Prevent huge responses from drowning your LLM.

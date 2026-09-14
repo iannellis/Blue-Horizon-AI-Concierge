@@ -6,8 +6,8 @@ The FastAPI backend runs on port `8000` and exposes the following endpoints unde
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/v1/health` | Returns `{"status": "ok"}` (200) when ready, `{"status": "starting"}` or `{"status": "failed"}` (503) otherwise |
-| `GET` | `/v1/customers` | Lists the seeded guests as `{customer_id, first_name, last_name}`, for guest assignment. 503 during the startup window |
-| `GET` | `/v1/bookings?customer_id=` | Lists one guest's reservations (confirmation number, rooms, dates, total, status). 503 during the startup window |
+| `GET` | `/v1/customers` | Lists the seeded guests as `{customer_id, first_name, last_name}`, for guest assignment. 503 during the startup window or while the database is unreachable |
+| `GET` | `/v1/bookings?customer_id=` | Lists one guest's reservations (confirmation number, rooms, dates, total, status). 503 during the startup window or while the database is unreachable |
 | `POST` | `/v1/chat` | Send a message. Content-negotiated: `Accept: text/event-stream` streams SSE events, anything else returns one JSON response. 503 while not ready |
 | `POST` | `/v1/booking/confirm` | Commit a pending proposal. The only path that ever writes a booking, cancellation, or modification |
 | `POST` | `/v1/booking/dismiss` | Discard a pending proposal without writing anything |
@@ -54,7 +54,9 @@ classification.
 
 `GET /v1/customers` and `GET /v1/bookings` return the same shape (503 with
 `Retry-After`, `detail` in place of `message`) during the same startup window, since
-both read from the booking database pool.
+both read from the booking database pool. They also return it after startup whenever a
+database connection cannot be obtained, for example during a network outage or a Neon
+compute resume, with `detail` saying the database could not be reached.
 
 ## Streaming events
 
@@ -159,7 +161,7 @@ identically is what this API is deliberately designed to avoid:
 | Response | Retryable? | Why |
 |---|---|---|
 | `/v1/chat` `503` | Yes, after `retry_after_s` | Nothing ran; the init loop keeps retrying regardless of `status` |
-| `/v1/customers`, `/v1/bookings` `503` | Yes, after `retry_after_s` | Same startup window as above |
+| `/v1/customers`, `/v1/bookings` `503` | Yes, after `Retry-After` | The startup window, or an unreachable database. Both are idempotent reads |
 | Mid-stream `error` event, or JSON `502`/`504` | Yes for `timeout` and `internal`; no for `thread_mismatch` | The failed turn is dropped from history and its proposal invalidated, so resending the same text is safe. The system never resends on its own: the guest decides |
 | Confirm `503` | Yes - the proposal is still pending | Nothing was decided; see the table above |
 | Confirm `409` | No | The proposal is retired; a client should let the guest start a new request, not retry the same one |

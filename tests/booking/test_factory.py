@@ -61,7 +61,13 @@ _BOOKING_CONFIG_DICT: dict[str, Any] = {
     },
     "agent": {"top_k": 4},
     "db": {
-        "pool": {"min_size": 0, "max_size": 10, "timeout_s": 10.0, "max_idle_s": 240.0},
+        "pool": {
+            "min_size": 0,
+            "max_size": 10,
+            "timeout_s": 10.0,
+            "max_idle_s": 240.0,
+            "reconnect_timeout_s": 30.0,
+        },
         "guardrails": {"max_rows": 50, "allow_only_hotel_tables": True},
         "retry": {"max_transient_retries": 1, "transient_retry_backoff_s": 0.15},
     },

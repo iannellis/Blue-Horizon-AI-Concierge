@@ -654,32 +654,37 @@ async def list_bookings(
         room-stays. Bookings with no remaining `booking_rooms` rows (fully
         cancelled) are still included, with an empty `rooms` tuple.
 
-    """
-    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-        await cur.execute(
-            """
-            SELECT booking_id, status, confirmation_number, booked_at, cancelled_at
-            FROM bookings
-            WHERE customer_id = %s
-            ORDER BY booked_at DESC
-            """,
-            (customer_id,),
-        )
-        booking_rows = cast("list[dict[str, Any]]", await cur.fetchall())
+    Raises:
+        BookingUnavailableError: If the database could not be reached, so
+            the API can answer 503 instead of an uncaught 500.
 
-        await cur.execute(
-            """
-            SELECT br.booking_id, br.booking_room_id, br.room_id, r.room_number,
-                   br.check_in, br.check_out, br.total_amount
-            FROM booking_rooms br
-            JOIN rooms r ON r.room_id = br.room_id
-            JOIN bookings b ON b.booking_id = br.booking_id
-            WHERE b.customer_id = %s
-            ORDER BY br.check_in
-            """,
-            (customer_id,),
-        )
-        room_rows = cast("list[dict[str, Any]]", await cur.fetchall())
+    """
+    with _reraise_operational_as_unavailable():
+        async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT booking_id, status, confirmation_number, booked_at, cancelled_at
+                FROM bookings
+                WHERE customer_id = %s
+                ORDER BY booked_at DESC
+                """,
+                (customer_id,),
+            )
+            booking_rows = cast("list[dict[str, Any]]", await cur.fetchall())
+
+            await cur.execute(
+                """
+                SELECT br.booking_id, br.booking_room_id, br.room_id, r.room_number,
+                       br.check_in, br.check_out, br.total_amount
+                FROM booking_rooms br
+                JOIN rooms r ON r.room_id = br.room_id
+                JOIN bookings b ON b.booking_id = br.booking_id
+                WHERE b.customer_id = %s
+                ORDER BY br.check_in
+                """,
+                (customer_id,),
+            )
+            room_rows = cast("list[dict[str, Any]]", await cur.fetchall())
 
     rooms_by_booking: dict[int, list[RoomStaySummary]] = {}
     for row in room_rows:
@@ -829,14 +834,19 @@ async def list_customers(
         list[CustomerSummary]: The seeded guests available for assignment,
             ordered by id.
 
+    Raises:
+        BookingUnavailableError: If the database could not be reached, so
+            the API can answer 503 instead of an uncaught 500.
+
     """
-    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-        await cur.execute(
-            "SELECT customer_id, first_name, last_name "
-            "FROM customers ORDER BY customer_id LIMIT %s",
-            (seeded_customer_count,),
-        )
-        rows = cast("list[dict[str, Any]]", await cur.fetchall())
+    with _reraise_operational_as_unavailable():
+        async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                "SELECT customer_id, first_name, last_name "
+                "FROM customers ORDER BY customer_id LIMIT %s",
+                (seeded_customer_count,),
+            )
+            rows = cast("list[dict[str, Any]]", await cur.fetchall())
     return [CustomerSummary(**row) for row in rows]
 
 

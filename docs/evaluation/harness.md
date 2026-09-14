@@ -99,6 +99,33 @@ in `main()`, before the first `load_app_config()` call. That ordering matters: C
 ever sets the `_EVAL` names, so a `load_app_config()` that runs before the override has
 nothing to validate against and fails with a pydantic `ValidationError`.
 
+## Configuration
+
+`eval_config_23.toml` and `eval_config_206.toml` differ only in the `[experiment]`
+dataset and naming keys. Most keys are self-explanatory caps on what is stored or passed
+to the judge. The ones with non-obvious consequences:
+
+**`[neon].http_timeout_s`** (default 30) is the timeout for each request to the Neon
+management API. It is well above httpx's 5 second default because a restore request on
+an archived branch takes longer to be acknowledged. The same key appears in
+`stress_config.toml`.
+
+**`[judge].info_cards_max`** (default 4) tells the judge the most amenity or service
+cards the information agent presents, so it does not penalise the agent for leaving out
+further valid options. It must match `[info.retrieval].top_k` in `app_config.toml`.
+
+**`[ragas].custom_precision_prompt`** (default true) swaps Ragas' stock
+context-precision prompt for the partial-coverage variant in `_rag_prompts.py`. See
+[Datasets](datasets.md#the-custom-context-precision-prompt).
+
+**`[ragas].no_match_reference`** is the reference text that marks a turn whose expected
+answer is "nothing matched". Context precision is skipped for turns whose reference is
+only this sentinel, because a bare refusal has no content for a retrieved chunk to
+support, so the judge's verdicts there measure nothing. Set it to `""` to score those
+turns anyway. See
+[the known issue](datasets.md#known-issue-sentinel-bundled-compound-references) for
+references that mix the sentinel with a real answer.
+
 ## Running evaluations
 
 ### Smoke eval (23 cases)

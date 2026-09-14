@@ -1,16 +1,10 @@
-# Unified configuration for the Blue Horizon agents.
-# Secrets (redis/pgsql) are still injected via environment variables; this file only holds tunables.
-
-# Orchestration configuration for blue_horizon/agents/orchestration.py
-# Notes
-# - Secrets (API keys, Redis/DB URLs) are read from environment variables.
-# - Timeouts are in seconds unless otherwise noted.
+# Tunables for the Blue Horizon agents. Secrets come from environment variables.
+# Timeouts are in seconds. See docs/guides/configuration.md.
 
 [orchestration.llm]
 # Model identifier passed to ChatOpenAI
 model = "gpt-5.6-luna"
-# Reasoning effort hint for reasoning models (passed as reasoning={"effort": ...})
-# Typical values: "minimal", "low", "medium", "high"
+# Reasoning effort: "none", "minimal", "low", "medium", or "high"
 reasoning_effort = "none"
 # Per-request network timeout for the LLM client
 timeout_s = 15.0
@@ -27,12 +21,9 @@ router_timeout_s = 30.0
 info_timeout_s = 60
 # Wall-clock cap for the booking node (wraps the booking LLM call)
 booking_timeout_s = 60
-# Maximum concurrent LLM pipeline executions. Prevents token-per-minute
-# exhaustion under high concurrency (e.g. stress tests, production traffic spikes).
+# Maximum concurrent LLM pipeline executions
 llm_concurrency = 15
-# Retry-After seconds on a /v1/chat 503 while not ready (STARTING or FAILED).
-# Short by design: the init loop keeps retrying in both states, so a client
-# polling at this interval sees a transient outage recover on its own.
+# Retry-After seconds on a 503 while the orchestrator is not ready
 unavailable_retry_after_s = 5.0
 
 [orchestration.prompts]
@@ -42,94 +33,80 @@ folder = "system_prompts"
 orchestration_prompt_filename = "orchestration.txt"
 
 [orchestration.messages]
-# User-facing message when the router explicitly chooses "refuse"
+# Shown when the router chooses "refuse"
 refusal = "I'm sorry, I cannot help with that query. I can only provide information about the hotel and help with room bookings."
-# Shown when a chat turn failed mid-flight (router or sub-agent timeout or
-# exception, an empty turn). Delivered as the message of an `error` event (or
-# a 502/504 JSON body), never written into conversation history, so the UI
-# can offer its Send again button. A resend is a genuinely safe next step
-# here, so this invites one; it does not claim the retry will succeed.
+# Shown when a chat turn fails mid-flight
 error = "Sorry - that request could not be completed. You can send it again."
-# Shown while readiness is STARTING: initialization is in progress and
-# expected to recover on its own, so this carries no retry instruction.
+# Shown while readiness is STARTING
 unavailable = "The system is starting up and should be ready again shortly. No action is needed on your part."
-# Shown while readiness is FAILED: the last startup attempt was classified
-# permanent. The init loop keeps retrying regardless, but this string must
-# not offer a retry affordance the guest cannot act on.
+# Shown while readiness is FAILED
 failed = "Sorry - the system hit a problem that will not resolve on its own. Please check back later."
 
-# Single source of truth for all tunables used by the hotel RAG agent.
-# Keep this section under version control, and override secrets via env vars (e.g. REDIS_URL).
 [info.retrieval]
-# Number of candidates to retrieve per source tool call (faq/amenities/services)
-# and used as services/amenities card limit by the agent.
+# Candidates retrieved per source, and the most cards the agent presents
 top_k = 4
-# Safety ceiling on total retrieved items passed to the LLM (all sources combined).
-# Prevents runaway context growth from queries that parse into many sub-queries.
+# Cap on retrieved items passed to the LLM across all sources
 max_context_items = 20
-# Embedding dimensionality used by your Redis vector field schema.
-# Must match the index schema in Redis (validated at startup via FT.INFO).
+# Embedding dimensionality; must match the Redis index schema
 vector_dims = 1536
-# Max number of cached retrievers (amenities/services) per process.
-# This prevents filter-combo explosions from eating RAM.
+# Maximum cached amenity/service retrievers per process
 retriever_cache_max = 64
 
 [info.embeddings]
-# OpenAI embedding model used by LlamaIndex Settings.embed_model.
+# OpenAI embedding model used by LlamaIndex
 model = "text-embedding-3-small"
-# Batch size for embedding calls (tradeoff: throughput vs memory/latency).
+# Batch size for embedding calls
 batch_size = 64
-# Network timeout for embedding requests (seconds). Keep bounded.
+# Network timeout for embedding requests
 timeout_s = 20.0
-# Max retries for embedding requests (small, to avoid request pileups under load).
+# Max retries for embedding requests
 max_retries = 2
 
 [info.llm]
-# Chat model used by LangChain ChatOpenAI.
+# Chat model used by ChatOpenAI
 model = "gpt-5.6-luna"
-# Reasoning effort. Medium works well for information agent.
+# Reasoning effort
 reasoning_effort = "medium"
-# Network timeout for chat requests (seconds).
+# Network timeout for chat requests
 timeout_s = 20.0
-# Max retries for chat requests.
+# Max retries for chat requests
 max_retries = 2
 
 [info.redis]
-# Redis connection timeout (seconds).
+# Redis connection timeout
 connect_timeout_s = 2.0
-# Redis socket timeout (seconds). Bounds slow ops.
+# Redis socket timeout
 socket_timeout_s = 4.0
-# Redis client health check interval (seconds).
+# Redis client health check interval
 health_check_interval_s = 30
-# Retry count for transient Redis failures.
+# Retry count for transient Redis failures
 retry_max_retries = 2
-# Base backoff (seconds) for Redis retries.
+# Base backoff for Redis retries
 retry_backoff_base_s = 0.1
-# Maximum backoff (seconds) for Redis retries.
+# Maximum backoff for Redis retries
 retry_backoff_max_s = 1.0
 
 [info.prompts]
 # Folder (relative to blue_horizon package root) containing prompt files
 folder = "system_prompts"
-# File name ONLY (no path). The code assumes all prompts live in one folder.
+# Prompt filenames within the prompts folder (no paths)
 system_prompt_filename = "information.txt"
 parser_prompt_filename = "information_parser.txt"
 
-# Non-secret configuration for the Booking Agent.
 [booking.llm]
-# Chat model name.
+# Chat model name
 model = "gpt-5.6-luna"
-# OpenAI reasoning effort hint (if supported by your model).
+# Reasoning effort
 reasoning_effort = "medium"
-# Network timeout for LLM requests (seconds).
+# Network timeout for LLM requests
 timeout_s = 20.0
-# Max retries for LLM requests.
+# Max retries for LLM requests
 max_retries = 2
 
 [booking.prompts]
 # Folder (relative to blue_horizon package root) containing prompt files
 folder = "system_prompts"
-# Prompt template filename inside the folder.
+# Prompt filename within the prompts folder
 system_prompt_filename = "booking.txt"
 
 [booking.agent]
@@ -137,61 +114,38 @@ system_prompt_filename = "booking.txt"
 top_k = 4
 
 [booking.db.pool]
-# App-side pool. Even with Neon pooler this provides sane backpressure.
-# min_size=0: don't proactively hold connections; open on demand only.
+# Connections opened on demand only (min) and the pool ceiling (max)
 min_size = 0
 max_size = 10
-# Seconds to wait when acquiring a pooled connection before failing.
+# Seconds to wait when acquiring a pooled connection before failing
 timeout_s = 10.0
-# Close idle connections after this many seconds. Neon serverless suspends
-# compute after ~300 s of inactivity; 240 s keeps us safely under that
-# threshold so stale connections are dropped before the server kills them.
+# Close idle connections before Neon suspends compute
 max_idle_s = 240.0
-# Seconds a failed background connect keeps retrying before the pool gives up.
+# Seconds a failed background connect keeps retrying before the pool gives up
 reconnect_timeout_s = 30.0
 
 [booking.db.guardrails]
-# Prevent huge responses from drowning your LLM.
+# Maximum rows returned by one run_sql call
 max_rows = 50
-# Restrict queries to known hotel tables. Good safety belt.
+# Restrict queries to known hotel tables
 allow_only_hotel_tables = true
 
-# NOTE: statement_timeout (10s) is set at the database role level by
-# blue_horizon/load_data/regrant_booking_agent_role.sql, which the loader runs
-# on Parent; a branch reset carries it to child branches along with the grants.
-# This ensures it applies under PgBouncer transaction pooling, where a
-# per-connection SET would not reliably survive. search_path is NOT set this
-# way: the roles use the PostgreSQL default of "$user", public, which already
-# resolves to public, and the code paths that care set it per connection.
-
 [booking.db.retry]
-# Retries for transient connection errors like connection closed unexpectedly.
-# The run_sql pool is now read-only, so every retry here is safe: there is no
-# write path left on this connection to duplicate.
+# Retries for transient connection errors on the read-only run_sql pool
 max_transient_retries = 3
-# Small backoff (seconds) before retry.
+# Backoff before each retry
 transient_retry_backoff_s = 0.15
 
 [booking.proposals]
-# Seconds an unconfirmed booking/cancel/modify proposal stays in the
-# in-process store before it is purged. A proposal reserves no inventory, so
-# this only bounds the store's size -- long enough to survive a coffee break,
-# short enough to stay bounded.
+# Seconds an unconfirmed proposal stays in the store before it is purged
 ttl_s = 1800
 
-# Local data ingestion settings for one-off loaders.
 [load_data.information_redis]
-# Folder containing the Redis ingestion pickle files.
-# Specified from the same level as the blue_horizon package.
+# Folder with the Redis ingestion pickles, relative to the repo root
 data_path = "data/pandas"
 
 [load_data.booking_pgsql]
-# Folder containing the PostgreSQL ingestion pickle files.
-# Specified from the same level as the blue_horizon package.
+# Folder with the PostgreSQL ingestion pickles, relative to the repo root
 data_path = "data/pandas"
-# Number of source customers -- the ones with the richest pre-existing
-# booking history -- remapped to a dense customer_id range [1, N] and loaded
-# first. The UI's automated identity picker and the eval/stress harnesses'
-# simulated-guest selection both assume this exact range, so this is the single
-# source of truth for that count.
+# Customers remapped to the dense customer_id range [1, N] and loaded first
 seeded_customer_count = 15

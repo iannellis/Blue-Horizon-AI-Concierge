@@ -49,8 +49,7 @@ lock_retry_delay_s = 5.0
 operation_poll_interval_s = 2.0
 # Maximum seconds to wait for a restore operation to finish before giving up.
 operation_poll_timeout_s = 120.0
-# Timeout in seconds for each HTTP request to the Neon management API. An
-# archived branch takes longer than the default timeout to wake up.
+# Timeout in seconds for each HTTP request to the Neon management API.
 http_timeout_s = 30.0
 
 [orchestration]
@@ -60,8 +59,7 @@ ready_timeout_s = 90.0
 [judge]
 # Judge model name used for rubric grading (Gemini model unless code edited).
 model = "gemini-3.5-flash-lite"
-# Maximum cards the information agent presents per response (matches info.retrieval.top_k).
-# The judge uses this to avoid penalising the agent for omitting additional valid options.
+# Maximum cards the information agent presents per response.
 info_cards_max = 4
 
 [ragas]
@@ -83,13 +81,8 @@ llm_model = "gemini-3.5-flash-lite"
 llm_max_tokens = 2048
 # Gemini model used for Ragas embeddings.
 embedding_model = "gemini-embedding-2"
-# Replace the stock Ragas context-precision prompt with the hotel-tuned variant
-# that counts a chunk as useful when it answers any one clause of a multi-part
-# question (see eval/evaluators/_rag_prompts.py).
+# Use the partial-coverage context-precision prompt instead of Ragas' stock one.
 custom_precision_prompt = true
-# Reference text marking a turn whose expected answer is "nothing matched".
-# Context precision is skipped for turns whose reference is only this sentinel:
-# a bare refusal has no content for a retrieved chunk to support, so the judge's
-# verdicts there measure nothing. Set to "" to score those turns anyway.
+# Reference text marking a "nothing matched" turn; "" disables the skip.
 no_match_reference = "I could not find exactly what you requested"
 

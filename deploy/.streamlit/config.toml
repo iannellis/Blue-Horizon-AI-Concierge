@@ -1,7 +1,6 @@
 [server]
 headless = true
 port = 8501
-# Disable CORS and XSRF checks so Streamlit works correctly behind the nginx
-# reverse proxy without origin-mismatch errors.
+# Disable CORS and XSRF checks behind the HuggingFace Space proxy.
 enableCORS = false
 enableXsrfProtection = false

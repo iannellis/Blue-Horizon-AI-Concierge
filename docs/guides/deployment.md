@@ -19,6 +19,10 @@ docker run -p 7860:7860 \
 The UI is served on port `7860`. The FastAPI backend runs internally on
 `127.0.0.1:8000` and is not exposed outside the container.
 
+`deploy/.streamlit/config.toml` disables Streamlit's CORS and XSRF checks. The Space
+serves the app through HuggingFace's own proxy, whose origin does not match the one
+Streamlit sees, and with the checks on, requests fail with origin-mismatch errors.
+
 Optional Google OAuth can be enabled by setting `GOOGLE_CLIENT_ID`,
 `GOOGLE_CLIENT_SECRET`, and `COOKIE_SECRET` as HuggingFace Space secrets.
 `deploy/generate_secrets.py` writes the project-level `.streamlit/secrets.toml` that

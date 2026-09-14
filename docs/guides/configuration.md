@@ -23,6 +23,11 @@ Neon branch management (project ID, branch name, reset tuning) lives entirely in
 pipeline executions. It prevents tokens-per-minute exhaustion under high concurrency,
 which otherwise fails every in-flight request at once rather than making a few wait.
 
+**`[booking.db.pool].max_size`** (default 10) is kept even though Neon's own pooler sits
+in front of the database, because the app-side pool is what applies backpressure: a
+request beyond the ceiling waits up to `timeout_s` for a connection instead of opening
+another one.
+
 **`[booking.db.pool].max_idle_s`** (default 240) closes idle connections before Neon's
 serverless compute suspends at roughly 300 seconds, so the pool does not hand out
 connections the server has already killed.
@@ -45,9 +50,34 @@ This does not change how long a single request waits for a connection; that is
 means the first query after an idle stretch pays a cold-start cost, which is why UI data
 fetches use a 20-second timeout rather than the health check's 3 seconds.
 
+**`[booking.db.retry].max_transient_retries`** (default 3) retries `run_sql` after a
+transient connection error such as a connection closed unexpectedly. Every retry is safe
+because that pool connects as the read-only `bh_agent_ro` role, so there is no write on
+it that a retry could duplicate.
+
 **`[booking.proposals].ttl_s`** (default 1800) bounds the proposal store's size only. A
 proposal reserves no inventory, so expiry costs a guest nothing beyond having to ask
-again.
+again. Thirty minutes is long enough for a guest to step away before confirming.
+
+**`[info.retrieval].top_k`** (default 4) is both the number of candidates retrieved per
+source and the most amenity or service cards the information agent presents. The eval
+judge's `[judge].info_cards_max` must match it; see
+[Evaluation](../evaluation/harness.md#configuration).
+
+**`[info.retrieval].vector_dims`** (default 1536) must match the dimensionality of the
+vector field in the Redis index schema, which is fixed by the embedding model. Startup
+reads each index's schema from Redis and refuses to become ready on a mismatch.
+
+**`[info.retrieval].retriever_cache_max`** (default 64) bounds the per-process cache of
+amenity and service retrievers. One retriever is built per distinct filter combination,
+so without a bound the cache would grow with every new combination guests ask for.
+
+**Prompt filenames** under each `[*.prompts]` section are bare names, never paths. Every
+prompt lives in the one folder named by that section's `folder`, relative to the
+`blue_horizon` package root.
+
+**`[load_data.*].data_path`** is relative to the repository root, the directory that
+contains the `blue_horizon` package.
 
 **`[load_data.booking_pgsql].seeded_customer_count`** (default 15) sets how many source
 customers get the dense low `customer_id` block that the UI's guest assignment and the
@@ -60,6 +90,13 @@ eval and stress harnesses assume. It is the single source of truth that both
 states. Kept short by design: the init loop keeps retrying in both states, so a client
 polling at this interval sees a transient outage recover on its own. See
 [Orchestration](../architecture/orchestration.md#readiness).
+
+**`[orchestration.messages].error`** is shown when a chat turn fails mid-flight: a
+router or sub-agent timeout or exception, or a turn that produced nothing. It is
+delivered as the message of an `error` event (or a 502 or 504 JSON body) and is never
+written into conversation history, so the UI can offer its Send again button. A resend
+is a genuinely safe next step here, so the string invites one, without claiming the
+retry will succeed.
 
 **`[orchestration.messages].failed`** is shown while readiness is `FAILED`: the last
 startup attempt was classified permanent. Unlike `.unavailable` (shown for `STARTING`,

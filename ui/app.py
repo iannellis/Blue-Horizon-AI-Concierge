@@ -193,8 +193,8 @@ def _fetch_customers() -> list[dict[str, Any]]:
     """
     try:
         return _fetch_customers_uncached()
-    except Exception:
-        logger.warning("Could not fetch the guest list.", exc_info=True)
+    except Exception as exc:  # noqa: BLE001
+        _log_api_failure(exc, "Could not fetch the guest list.")
         return []
 
 
@@ -219,13 +219,32 @@ def _fetch_bookings(customer_id: int) -> list[dict[str, Any]] | None:
         )
         response.raise_for_status()
         return response.json().get("bookings", [])
-    except Exception:
-        logger.warning(
-            "Could not fetch bookings for customer_id=%s.",
-            customer_id,
-            exc_info=True,
+    except Exception as exc:  # noqa: BLE001
+        _log_api_failure(
+            exc, "Could not fetch bookings for customer_id=%s.", customer_id,
         )
         return None
+
+
+def _log_api_failure(exc: BaseException, message: str, *args: object) -> None:
+    """Log a failed API call, without a traceback when it is expected.
+
+    A refused connection, a timeout, or an error status means the API is down
+    or unhealthy, which the sidebar already reports, and its traceback runs
+    to dozens of lines that say nothing ``exc`` itself does not. Those are
+    logged as one warning line. Anything else, such as a malformed response
+    body, is a defect and keeps its traceback.
+
+    Args:
+        exc: The exception the call raised.
+        message: Log message format string.
+        *args: Arguments for ``message``.
+
+    """
+    if isinstance(exc, httpx2.HTTPError):
+        logger.warning(f"{message} %r", *args, exc)  # noqa: G004
+        return
+    logger.warning(message, *args, exc_info=exc)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -322,11 +341,9 @@ def _confirm_proposal(proposal_id: str, customer_id: int) -> ConfirmOutcome:
             json={"proposal_id": proposal_id, "customer_id": customer_id},
             timeout=_CHAT_TIMEOUT_S,
         )
-    except Exception:
-        logger.warning(
-            "Could not reach the API to confirm proposal_id=%s.",
-            proposal_id,
-            exc_info=True,
+    except Exception as exc:  # noqa: BLE001
+        _log_api_failure(
+            exc, "Could not reach the API to confirm proposal_id=%s.", proposal_id,
         )
         return ConfirmOutcome(
             status="unreachable",
@@ -857,8 +874,8 @@ def _stream_message(thread_id: str, customer_id: int, text: str) -> ChatTurnResu
     # rendered above the "Send again" button, which is that instruction.
     except httpx2.TimeoutException:
         error_message = "The concierge took too long to reply."
-    except Exception:
-        logger.warning("Chat request failed unexpectedly.", exc_info=True)
+    except Exception as exc:  # noqa: BLE001
+        _log_api_failure(exc, "Chat request failed.")
         error_message = "Could not reach the concierge."
     else:
         return ChatTurnResult(

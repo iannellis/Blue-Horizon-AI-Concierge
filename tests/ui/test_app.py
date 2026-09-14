@@ -21,6 +21,7 @@ environment (it lives in the optional ``ui`` dependency group).
 
 # ruff: noqa: S101
 
+import logging
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
@@ -95,6 +96,47 @@ class TestCheckHealth:
             side_effect=httpx2.TimeoutException("timeout"),
         ):
             assert _check_health() is False
+
+
+# ---------------------------------------------------------------------------
+# API failure logging
+# ---------------------------------------------------------------------------
+
+
+class TestApiFailureLogging:
+    """An unreachable API logs one line; an unexpected error keeps its traceback."""
+
+    def test_connect_error_logs_one_line(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A refused connection logs a warning naming the error, with no traceback."""
+        with (
+            patch("ui.app.httpx2.get", side_effect=httpx2.ConnectError("refused")),
+            caplog.at_level(logging.WARNING, logger="ui.app"),
+        ):
+            assert _fetch_bookings(13) is None
+        assert len(caplog.records) == 1
+        record = caplog.records[0]
+        assert record.exc_info is None
+        assert "customer_id=13" in record.getMessage()
+        assert "refused" in record.getMessage()
+
+    def test_malformed_body_keeps_traceback(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A response that is not the expected JSON is a defect, logged in full."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.side_effect = ValueError("not JSON")
+        with (
+            patch("ui.app.httpx2.get", return_value=mock_response),
+            caplog.at_level(logging.WARNING, logger="ui.app"),
+        ):
+            assert _fetch_bookings(13) is None
+        assert len(caplog.records) == 1
+        assert caplog.records[0].exc_info is not None
 
 
 # ---------------------------------------------------------------------------

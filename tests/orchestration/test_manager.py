@@ -67,6 +67,7 @@ def _make_manager(
     manager._thread_customers = {}  # noqa: SLF001
     mock_resources = MagicMock()
     mock_resources.config.messages.unavailable = unavailable
+    mock_resources.config.messages.error = "Could not complete."
     # No proposal pending by default, so stage tests don't see a spurious
     # "proposal" event mixed into their stage/done assertions.
     booking_resources = mock_resources.booking_resources
@@ -200,6 +201,7 @@ def _mock_agent(
     events: list[dict[str, Any]],
     *,
     ai_response: str = "Reply.",
+    turn_error: str | None = None,
 ) -> MagicMock:
     """Build a mock compiled graph for ``ainvoke_stream`` tests.
 
@@ -214,16 +216,21 @@ def _mock_agent(
             the synthetic finalize event.
         ai_response: Plain-string content for the final AI message carried
             by the synthetic finalize event's output.
+        turn_error: When set, the finalize output instead reports a failed
+            turn with this code and no messages, as ``finalize_node`` does.
 
     Returns:
         MagicMock configured to simulate a ``CompiledStateGraph``.
 
     """
     mock = MagicMock()
+    output: dict[str, Any] = {"messages": [AIMessage(content=ai_response)]}
+    if turn_error is not None:
+        output = {"messages": [], "turn_error": turn_error}
     finalize_event = {
         "event": "on_chain_end",
         "metadata": {"langgraph_node": "finalize"},
-        "data": {"output": {"messages": [AIMessage(content=ai_response)]}},
+        "data": {"output": output},
     }
     mock.astream_events.return_value = _async_events([*events, finalize_event])
     return mock
@@ -534,3 +541,53 @@ class TestInitLoopSimulatedSlowStartup:
                 await manager.stop()
 
         asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# Failed turns
+#
+# A turn that failed inside the graph arrives as a finalize output carrying
+# `turn_error` and no reply. It must end the stream with an `error` event,
+# never a `done` event a client would render as the concierge's answer.
+# ---------------------------------------------------------------------------
+
+
+class TestFailedTurn:
+    """A failed turn is reported as an error, and its proposal cannot survive."""
+
+    def test_stream_emits_error_event_instead_of_done(self) -> None:
+        """The stream ends with an error event carrying the code and copy."""
+        manager = _make_manager(
+            agent=_mock_agent([_chain_start("router")], turn_error="timeout"),
+        )
+        events = asyncio.run(_run_stream(manager))
+        assert [e["type"] for e in events] == ["stage", "error"]
+        assert events[-1] == {
+            "type": "error",
+            "code": "timeout",
+            "message": "Could not complete.",
+        }
+
+    def test_stream_invalidates_proposal_and_emits_none(self) -> None:
+        """A proposal left by a failed turn is invalidated, never surfaced."""
+        manager = _make_manager(agent=_mock_agent([], turn_error="internal"))
+        proposals = cast("MagicMock", manager.get_booking_resources().proposals)
+        proposals.get_pending_for_thread.return_value = MagicMock()
+        events = asyncio.run(_run_stream(manager))
+        assert all(e["type"] != "proposal" for e in events)
+        # Once as the turn starts, and once more for the failure.
+        assert proposals.invalidate_thread.call_count == 2  # noqa: PLR2004
+
+    def test_ainvoke_invalidates_proposal_of_failed_turn(self) -> None:
+        """The non-streaming path invalidates a failed turn's proposal too."""
+        agent = MagicMock()
+        agent.ainvoke = AsyncMock(
+            return_value={"messages": [], "turn_error": "internal"},
+        )
+        manager = _make_manager(agent=agent)
+        proposals = cast("MagicMock", manager.get_booking_resources().proposals)
+        result = asyncio.run(
+            manager.ainvoke(thread_id="t1", user_text="hi", customer_id=1),
+        )
+        assert result["turn_error"] == "internal"
+        assert proposals.invalidate_thread.call_count == 2  # noqa: PLR2004

@@ -286,7 +286,11 @@ class OrchestrationManager:
                 by LangSmith tracing).
 
         Returns:
-            Final state patch from the orchestration agent.
+            Final state from the orchestration agent. ``turn_error`` is set
+            when the turn failed, in which case the failed turn is absent
+            from ``messages`` and any proposal it created has been
+            invalidated. Callers must check it rather than reading the last
+            AI message, which would then belong to an earlier turn.
 
         Raises:
             ThreadCustomerMismatchError: If `thread_id` is already bound to a
@@ -317,13 +321,18 @@ class OrchestrationManager:
             config["metadata"] = metadata
 
         async with self._llm_semaphore:
-            return cast(
+            result = cast(
                 "dict[str, Any]",
                 await agent.ainvoke(
                     state,
                     config=config,
                 ),
             )
+        if result.get("turn_error") is not None:
+            # The turn is reported as failed, so nothing it proposed may
+            # remain confirmable.
+            self.get_booking_resources().proposals.invalidate_thread(thread_id)
+        return result
 
     async def ainvoke_stream(
         self,
@@ -334,14 +343,18 @@ class OrchestrationManager:
     ) -> AsyncGenerator[dict[str, Any]]:
         """Stream stage events, an optional proposal, then the final response.
 
-        Yields stage-progress events as the graph executes each node, an
-        optional ``proposal`` event if the turn created one, then a single
-        ``done`` event once the graph has finished.
+        Yields stage-progress events as the graph executes each node, then
+        either an optional ``proposal`` event followed by a single ``done``
+        event, or, if the turn failed, a single ``error`` event and nothing
+        else.
 
         Stage events have the form ``{"type": "stage", "label": str}``.
         The proposal event has the form ``{"type": "proposal", "proposal_id":
         str, "action": str, "summary": dict}``. The done event has the form
-        ``{"type": "done", "response": str}``.
+        ``{"type": "done", "response": str}``. The error event has the form
+        ``{"type": "error", "code": "timeout" | "internal", "message": str}``.
+        A failed turn yields no proposal, and any proposal it created is
+        invalidated, since the guest is told the request did not complete.
 
         Multiple graph nodes that share the same conceptual stage (e.g.
         ``query_faq``, ``query_amenities``, ``query_services``) are
@@ -354,7 +367,8 @@ class OrchestrationManager:
                 calls and never exposed to the model directly.
 
         Yields:
-            Stage, proposal, and done event dicts, in that order.
+            Stage events, then proposal and done event dicts, or one error
+            event.
 
         Raises:
             ThreadCustomerMismatchError: If `thread_id` is already bound to a
@@ -402,6 +416,16 @@ class OrchestrationManager:
                     finalize_output = cast(
                         "dict[str, Any]", event["data"].get("output"),
                     )
+
+        turn_error = (finalize_output or {}).get("turn_error")
+        if turn_error is not None:
+            booking_resources.proposals.invalidate_thread(thread_id)
+            yield {
+                "type": "error",
+                "code": turn_error,
+                "message": self._resources.config.messages.error,
+            }
+            return
 
         response_dict = format_chat_response(finalize_output or {})
 

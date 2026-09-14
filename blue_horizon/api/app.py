@@ -138,15 +138,14 @@ def _error_message(exc: Exception) -> str:
 
 
 # Maps an exception type this module can specifically recognise to the
-# additive `code` on a mid-turn `error` SSE event. Anything else falls back
-# to "internal" in `_error_event`: it cannot be a genuine programming defect
-# this module already knows how to name, but it is also not one of the
-# codes worth a guest-visible distinction yet. `"unavailable"`, `"failed"`,
-# and `"timeout"` from docs/api.md's full code enum are not reachable here
-# today -- an unready agent is stopped by the readiness gate before
-# _event_stream ever starts, and a node-level timeout is already absorbed
-# into a normal `done` event's `messages.error` text inside the graph
-# itself, never raised as a Python exception this pump would see.
+# additive `code` on a mid-turn `error` SSE event raised by the pump itself.
+# Anything else falls back to "internal" in `_error_event`. A turn that
+# failed inside the graph (a router or sub-agent timeout or exception, or an
+# empty turn) never reaches this map: the orchestrator yields its own
+# `error` event carrying `"timeout"` or `"internal"`, which the pump forwards
+# unchanged. `"unavailable"` and `"failed"` are not reachable mid-stream at
+# all, since an unready agent is stopped by the readiness gate before
+# _event_stream ever starts.
 _MID_TURN_ERROR_CODE_BY_EXCEPTION: dict[type[Exception], str] = {
     ThreadCustomerMismatchError: "thread_mismatch",
 }
@@ -333,7 +332,9 @@ async def chat(payload: ChatPayload, request: Request) -> Response:
         not ready -- checked here, before either branch commits to a
         response, since that is the one point where 503 is still an option
         for the streaming branch too (a `StreamingResponse` commits its 200
-        as soon as it starts).
+        as soon as it starts). On the JSON branch, a turn that failed inside
+        the graph returns `_failed_turn_response` instead: 504 for a timeout,
+        502 otherwise.
 
     Raises:
         HTTPException: 409 if `thread_id` is already bound to a different
@@ -354,6 +355,10 @@ async def chat(payload: ChatPayload, request: Request) -> Response:
         )
     except ThreadCustomerMismatchError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    turn_error = result.get("turn_error")
+    if turn_error is not None:
+        return _failed_turn_response(turn_error)
 
     response = format_chat_response(result)
     proposal = orchestrator.get_booking_resources().proposals.get_pending_for_thread(
@@ -418,6 +423,32 @@ async def _event_stream(payload: ChatPayload) -> AsyncGenerator[str]:
             pump_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await pump_task
+
+
+def _failed_turn_response(turn_error: str) -> JSONResponse:
+    """Build the JSON-branch response for a chat turn that failed in the graph.
+
+    Unlike the SSE branch, nothing is committed yet when the JSON branch
+    learns the outcome, so the failure can be a real HTTP status rather than
+    a `200` carrying an apology the client cannot tell apart from a reply.
+
+    Args:
+        turn_error: The orchestrator's failure code, `"timeout"` or
+            `"internal"`.
+
+    Returns:
+        JSONResponse: 504 for `"timeout"`, 502 otherwise, with a body of
+        ``{"code": str, "message": str}`` matching the SSE `error` event.
+
+    """
+    status_code = 504 if turn_error == "timeout" else 502
+    return JSONResponse(
+        {
+            "code": turn_error,
+            "message": load_app_config().orchestration.messages.error,
+        },
+        status_code=status_code,
+    )
 
 
 @router.post("/booking/confirm")

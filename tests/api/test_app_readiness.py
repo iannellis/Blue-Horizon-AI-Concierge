@@ -4,12 +4,15 @@ Unlike `tests/api/test_app.py` (`db_integration`-marked, drives the real
 stack), the gates covered here are pure: `chat()`, `list_customers()`, and
 `list_bookings()` each check readiness before doing any I/O, so a mocked
 `orchestrator` is sufficient and no real Postgres/Redis/OpenAI is needed.
+The same mocked orchestrator also covers how `/v1/chat` reports a turn the
+orchestrator says failed.
 """
 # ruff: noqa: S101
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import json
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -19,9 +22,12 @@ import blue_horizon.api.app as app_module
 from blue_horizon.agents.orchestration import Readiness
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import AsyncGenerator, Iterator
 
+_HTTP_OK = 200
+_HTTP_BAD_GATEWAY = 502
 _HTTP_SERVICE_UNAVAILABLE = 503
+_HTTP_GATEWAY_TIMEOUT = 504
 
 
 @pytest.fixture
@@ -170,3 +176,85 @@ class TestDataEndpointsNotReady:
         assert response.status_code == _HTTP_SERVICE_UNAVAILABLE
         assert response.headers["retry-after"]
         assert response.json()["detail"] == "Still starting up."
+
+
+# ---------------------------------------------------------------------------
+# /v1/chat failed turns
+# ---------------------------------------------------------------------------
+
+
+class TestChatFailedTurn:
+    """A turn the orchestrator reports as failed never looks like a reply."""
+
+    def test_json_branch_timeout_returns_504(
+        self, client: TestClient, mock_orchestrator: MagicMock,
+    ) -> None:
+        """A timed-out turn is a 504 carrying the code, not a 200 apology."""
+        mock_orchestrator.is_ready = True
+        mock_orchestrator.ainvoke = AsyncMock(
+            return_value={"messages": [], "turn_error": "timeout"},
+        )
+
+        response = client.post(
+            "/v1/chat",
+            json={"thread_id": "t1", "customer_id": 1, "text": "hi"},
+        )
+
+        assert response.status_code == _HTTP_GATEWAY_TIMEOUT
+        body = response.json()
+        assert body["code"] == "timeout"
+        assert body["message"]
+        assert "messages" not in body
+
+    def test_json_branch_internal_returns_502(
+        self, client: TestClient, mock_orchestrator: MagicMock,
+    ) -> None:
+        """Any other failed turn is a 502 carrying the code."""
+        mock_orchestrator.is_ready = True
+        mock_orchestrator.ainvoke = AsyncMock(
+            return_value={"messages": [], "turn_error": "internal"},
+        )
+
+        response = client.post(
+            "/v1/chat",
+            json={"thread_id": "t1", "customer_id": 1, "text": "hi"},
+        )
+
+        assert response.status_code == _HTTP_BAD_GATEWAY
+        assert response.json()["code"] == "internal"
+
+    def test_sse_branch_forwards_error_event_without_done(
+        self, client: TestClient, mock_orchestrator: MagicMock,
+    ) -> None:
+        """The orchestrator's own error event reaches the client unchanged."""
+        mock_orchestrator.is_ready = True
+        failure = {"type": "error", "code": "internal", "message": "Could not."}
+
+        async def _stream(**_kwargs: object) -> AsyncGenerator[dict[str, Any]]:
+            """Yield the failure event a failed turn produces.
+
+            Args:
+                **_kwargs: Ignored `ainvoke_stream` arguments.
+
+            Yields:
+                dict[str, Any]: The single error event.
+
+            """
+            yield failure
+
+        mock_orchestrator.ainvoke_stream = _stream
+
+        with client.stream(
+            "POST",
+            "/v1/chat",
+            json={"thread_id": "t1", "customer_id": 1, "text": "hi"},
+            headers={"Accept": "text/event-stream"},
+        ) as response:
+            assert response.status_code == _HTTP_OK
+            events = [
+                json.loads(line.removeprefix("data: "))
+                for line in response.iter_lines()
+                if line.startswith("data: ")
+            ]
+
+        assert events == [failure]

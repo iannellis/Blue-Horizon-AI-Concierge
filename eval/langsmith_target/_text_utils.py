@@ -141,15 +141,23 @@ def _get_tool_name(metadata: dict[str, Any]) -> str | None:
 def _extract_assistant_text_from_result(result: object) -> str:
     """Extract the final assistant text from an orchestration result object.
 
+    A failed turn (``turn_error`` set) yields an empty string. The failed
+    turn is absent from ``messages``, so the last AI message there belongs
+    to an earlier turn, and scoring it would credit this turn with a reply
+    it never produced.
+
     Args:
         result: Orchestration result object, typically a mapping containing a
             ``"messages"`` entry.
 
     Returns:
-        Final assistant message text, or an empty string when unavailable.
+        Final assistant message text, or an empty string when unavailable or
+        when the turn failed.
 
     """
     if not isinstance(result, Mapping):
+        return ""
+    if result.get("turn_error") is not None:
         return ""
 
     messages = result.get("messages", [])

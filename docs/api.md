@@ -72,34 +72,41 @@ data: {"type": "done", "response": "I've put together a request for you to revie
 |---|---|
 | `stage` | Progress label for the UI's in-bubble indicator |
 | `proposal` | A `propose_*` tool ran; carries the fields the confirmation dialog renders |
-| `done` | Final assistant response for the turn |
-| `error` | An exception occurred mid-stream |
+| `done` | Final assistant response for a turn that completed |
+| `error` | The turn did not complete; ends the stream in place of `done` |
 
 A `proposal` event appears after a `propose_*` tool call, carrying the same fields the
 confirmation dialog renders. `summary` is action-shaped (`book`, `cancel`, or `modify`)
 and is **never** derived from the assistant's own text.
 
-Any exception mid-stream, including a `thread_id`/`customer_id` mismatch, is translated
-into an `error` event rather than silently severing the connection:
+A turn that does not complete ends with an `error` event instead of `done`, never both.
+That covers a router or sub-agent timeout or exception, a turn that produced no reply,
+and any exception mid-stream, including a `thread_id`/`customer_id` mismatch:
 
 ```json
-{"type": "error", "message": "...", "code": "thread_mismatch"}
+{"type": "error", "message": "...", "code": "timeout"}
 ```
 
-`code` is additive: a client that only reads `message` behaves exactly as it did before
-this field existed. It cannot be an HTTP status here, unlike the readiness 503 above -
-the 200 and the SSE headers are already committed by the time a turn in progress can
-fail. The full code enum is `"unavailable" | "failed" | "timeout" | "thread_mismatch" |
-"internal"`, but only `"thread_mismatch"` (a `thread_id`/`customer_id` mismatch) and
-`"internal"` (anything else this module does not specifically recognise) are reachable
-today. `"unavailable"` and `"failed"` are not reachable mid-stream: an unready
+`message` is `[orchestration.messages].error`, or a mismatch-specific string. It is never
+written into the conversation history: the failed turn is dropped from the thread
+entirely, and any proposal it created is invalidated, so resending the same text starts
+clean. `code` cannot be an HTTP status here, unlike the readiness 503 above - the 200 and
+the SSE headers are already committed by the time a turn in progress can fail. The
+reachable codes are:
+
+| `code` | Meaning |
+|---|---|
+| `timeout` | The router or a sub-agent exceeded its wall-clock cap |
+| `internal` | Any other failure, including an unreachable model provider or a turn with no reply |
+| `thread_mismatch` | The `thread_id` is bound to a different `customer_id` |
+
+`"unavailable"` and `"failed"` are reserved but not reachable mid-stream: an unready
 orchestrator is stopped by the readiness gate above before a stream ever starts.
-`"timeout"` is reserved too - a node-level timeout is already absorbed into a normal
-`done` event carrying `[orchestration.messages].error` text, never raised as an
-exception this handler would see.
 
 The non-streaming JSON response carries the same `proposal` field when a proposal is
-pending after the turn.
+pending after the turn. A turn that did not complete returns `504` (`timeout`) or `502`
+(anything else) instead of `200`, with a body of `{"code": ..., "message": ...}`. Nothing
+is committed before the JSON branch knows the outcome, so it can use a real status.
 
 ## The propose/confirm contract
 
@@ -153,7 +160,7 @@ identically is what this API is deliberately designed to avoid:
 |---|---|---|
 | `/v1/chat` `503` | Yes, after `retry_after_s` | Nothing ran; the init loop keeps retrying regardless of `status` |
 | `/v1/customers`, `/v1/bookings` `503` | Yes, after `retry_after_s` | Same startup window as above |
-| Mid-stream `error` event | Depends on `code` (see above) | The turn may already have mutated state (a proposal, the conversation history); this is not a blanket invitation to resend |
+| Mid-stream `error` event, or JSON `502`/`504` | Yes for `timeout` and `internal`; no for `thread_mismatch` | The failed turn is dropped from history and its proposal invalidated, so resending the same text is safe. The system never resends on its own: the guest decides |
 | Confirm `503` | Yes - the proposal is still pending | Nothing was decided; see the table above |
 | Confirm `409` | No | The proposal is retired; a client should let the guest start a new request, not retry the same one |
 | Confirm `404` / `403` | No | Terminal for this proposal id |

@@ -139,6 +139,9 @@ async def run_example(
         turn_outputs.append(
             {
                 "assistant_text": assistant_text,
+                # Set when the orchestrator reports the turn failed; the
+                # failed turn then has no reply of its own in `messages`.
+                "turn_error": result.get("turn_error"),
                 "route_pred": route_pred,
                 "tool_summary": callback.tool_summary,
                 "contexts_used": callback.contexts_used,

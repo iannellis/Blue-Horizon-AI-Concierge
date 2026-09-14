@@ -23,12 +23,13 @@ from blue_horizon.agents.orchestration.models import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Sequence
 
     from langchain_core.messages import BaseMessage
     from langchain_core.runnables import RunnableConfig
     from langgraph.graph.state import CompiledStateGraph
 
+    from blue_horizon.agents.orchestration.models import TurnErrorCode
     from blue_horizon.agents.orchestration.resources import OrchestrationResources
 
 logger = logging.getLogger(__name__)
@@ -82,7 +83,8 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
                 config: LangGraph runnable config.
 
             Returns:
-                State patch from the sub-agent, or an error message on failure.
+                State patch from the sub-agent, or a ``turn_error`` on failure.
+                A failure writes no message: see `finalize_node` for why.
 
             """
             logger.info("Dispatching to %s agent", agent_name)
@@ -97,22 +99,10 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
                     agent_name,
                     timeout_s,
                 )
-                return {
-                    "messages": [
-                        AIMessage(
-                            content=[{"type": "text", "text": cfg.messages.error}],
-                        ),
-                    ],
-                }
+                return {"turn_error": "timeout"}
             except Exception:
                 logger.exception("%s agent failed", agent_name)
-                return {
-                    "messages": [
-                        AIMessage(
-                            content=[{"type": "text", "text": cfg.messages.error}],
-                        ),
-                    ],
-                }
+                return {"turn_error": "internal"}
             return cast("dict[str, Any]", result)
 
         _node.__name__ = _node.__qualname__ = f"{agent_name}_node"
@@ -125,7 +115,10 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
             state: Current conversation state.
 
         Returns:
-            State patch containing the chosen route.
+            State patch containing the chosen route and this turn's reset
+            ``turn_error``. The router is the first node of every turn, so
+            clearing ``turn_error`` here keeps an earlier turn's failure,
+            still held in the checkpoint, from being reported again.
 
         """
         messages = state["messages"]
@@ -141,14 +134,14 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
                 "Router timed out after %s s",
                 cfg.orchestration.router_timeout_s,
             )
-            return {"route": "error"}
+            return {"route": "error", "turn_error": "timeout"}
         except Exception:
             logger.exception("Router failed")
-            return {"route": "error"}
+            return {"route": "error", "turn_error": "internal"}
 
         step = cast("RouteStep", getattr(decision, "step", "error"))
         logger.info("Router decision: %s", step)
-        return {"route": step}
+        return {"route": step, "turn_error": None}
 
     info_node = _make_dispatch_node(
         "info",
@@ -178,91 +171,71 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
             ],
         }
 
-    def error_node(state: ConversationState) -> dict[str, Any]:  # noqa: ARG001
-        """Return a user-friendly error response.
+    def error_node(state: ConversationState) -> dict[str, Any]:
+        """Mark the turn failed without writing a reply.
+
+        Reached when the router failed, or chose the ``error`` step itself.
+        No apology is written into history: the client is told about the
+        failure through an ``error`` event instead (see `finalize_node`).
 
         Args:
-            state: Unused conversation state.
+            state: Current conversation state, read for a ``turn_error`` the
+                router already recorded.
 
         Returns:
-            State patch with the error message.
+            State patch carrying ``turn_error``: ``"internal"`` unless the
+            router recorded something more specific.
 
         """
-        logger.info("Returning error message")
-        return {
-            "messages": [
-                AIMessage(content=[{"type": "text", "text": cfg.messages.error}]),
-            ],
-        }
+        logger.info("Turn failed at routing")
+        return {"turn_error": state.get("turn_error") or "internal"}
 
     def finalize_node(state: ConversationState) -> dict[str, Any]:
-        """Prune intermediate tool chatter and keep user+final assistant messages.
+        """Prune intermediate tool chatter and drop a failed turn from history.
 
         This graph includes tool-using sub-agents. Their intermediate AI/tool
         messages are useful for execution but should not be retained or returned
-        to the API client.
+        to the API client. What is kept is every HumanMessage together with the
+        AIMessages that follow it without tool calls, preserving legitimate
+        multi-message replies.
 
-        This implementation keeps:
-            - Every HumanMessage
-            - All AIMessage objects following that HumanMessage that do NOT
-              contain tool calls (to preserve legitimate multi-message replies)
-
-        If a user message has no corresponding final AIMessage, an error message
-        is appended for that turn.
+        A turn has failed when a node recorded ``turn_error``, or when it
+        produced no final AIMessage at all, which is recorded as
+        ``"internal"``. A failed turn is removed from history entirely rather
+        than answered with an apology: an apology written into history reads,
+        to the router and sub-agents on the next turn, as something the
+        concierge said, and a guest resending the same text would otherwise
+        leave the unanswered question in history twice.
 
         Args:
             state: Current conversation state.
 
         Returns:
             State patch that clears the messages channel and replaces it with
-            the pruned history.
+            the pruned history, plus ``turn_error`` when this turn failed. The
+            manager reads that value from this node's own output to choose
+            between an ``error`` and a ``done`` event.
 
         """
-        messages = state["messages"]
-        filtered_messages = filter_messages(messages, exclude_tool_calls=True)
+        turns = _group_turns(
+            filter_messages(state["messages"], exclude_tool_calls=True),
+        )
+        turn_error: TurnErrorCode | None = state.get("turn_error")
+        if turns and (turn_error is not None or not turns[-1][1]):
+            turn_error = turn_error or "internal"
+            turns.pop()
 
         kept: list[BaseMessage] = []
-        current_user: HumanMessage | None = None
-        current_assistants: list[AIMessage] = []
+        for human, replies in turns:
+            if replies:
+                kept.extend([human, *replies])
 
-        def _flush_turn() -> None:
-            """Append current turn to kept, ensuring a final assistant message.
-
-            Ensures that a stored human message without a system response gets
-            an error message inserted to prevent system confusion.
-
-            """
-            nonlocal current_user, current_assistants
-            if current_user is None:
-                return
-            kept.append(current_user)
-            if current_assistants:
-                kept.extend(current_assistants)
-            else:
-                kept.append(
-                    AIMessage(
-                        content=[{"type": "text", "text": cfg.messages.error}],
-                    ),
-                )
-            current_user = None
-            current_assistants = []
-
-        for msg in filtered_messages:
-            if isinstance(msg, HumanMessage):
-                _flush_turn()
-                current_user = msg
-                current_assistants = []
-                continue
-
-            if current_user is None:
-                continue
-
-            if isinstance(msg, AIMessage):
-                current_assistants.append(msg)
-
-        _flush_turn()
-
-        return {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES), *kept]}
+        patch: dict[str, Any] = {
+            "messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES), *kept],
+        }
+        if turn_error is not None:
+            patch["turn_error"] = turn_error
+        return patch
 
     graph = StateGraph(ConversationState)
     graph.add_node("router", router_node)
@@ -291,3 +264,28 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
     graph.add_edge("finalize", END)
 
     return graph.compile(checkpointer=resources.checkpointer)
+
+
+def _group_turns(
+    messages: Sequence[BaseMessage],
+) -> list[tuple[HumanMessage, list[AIMessage]]]:
+    """Group a message history into turns, one per HumanMessage.
+
+    Messages before the first HumanMessage belong to no turn and are dropped,
+    as are message types other than human and AI.
+
+    Args:
+        messages: History with tool-call messages already filtered out.
+
+    Returns:
+        One ``(human_message, replies)`` pair per turn, in order, where
+        ``replies`` holds the AIMessages that followed that HumanMessage.
+
+    """
+    turns: list[tuple[HumanMessage, list[AIMessage]]] = []
+    for msg in messages:
+        if isinstance(msg, HumanMessage):
+            turns.append((msg, []))
+        elif isinstance(msg, AIMessage) and turns:
+            turns[-1][1].append(msg)
+    return turns

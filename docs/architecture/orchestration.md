@@ -60,6 +60,33 @@ Initialization uses `tenacity` with exponential backoff between `init_retry_base
 `init_retry_max_s`, so a cold Redis or a suspended Neon compute delays startup instead
 of failing it.
 
+## Failed turns
+
+A turn fails when the router or a sub-agent exceeds its timeout above, raises, or the
+turn ends without a reply. Every failure site records a `turn_error` of `"timeout"` or
+`"internal"` in the graph state instead of writing a reply:
+
+| Site | Records |
+|---|---|
+| Router timeout | `timeout` |
+| Router exception, or the router choosing the `error` step | `internal` |
+| Sub-agent timeout (`info_timeout_s`, `booking_timeout_s`) | `timeout` |
+| Sub-agent exception | `internal` |
+| No final assistant message for the turn | `internal`, set by `finalize` |
+
+`finalize` then removes the failed turn from history entirely. The manager reads
+`turn_error` from `finalize`'s own output, emits an `error` event instead of `done`, and
+invalidates any proposal the turn created. The router clears `turn_error` at the start
+of every turn, so a failure still held in the checkpoint from an earlier turn is never
+reported again.
+
+Two things follow. A failure can no longer reach a client looking like an ordinary
+reply, which is what previously kept the UI from offering its Send again button. And the
+router never reads an apology in history as something the concierge said. See
+[API Reference](../api.md#streaming-events) for the event shape, and
+[Design Goals and Decisions](../design-decisions.md#a-failed-turn-was-reported-as-a-successful-one)
+for the reasoning.
+
 ## Readiness
 
 `OrchestrationManager` tracks a three-state `Readiness` enum, not a boolean, because

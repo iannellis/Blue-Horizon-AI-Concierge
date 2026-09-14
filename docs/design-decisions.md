@@ -389,6 +389,39 @@ Mechanism lives in the architecture pages linked above; this entry exists to rec
 reasoning and the tiering, per this file's own rule against duplicating the same fact in
 two places.
 
+### A failed turn was reported as a successful one
+
+**Status:** adopted.
+
+The tiering above promised that a failed chat turn offers a resend action. Manual
+verification with the network cable unplugged showed it did not: the guest saw "Sorry -
+that request could not be completed. You can send it again." with no Send again button,
+and a sidebar still reading "Chatbot: Online".
+
+The copy was right and the delivery was wrong. Every failure the graph caught itself - a
+router or sub-agent timeout or exception, an empty turn - was written into history as an
+ordinary assistant message and streamed as a normal `done` event. Only an exception that
+escaped the graph became an `error` event, and only an `error` event triggers the
+resend. So the most common failures, the ones a dropped network actually produces, were
+indistinguishable from a reply. The apology also stayed in the checkpoint, where the
+router read it on the next turn as something the concierge had said.
+
+**The failure is now structured state, not prose.** Each failure site records a
+`turn_error` code instead of an apology, the failed turn is dropped from history, and
+the manager emits an `error` event in place of `done`. Matching the reply text against
+`[orchestration.messages].error` in the UI was rejected: it couples the client to
+wording, the same fragility `eval/stress/workload.py`'s prose fallback already carries.
+The eval and stress harnesses read the code too, since with the failed turn gone from
+history, "the last AI message" would otherwise have been an earlier turn's reply.
+
+**The sidebar badge was renamed rather than made to probe dependencies.** `/v1/health`
+reports readiness, meaning startup finished, and deliberately touches no dependency: the
+UI polls it every few seconds, and a database probe on that cadence would keep the Neon
+compute from ever scaling to zero and would wake an archived branch. So the badge now
+says "Service: Running", which readiness can honestly claim, and an outage during a
+conversation surfaces through the failed turn itself. See
+[Orchestration](architecture/orchestration.md#failed-turns) for the mechanism.
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

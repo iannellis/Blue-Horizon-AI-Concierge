@@ -8,6 +8,7 @@ from langgraph.graph import MessagesState
 from pydantic import BaseModel, Field
 
 type RouteStep = Literal["info", "booking", "refuse", "error"]
+type TurnErrorCode = Literal["timeout", "internal"]
 
 
 class RouteDecision(BaseModel):
@@ -35,10 +36,18 @@ class ConversationState(MessagesState, total=False):
     Attributes:
         messages: Message history (provided by MessagesState).
         route: Router decision.
+        turn_error: Why the current turn failed, or ``None`` if it has not.
+            ``"timeout"`` when the router or a sub-agent exceeded its
+            wall-clock cap, ``"internal"`` for any other failure, including a
+            turn that produced no reply. The router resets it at the start of
+            every turn, so a value from an earlier turn never leaks forward.
+            A failed turn is reported to the client as an ``error`` event, not
+            as an apology written into history.
 
     """
 
     route: RouteStep
+    turn_error: TurnErrorCode | None
 
 
 def _route_from_state(state: ConversationState) -> RouteStep:

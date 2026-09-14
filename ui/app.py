@@ -682,11 +682,15 @@ def _render_sidebar() -> None:
         # second /v1/health round trip of its own.
         online = _check_health()
         st.session_state.api_online = online
+        # This reports readiness (`/v1/health`: startup finished), not
+        # whether the model provider, Redis, or Postgres are reachable right
+        # now; a failure during a turn shows up in the chat's own failure
+        # block instead. Hence "Running", which it can honestly claim.
         if online:
-            st.success("Chatbot: Online")
+            st.success("Service: Running")
             _render_online_poll()
         else:
-            st.error("Chatbot: Offline")
+            st.error("Service: Unavailable")
             _render_recovery_poll()
 
         st.divider()

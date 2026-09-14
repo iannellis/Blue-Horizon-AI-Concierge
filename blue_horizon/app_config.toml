@@ -45,8 +45,10 @@ orchestration_prompt_filename = "orchestration.txt"
 # User-facing message when the router explicitly chooses "refuse"
 refusal = "I'm sorry, I cannot help with that query. I can only provide information about the hotel and help with room bookings."
 # Shown when a chat turn failed mid-flight (router or sub-agent timeout or
-# exception, an empty turn). A resend is a genuinely safe next step here, so
-# this invites one; it does not claim the retry will succeed.
+# exception, an empty turn). Delivered as the message of an `error` event (or
+# a 502/504 JSON body), never written into conversation history, so the UI
+# can offer its Send again button. A resend is a genuinely safe next step
+# here, so this invites one; it does not claim the retry will succeed.
 error = "Sorry - that request could not be completed. You can send it again."
 # Shown while readiness is STARTING: initialization is in progress and
 # expected to recover on its own, so this carries no retry instruction.

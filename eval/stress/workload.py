@@ -400,7 +400,11 @@ async def _invoke_orchestration(  # noqa: PLR0913
         metadata: LangSmith metadata for the trace.
 
     Returns:
-        A tuple of ``(assistant_text, error_text)``.
+        A tuple of ``(assistant_text, error_text)``. A turn the orchestrator
+        reports as failed (``turn_error``) returns an empty assistant text and
+        an ``error_text`` naming the code, without auto-confirming, so it
+        classifies as ``"error"`` structurally rather than through the prose
+        fallback.
 
     """
     try:
@@ -412,16 +416,20 @@ async def _invoke_orchestration(  # noqa: PLR0913
             tags=tags,
             metadata=metadata,
         )
+        turn_error = result.get("turn_error")
         assistant_text = _extract_assistant_text_from_result(result)
-        await auto_confirm_pending_proposal(
-            orchestration,
-            thread_id=thread_id,
-            customer_id=customer_id,
-            callback=callback,
-        )
+        if turn_error is None:
+            await auto_confirm_pending_proposal(
+                orchestration,
+                thread_id=thread_id,
+                customer_id=customer_id,
+                callback=callback,
+            )
     except Exception as exc:  # noqa: BLE001
         err_text = f"{type(exc).__name__}: {exc}"
         return "", err_text
+    if turn_error is not None:
+        return "", f"turn_error: {turn_error}"
     return assistant_text, None
 
 

@@ -6,6 +6,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
+from langchain_core.exceptions import ModelConnectionError, ModelTimeoutError
 from langchain_core.messages import (
     AIMessage,
     HumanMessage,
@@ -33,6 +34,11 @@ if TYPE_CHECKING:
     from blue_horizon.agents.orchestration.resources import OrchestrationResources
 
 logger = logging.getLogger(__name__)
+
+# Exceptions that mean a network dependency could not be reached. `OSError`
+# covers a failed DNS lookup or refused connect at the root of any client
+# library's chain, including embeddings and Redis calls inside a sub-agent.
+_NETWORK_ERRORS = (ModelConnectionError, ModelTimeoutError, OSError)
 
 
 def build_orchestration_agent(  # noqa: C901, PLR0915
@@ -100,8 +106,8 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
                     timeout_s,
                 )
                 return {"turn_error": "timeout"}
-            except Exception:
-                logger.exception("%s agent failed", agent_name)
+            except Exception as exc:  # noqa: BLE001
+                _log_turn_failure(f"{agent_name} agent", exc)
                 return {"turn_error": "internal"}
             return cast("dict[str, Any]", result)
 
@@ -135,8 +141,8 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
                 cfg.orchestration.router_timeout_s,
             )
             return {"route": "error", "turn_error": "timeout"}
-        except Exception:
-            logger.exception("Router failed")
+        except Exception as exc:  # noqa: BLE001
+            _log_turn_failure("Router", exc)
             return {"route": "error", "turn_error": "internal"}
 
         step = cast("RouteStep", getattr(decision, "step", "error"))
@@ -264,6 +270,51 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
     graph.add_edge("finalize", END)
 
     return graph.compile(checkpointer=resources.checkpointer)
+
+
+def _log_turn_failure(source: str, exc: BaseException) -> None:
+    """Log a node failure, without a traceback when the network is the cause.
+
+    An unreachable model provider or dependency raises through several layers
+    of client library, each chaining the last, so its traceback runs to well
+    over a hundred lines and says nothing the root cause does not. Such a
+    failure is logged as one warning line naming the root cause. Anything
+    else is a genuine defect and keeps its full traceback.
+
+    Args:
+        source: What failed, such as ``"Router"`` or ``"info agent"``.
+        exc: The exception the node caught.
+
+    """
+    chain = _cause_chain(exc)
+    if any(isinstance(link, _NETWORK_ERRORS) for link in chain):
+        logger.warning(
+            "%s failed: network unreachable: %r (root cause: %r)",
+            source,
+            exc,
+            chain[-1],
+        )
+        return
+    logger.error("%s failed", source, exc_info=exc)
+
+
+def _cause_chain(exc: BaseException) -> list[BaseException]:
+    """Return an exception followed by each exception it was raised from.
+
+    Args:
+        exc: The outermost exception.
+
+    Returns:
+        The chain from ``exc`` to its root cause, following ``__cause__``
+        and then ``__context__``, stopping at any cycle.
+
+    """
+    chain: list[BaseException] = []
+    current: BaseException | None = exc
+    while current is not None and current not in chain:
+        chain.append(current)
+        current = current.__cause__ or current.__context__
+    return chain
 
 
 def _group_turns(

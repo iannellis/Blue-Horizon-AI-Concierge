@@ -9,6 +9,7 @@ and short timeouts. No model provider, Redis, or Postgres is involved.
 from __future__ import annotations
 
 import asyncio
+import logging
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
@@ -22,11 +23,13 @@ from blue_horizon.agents.orchestration.factory import (
 from blue_horizon.agents.orchestration.models import RouteDecision
 
 if TYPE_CHECKING:
+    import pytest
     from langchain_core.runnables import RunnableConfig
     from langgraph.graph.state import CompiledStateGraph
 
     from blue_horizon.agents.orchestration.resources import OrchestrationResources
 
+_FACTORY_LOGGER = "blue_horizon.agents.orchestration.factory"
 _SHORT_TIMEOUT_S = 0.05
 _HANG_S = 5.0
 
@@ -68,6 +71,7 @@ class _FakeSubAgent:
         """Start as a sub-agent that returns one fixed reply."""
         self.reply: str | None = "Here you go."
         self.fail = False
+        self.fail_with_cause: OSError | None = None
         self.hang = False
 
     async def ainvoke(self, _state: object, **_kwargs: object) -> dict[str, Any]:
@@ -82,11 +86,15 @@ class _FakeSubAgent:
             `reply` is `None`.
 
         Raises:
-            RuntimeError: When `fail` is set.
+            RuntimeError: When `fail` is set, or raised from
+                `fail_with_cause` when that is set.
 
         """
         if self.hang:
             await asyncio.sleep(_HANG_S)
+        if self.fail_with_cause is not None:
+            msg = "Connection error."
+            raise RuntimeError(msg) from self.fail_with_cause
         if self.fail:
             msg = "sub-agent broke"
             raise RuntimeError(msg)
@@ -159,6 +167,69 @@ def _contents(state: dict[str, Any]) -> list[object]:
     """
     messages = cast("list[BaseMessage]", state["messages"])
     return [msg.content for msg in messages]
+
+
+class TestFailureLogging:
+    """A network failure logs one line; any other failure keeps its traceback."""
+
+    def test_router_network_failure_logs_one_line(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """An unreachable router logs a warning with no traceback."""
+        router = _FakeRouter()
+        router.fail = True
+        graph = _build_graph(router, _FakeSubAgent())
+        with caplog.at_level(logging.WARNING, logger=_FACTORY_LOGGER):
+            _run_turn(graph, "Hello")
+        records = _failure_records(caplog)
+        assert len(records) == 1
+        assert records[0].levelno == logging.WARNING
+        assert records[0].exc_info is None
+        assert "network unreachable" in records[0].getMessage()
+
+    def test_wrapped_network_failure_logs_one_line(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A client error raised from an `OSError` names the root cause."""
+        sub_agent = _FakeSubAgent()
+        sub_agent.fail_with_cause = OSError("getaddrinfo failed")
+        graph = _build_graph(_FakeRouter(), sub_agent)
+        with caplog.at_level(logging.WARNING, logger=_FACTORY_LOGGER):
+            _run_turn(graph, "Hello")
+        records = _failure_records(caplog)
+        assert len(records) == 1
+        assert records[0].exc_info is None
+        assert "getaddrinfo failed" in records[0].getMessage()
+
+    def test_other_failure_keeps_traceback(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A sub-agent defect is logged at ERROR with its traceback."""
+        sub_agent = _FakeSubAgent()
+        sub_agent.fail = True
+        graph = _build_graph(_FakeRouter(), sub_agent)
+        with caplog.at_level(logging.WARNING, logger=_FACTORY_LOGGER):
+            _run_turn(graph, "Hello")
+        records = _failure_records(caplog)
+        assert len(records) == 1
+        assert records[0].levelno == logging.ERROR
+        assert records[0].exc_info is not None
+
+
+def _failure_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    """Return the captured records that report a node failure.
+
+    Args:
+        caplog: Pytest log capture fixture.
+
+    Returns:
+        list[logging.LogRecord]: Records whose message contains "failed".
+
+    """
+    return [r for r in caplog.records if " failed" in r.getMessage()]
 
 
 class TestFailedTurn:

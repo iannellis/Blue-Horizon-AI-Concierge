@@ -83,6 +83,11 @@ invalidates any proposal the turn created. The router clears `turn_error` at the
 of every turn, so a failure still held in the checkpoint from an earlier turn is never
 reported again.
 
+A router or sub-agent exception whose cause chain contains a network failure (a
+LangChain `ModelConnectionError` or `ModelTimeoutError`, or any `OSError` such as a
+failed DNS lookup) is logged as one warning line naming the root cause. Any other
+exception is logged at ERROR with its full traceback.
+
 Two things follow. A failure can no longer reach a client looking like an ordinary
 reply, which is what previously kept the UI from offering its Send again button. And the
 router never reads an apology in history as something the concierge said. See

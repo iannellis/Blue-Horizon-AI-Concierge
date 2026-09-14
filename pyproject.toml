@@ -26,7 +26,7 @@ dependencies = [
 
 [dependency-groups]
 ui = [
-    "streamlit[auth] (>=1.40.0)",
+    "streamlit[auth] (>=1.48.0)",  # st.dialog(dismissible=...)
 ]
 eval = [
     "jsonref (>=1.1.0,<2.0.0)",  # Should be somebody's dependency

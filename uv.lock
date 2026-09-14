@@ -311,7 +311,7 @@ notebook = [
     { name = "llama-index-llms-openai", specifier = ">=0.6.6,<1.0.0" },
     { name = "openai", specifier = ">=2.7.2,<4.0.0" },
 ]
-ui = [{ name = "streamlit", extras = ["auth"], specifier = ">=1.40.0" }]
+ui = [{ name = "streamlit", extras = ["auth"], specifier = ">=1.48.0" }]
 
 [[package]]
 name = "certifi"

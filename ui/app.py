@@ -969,7 +969,7 @@ _AMBIGUOUS_REFUSAL_MSG = (
 )
 
 
-@st.dialog("Review your request")
+@st.dialog("Review your request", dismissible=False)
 def _render_proposal_dialog(proposal: dict[str, Any]) -> None:
     """Render the confirmation dialog for a pending proposal.
 
@@ -978,6 +978,12 @@ def _render_proposal_dialog(proposal: dict[str, Any]) -> None:
     is the load-bearing detail from the design this UI implements: the
     dialog and the eventual commit must never be able to disagree, so do not
     "simplify" this to reuse the assistant's message text instead.
+
+    Not dismissible, so Confirm and Cancel are the only ways out. A click
+    outside the dialog, ESC, or its X would close it in the browser only:
+    `pending_proposal` stays set and the proposal stays pending on the
+    server, so the dialog would reappear on the guest's next unrelated
+    interaction, such as switching guests in the sidebar.
 
     A confirm that comes back `unavailable` or `unreachable` (see
     `ConfirmOutcome`) leaves the dialog open with Confirm still enabled

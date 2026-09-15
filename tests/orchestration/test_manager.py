@@ -117,6 +117,7 @@ def _make_uninitialized_manager(
 
     mock_resources = MagicMock()
     mock_resources.startup_check = AsyncMock(side_effect=startup_check_side_effect)
+    mock_resources.aclose = AsyncMock()
     mock_resources.config.orchestration.init_retry_base_s = init_retry_base_s
     mock_resources.config.orchestration.init_retry_max_s = init_retry_max_s
     manager._resources = mock_resources  # noqa: SLF001
@@ -474,26 +475,44 @@ class TestInitLoopReadinessClassification:
     def test_failed_state_still_retries_and_can_recover(
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """FAILED does not stop the loop: a later success still reaches READY."""
+        """FAILED does not stop the loop: a later success still reaches READY.
+
+        The succeeding attempt is held until the test has observed FAILED.
+        With near-zero backoff the loop can otherwise pass through FAILED
+        and reach READY between two polls, and READY never reverts, so the
+        wait for FAILED would time out.
+        """
         monkeypatch.setattr(
             "blue_horizon.agents.orchestration.manager.build_orchestration_agent",
             MagicMock(),
         )
-        manager = _make_uninitialized_manager(
-            startup_check_side_effect=[
-                ConfigurationError("bad role"),
-                ConfigurationError("bad role"),
-                None,
-            ],
-        )
+        failures = iter([ConfigurationError("bad role") for _ in range(2)])
+        release_success = asyncio.Event()
+
+        async def _startup_check() -> None:
+            """Raise each queued failure, then succeed once released.
+
+            Raises:
+                ConfigurationError: For each of the first two calls.
+
+            """
+            failure = next(failures, None)
+            if failure is not None:
+                raise failure
+            await release_success.wait()
+
+        manager = _make_uninitialized_manager(startup_check_side_effect=_startup_check)
 
         async def _run() -> None:
             await manager.start()
             try:
                 await _wait_until(lambda: manager.readiness is Readiness.FAILED)
+                release_success.set()
                 await _wait_until(lambda: manager.is_ready)
                 assert manager.readiness is Readiness.READY
             finally:
+                # Never leave the loop blocked in startup_check on teardown.
+                release_success.set()
                 await manager.stop()
 
         asyncio.run(_run())

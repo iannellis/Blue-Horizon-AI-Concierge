@@ -103,6 +103,8 @@ class TurnOutput(BaseModel):
             Entries that fail to parse are dropped individually rather than
             invalidating the whole turn.
         contexts_used: Context snippets captured from retrieval output.
+        latency_ms: Wall-clock milliseconds for the turn, including any
+            post-turn auto-confirm, as measured by the eval target.
         confirm_receipt_text: App-authored receipt text from a post-turn
             auto-confirm, when one committed a proposal this turn.
 
@@ -114,6 +116,7 @@ class TurnOutput(BaseModel):
     assistant_text: str | None = None
     tool_summary: list[ToolSummaryEntry] = Field(default_factory=list)
     contexts_used: list[str] = Field(default_factory=list)
+    latency_ms: float | None = None
     confirm_receipt_text: str | None = None
 
     @field_validator("tool_summary", mode="before")

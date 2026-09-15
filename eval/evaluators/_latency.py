@@ -34,9 +34,9 @@ def eval_turn_latency(run: Run, example: Example) -> list[dict[str, Any]]:  # no
 
     """
     records = [
-        {"route": t.get("route_pred"), "latency_ms": t["latency_ms"]}
+        {"route": t.route_pred, "latency_ms": t.latency_ms}
         for t in _iter_turn_outputs(run)
-        if "latency_ms" in t
+        if t.latency_ms is not None
     ]
     return [
         {

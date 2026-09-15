@@ -10,8 +10,10 @@ import asyncio
 import contextlib
 import enum
 import logging
+import time
 from typing import TYPE_CHECKING, Any, cast
 
+from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.messages import AIMessage, HumanMessage
 from tenacity import (
     AsyncRetrying,
@@ -317,17 +319,19 @@ class OrchestrationManager:
 
         state: ConversationState = {"messages": [HumanMessage(content=user_text)]}
 
+        usage = UsageMetadataCallbackHandler()
         config: RunnableConfig = {
             "configurable": {"thread_id": thread_id, "customer_id": customer_id},
+            "callbacks": [*(callbacks or []), usage],
         }
-        if callbacks is not None:
-            config["callbacks"] = callbacks
         if tags is not None:
             config["tags"] = tags
         if metadata is not None:
             config["metadata"] = metadata
 
+        started = time.perf_counter()
         async with self._llm_semaphore:
+            admitted = time.perf_counter()
             result = cast(
                 "dict[str, Any]",
                 await agent.ainvoke(
@@ -335,6 +339,13 @@ class OrchestrationManager:
                     config=config,
                 ),
             )
+        _log_turn_finished(
+            route=result.get("route", "error"),
+            outcome=result.get("turn_error") or "ok",
+            started=started,
+            admitted=admitted,
+            usage=usage,
+        )
         if result.get("turn_error") is not None:
             # The turn is reported as failed, so nothing it proposed may
             # remain confirmable.
@@ -394,13 +405,18 @@ class OrchestrationManager:
         booking_resources.proposals.invalidate_thread(thread_id)
 
         state: ConversationState = {"messages": [HumanMessage(content=user_text)]}
+        usage = UsageMetadataCallbackHandler()
         config: RunnableConfig = {
             "configurable": {"thread_id": thread_id, "customer_id": customer_id},
+            "callbacks": [usage],
         }
 
         emitted_stages: set[str] = set()
         finalize_output: dict[str, Any] | None = None
+        route = "error"
+        started = time.perf_counter()
         async with self._llm_semaphore:
+            admitted = time.perf_counter()
             async for event in agent.astream_events(
                 state,
                 config=config,
@@ -415,6 +431,14 @@ class OrchestrationManager:
                         emitted_stages.add(stage_key)
                         yield {"type": "stage", "label": label}
 
+                elif event_type == "on_chain_end" and event.get("name") == "router":
+                    # Matched on the event's own name: the router's model call
+                    # carries the same `langgraph_node` metadata.
+                    router_output = cast(
+                        "dict[str, Any]", event["data"].get("output") or {},
+                    )
+                    route = router_output.get("route", route)
+
                 elif event_type == "on_chain_end" and node_name == "finalize":
                     # Captured directly from this run's own event stream
                     # rather than a post-hoc aget_state() re-read, which
@@ -426,6 +450,13 @@ class OrchestrationManager:
                     )
 
         turn_error = (finalize_output or {}).get("turn_error")
+        _log_turn_finished(
+            route=route,
+            outcome=turn_error or "ok",
+            started=started,
+            admitted=admitted,
+            usage=usage,
+        )
         if turn_error is not None:
             booking_resources.proposals.invalidate_thread(thread_id)
             yield {
@@ -584,3 +615,40 @@ class OrchestrationManager:
                         logger.info("Orchestration agent ready")
 
         await self._stop_event.wait()
+
+
+def _log_turn_finished(
+    *,
+    route: str,
+    outcome: str,
+    started: float,
+    admitted: float,
+    usage: UsageMetadataCallbackHandler,
+) -> None:
+    """Log one line summarizing a finished turn, with its timing and tokens.
+
+    Every field is also attached to the record, so a shipped line carries
+    them as attributes that can be filtered and aggregated, not only as text.
+
+    Args:
+        route: The router's decision, or ``"error"`` if it made none.
+        outcome: ``"ok"``, or the turn's ``turn_error`` code.
+        started: `time.perf_counter` reading when the turn asked for the LLM
+            semaphore.
+        admitted: `time.perf_counter` reading when the semaphore let it run.
+        usage: The callback that counted every model call's tokens this
+            turn. Embedding calls made through LlamaIndex are not counted.
+
+    """
+    finished = time.perf_counter()
+    counts = usage.usage_metadata.values()
+    fields: dict[str, object] = {
+        "route": route,
+        "outcome": outcome,
+        "duration_ms": round((finished - started) * 1000),
+        "semaphore_wait_ms": round((admitted - started) * 1000),
+        "input_tokens": sum(count["input_tokens"] for count in counts),
+        "output_tokens": sum(count["output_tokens"] for count in counts),
+    }
+    names = " ".join(f"{key}={value}" for key, value in fields.items())
+    logger.info("Turn finished: %s", names, extra=fields)

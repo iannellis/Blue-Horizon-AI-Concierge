@@ -12,6 +12,8 @@ Environment variables:
     GOOGLE_CLIENT_ID: When set, enables Google OAuth authentication.
         Set alongside ``GOOGLE_CLIENT_SECRET`` as HuggingFace Space secrets.
         Access is controlled via Google Cloud Console's OAuth test users list.
+    AXIOM_API_KEY, AXIOM_DATASET: When both are set, log records are also
+        shipped to that Axiom dataset, as the API's are.
 """
 
 from __future__ import annotations
@@ -22,15 +24,23 @@ import logging
 import os
 import secrets
 import threading
+import tomllib
 import uuid
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx2
 import streamlit as st
 from dotenv import load_dotenv
+from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+from opentelemetry.instrumentation.logging.handler import LoggingHandler
+from opentelemetry.sdk._logs import LoggerProvider
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+from opentelemetry.sdk.resources import Resource
 
 if TYPE_CHECKING:
+    from opentelemetry.sdk._logs.export import LogRecordExporter
     from streamlit.delta_generator import DeltaGenerator
 
 load_dotenv()
@@ -39,6 +49,14 @@ load_dotenv()
 # would not identify the UI in a log shared with the API.
 logger = logging.getLogger("ui.app")
 _LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
+# Read as data, not imported: the UI shares the API's Axiom settings rather
+# than keeping a second copy of them.
+_APP_CONFIG_PATH = (
+    Path(__file__).resolve().parents[1] / "blue_horizon" / "app_config.toml"
+)
+_SERVICE_NAME = "blue-horizon-ui"
+# The SDK names its batch export thread with this prefix.
+_EXPORT_THREAD_PREFIX = "OtelBatch"
 
 _API_BASE: str = os.getenv("BLUE_HORIZON_API_URL", "http://127.0.0.1:8000").rstrip("/")
 _AUTH_ENABLED: bool = bool(os.getenv("GOOGLE_CLIENT_ID"))
@@ -196,7 +214,7 @@ def _fetch_customers() -> list[dict[str, Any]]:
     try:
         return _fetch_customers_uncached()
     except Exception as exc:  # noqa: BLE001
-        _log_api_failure(exc, "Could not fetch the guest list.")
+        _log_api_failure(exc, "Could not fetch the guest list")
         return []
 
 
@@ -223,12 +241,18 @@ def _fetch_bookings(customer_id: int) -> list[dict[str, Any]] | None:
         return response.json().get("bookings", [])
     except Exception as exc:  # noqa: BLE001
         _log_api_failure(
-            exc, "Could not fetch bookings for customer_id=%s.", customer_id,
+            exc, "Could not fetch bookings", customer_id=customer_id,
         )
         return None
 
 
-def _log_api_failure(exc: BaseException, message: str, *args: object) -> None:
+def _log_api_failure(
+    exc: BaseException,
+    message: str,
+    *,
+    thread_id: str | None = None,
+    customer_id: int | None = None,
+) -> None:
     """Log a failed API call, without a traceback when it is expected.
 
     A refused connection, a timeout, or an error status means the API is down
@@ -239,14 +263,38 @@ def _log_api_failure(exc: BaseException, message: str, *args: object) -> None:
 
     Args:
         exc: The exception the call raised.
-        message: Log message format string.
-        *args: Arguments for ``message``.
+        message: What failed, without a trailing period.
+        thread_id: Conversation the call belonged to, if any.
+        customer_id: Guest the call was made for, if any.
 
     """
+    context = _log_context(thread_id=thread_id, customer_id=customer_id)
+    names = "".join(f" {key}={value}" for key, value in context.items())
     if isinstance(exc, httpx2.HTTPError):
-        logger.warning(f"{message} %r", *args, exc)  # noqa: G004
+        logger.warning("%s%s: %r", message, names, exc, extra=context)
         return
-    logger.warning(message, *args, exc_info=exc)
+    logger.warning("%s%s.", message, names, extra=context, exc_info=exc)
+
+
+def _log_context(
+    *, thread_id: str | None = None, customer_id: int | None = None,
+) -> dict[str, object]:
+    """Build a log record's conversation and guest fields.
+
+    The names match the API's, so once shipped, one Axiom query on
+    ``thread_id`` or ``customer_id`` finds both processes' lines. A value
+    that is ``None`` is left out, as the API leaves out an unbound one.
+
+    Args:
+        thread_id: Conversation the line concerns, if any.
+        customer_id: Guest the line concerns, if any.
+
+    Returns:
+        dict[str, object]: The bound fields, for a logging call's ``extra``.
+
+    """
+    context: dict[str, object] = {"thread_id": thread_id, "customer_id": customer_id}
+    return {key: value for key, value in context.items() if value is not None}
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -345,7 +393,9 @@ def _confirm_proposal(proposal_id: str, customer_id: int) -> ConfirmOutcome:
         )
     except Exception as exc:  # noqa: BLE001
         _log_api_failure(
-            exc, "Could not reach the API to confirm proposal_id=%s.", proposal_id,
+            exc,
+            f"Could not reach the API to confirm proposal_id={proposal_id}",
+            customer_id=customer_id,
         )
         return ConfirmOutcome(
             status="unreachable",
@@ -365,9 +415,11 @@ def _confirm_proposal(proposal_id: str, customer_id: int) -> ConfirmOutcome:
         # The mapped statuses are logged by the API; this one was not
         # expected, and the guest is told it is safe to try again.
         logger.warning(
-            "Confirm of proposal_id=%s returned unexpected HTTP %s.",
+            "Confirm of proposal_id=%s customer_id=%s returned unexpected HTTP %s.",
             proposal_id,
+            customer_id,
             response.status_code,
+            extra=_log_context(customer_id=customer_id),
         )
     status = _CONFIRM_STATUS_BY_HTTP_CODE.get(response.status_code, "unreachable")
     detail = _response_detail(response)
@@ -408,7 +460,11 @@ def _dismiss_proposal(proposal_id: str, customer_id: int) -> None:
             timeout=_HEALTH_TIMEOUT_S,
         )
     except Exception as exc:  # noqa: BLE001
-        _log_api_failure(exc, "Could not dismiss proposal_id=%s.", proposal_id)
+        _log_api_failure(
+            exc,
+            f"Could not dismiss proposal_id={proposal_id}",
+            customer_id=customer_id,
+        )
 
 
 def _dismiss_pending_proposal() -> None:
@@ -883,16 +939,22 @@ def _stream_message(thread_id: str, customer_id: int, text: str) -> ChatTurnResu
                 if result is not None:
                     return result
     except httpx2.HTTPStatusError as exc:
-        _log_api_failure(exc, "Chat request for thread_id=%s failed.", thread_id)
+        _log_api_failure(
+            exc, "Chat request failed", thread_id=thread_id, customer_id=customer_id,
+        )
         error_message = _http_error_message(exc)
     # None of the failure copy below tells the guest to try again: it is
     # rendered above the "Send again" button, which is that instruction.
     except httpx2.TimeoutException as exc:
         # Logged here only: the API may still be running the turn.
-        _log_api_failure(exc, "Chat request for thread_id=%s timed out.", thread_id)
+        _log_api_failure(
+            exc, "Chat request timed out", thread_id=thread_id, customer_id=customer_id,
+        )
         error_message = "The concierge took too long to reply."
     except Exception as exc:  # noqa: BLE001
-        _log_api_failure(exc, "Chat request for thread_id=%s failed.", thread_id)
+        _log_api_failure(
+            exc, "Chat request failed", thread_id=thread_id, customer_id=customer_id,
+        )
         error_message = "Could not reach the concierge."
     else:
         return ChatTurnResult(
@@ -1134,16 +1196,137 @@ def _render_chat() -> None:
 
 
 # ============================
+# Logging
+# ============================
+
+
+def _configure_logging() -> None:
+    """Log to stderr and, when Axiom is configured, ship to Axiom as well.
+
+    Streamlit re-executes this module on every rerun, in the same process, so
+    each handler is added only if the root logger does not already have one.
+    The shipping handler is recognized by the library's class: a class
+    defined in this module would be a new class on every rerun. Records are
+    shipped only when both ``AXIOM_API_KEY`` and ``AXIOM_DATASET`` are set.
+
+    Raises:
+        OSError: If shipping is configured and `_APP_CONFIG_PATH` cannot be
+            read.
+        KeyError: If that file has no ``[logging.axiom]`` section.
+
+    """
+    logging.basicConfig(level=logging.INFO, format=_LOG_FORMAT)
+    api_key = os.getenv("AXIOM_API_KEY")
+    dataset = os.getenv("AXIOM_DATASET")
+    root = logging.getLogger()
+    if (
+        api_key
+        and dataset
+        and not any(isinstance(h, LoggingHandler) for h in root.handlers)
+    ):
+        config = _axiom_config()
+        exporter = _axiom_exporter(config, api_key, dataset)
+        root.addHandler(_shipping_handler(config, exporter))
+
+
+def _axiom_config() -> dict[str, Any]:
+    """Read the API's ``[logging.axiom]`` settings from its config file.
+
+    Returns:
+        dict[str, Any]: The endpoint, batch size, queue size, flush interval,
+        and export timeout.
+
+    Raises:
+        OSError: If `_APP_CONFIG_PATH` cannot be read.
+        KeyError: If the file has no ``[logging.axiom]`` section.
+
+    """
+    data = tomllib.loads(_APP_CONFIG_PATH.read_text(encoding="utf-8"))
+    return data["logging"]["axiom"]
+
+
+def _axiom_exporter(
+    config: dict[str, Any], api_key: str, dataset: str,
+) -> OTLPLogExporter:
+    """Build the OTLP exporter for Axiom's logs endpoint.
+
+    Args:
+        config: The ``[logging.axiom]`` settings.
+        api_key: Axiom API token with ingest permission.
+        dataset: Axiom dataset to ship to.
+
+    Returns:
+        OTLPLogExporter: An exporter that authenticates with `api_key` and
+        writes to `dataset`.
+
+    """
+    return OTLPLogExporter(
+        endpoint=config["otlp_endpoint"],
+        headers={"Authorization": f"Bearer {api_key}", "X-Axiom-Dataset": dataset},
+        timeout=config["export_timeout_s"],
+    )
+
+
+def _shipping_handler(
+    config: dict[str, Any], exporter: LogRecordExporter,
+) -> LoggingHandler:
+    """Build the root handler that queues records for `exporter`.
+
+    The logger provider's own exit hook sends what is still queued, since
+    Streamlit offers no shutdown hook to do it from.
+
+    Args:
+        config: The ``[logging.axiom]`` settings.
+        exporter: Where batches are sent.
+
+    Returns:
+        LoggingHandler: A handler whose batch processor thread is already
+        running.
+
+    """
+    provider = LoggerProvider(
+        resource=Resource.create({"service.name": _SERVICE_NAME}),
+    )
+    provider.add_log_record_processor(
+        BatchLogRecordProcessor(
+            exporter,
+            schedule_delay_millis=config["flush_interval_s"] * 1000,
+            max_export_batch_size=config["batch_size"],
+            max_queue_size=config["max_queue_size"],
+        ),
+    )
+    handler = LoggingHandler(logger_provider=provider, log_code_attributes=True)
+    handler.addFilter(_not_from_export_thread)
+    return handler
+
+
+def _not_from_export_thread(record: logging.LogRecord) -> bool:
+    """Keep records logged by the SDK's export thread from being shipped.
+
+    The exporter logs its own failures and retries. Shipping those would send
+    a failure report through the pipeline that just failed. They still reach
+    stderr.
+
+    Args:
+        record: The record being handled.
+
+    Returns:
+        bool: False for a record logged on the export thread.
+
+    """
+    return not (record.threadName or "").startswith(_EXPORT_THREAD_PREFIX)
+
+
+# ============================
 # Entry point
 # ============================
 
 
 def main() -> None:
     """Configure logging and the Streamlit page, and render all UI components."""
-    # A no-op on every rerun after the first, once the root logger has a
-    # handler. Called here rather than at import so tests importing this
-    # module leave logging alone.
-    logging.basicConfig(level=logging.INFO, format=_LOG_FORMAT)
+    # Called here rather than at import so tests importing this module leave
+    # logging alone.
+    _configure_logging()
     st.set_page_config(
         page_title="Blue Horizon Concierge",
         page_icon="🏨",

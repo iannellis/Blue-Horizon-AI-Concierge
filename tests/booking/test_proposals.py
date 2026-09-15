@@ -1191,6 +1191,13 @@ class TestAuditLogging:
         message = _only_message(caplog, "Proposal confirmed")
         assert f"proposal_id={proposal.proposal_id}" in message
         assert "booking_id=42" in message
+        assert "duration_ms=" in message
+        (record,) = [
+            r for r in caplog.records if r.getMessage().startswith("Proposal confirmed")
+        ]
+        # Attributes, so a shipped line can be grouped and aggregated.
+        assert record.__dict__["action"] == "book"
+        assert isinstance(record.__dict__["duration_ms"], int)
 
     def test_wrong_guest_is_logged_as_a_warning(
         self, caplog: pytest.LogCaptureFixture,

@@ -504,6 +504,56 @@ outcome a retry would only repeat. The parameter is optional so tests can call `
 directly without a proposal; the confirm path always passes it. See
 [Booking agent](architecture/booking-agent.md#3-the-proposeconfirm-flow).
 
+### The audit log did not survive a restart
+
+**Status:** adopted.
+
+Once the log could audit a turn, it still lived only in the container's stderr, which a
+HuggingFace Space discards on every restart, including the nightly one. A question about
+a booking from the day before could not be answered.
+
+**The API now ships its records to Axiom over OTLP.** Axiom was chosen for its free
+tier's 30-day retention and an ingest endpoint the process can reach directly, with no
+agent beside the app, which a Space cannot conveniently run. `axiom-py`'s `AxiomHandler`
+was rejected: it sends from inside `emit`, which would block the event loop on the
+network, lets an ingest error raise into whatever code logged, and serializes the raw
+record, which fails for a record carrying a traceback. A hand-written queue and sender
+thread fixed all three, but the OpenTelemetry SDK's batch processor already does the
+same with a bounded queue, so it replaced that code. It also keeps the backend a
+configuration choice: any OTLP receiver can take Axiom's place.
+
+The context attributes are attached on the thread that logged, where the `contextvars`
+live, before the record is queued. Records logged on the SDK's export thread are not
+shipped, so a failing export cannot report itself through the pipeline that failed. The
+dataset is an environment variable, not a tunable, so a local run and the Space can
+write to different datasets. See [Architecture](architecture/index.md#logging).
+
+The UI ships too, to the same dataset under its own `service.name`. It cannot import
+`logging_setup.py` across the module boundary, so it repeats the few lines that build the
+handler. It reads `[logging.axiom]` from `app_config.toml` as data rather than copying
+the endpoint and batching values, which would have been a second copy of a tunable with
+nothing keeping the two in sync.
+
+### Latency was visible only one trace or one stress run at a time
+
+**Status:** adopted.
+
+LangSmith traces each turn and the stress test reports latency percentiles, but neither
+said how the deployed Space had performed over a day: a trace is opened one at a time,
+and the stress test runs on demand against a reset branch. Neither showed the time a
+turn spent waiting for the LLM semaphore before its first node started either, which is
+the number that separates a queue from a slow model.
+
+**Timings and token counts are fields on existing log lines, not OpenTelemetry metrics
+or spans.** Axiom aggregates numeric attributes directly, so a percentile of
+`duration_ms` needs no second pipeline or dataset, and spans would repeat the tree
+LangSmith already records in more detail. The turn line moved from `finalize_node` to
+the manager, the only place that sees the semaphore. Tokens are counted with
+LangChain's `UsageMetadataCallbackHandler` on the turn's config rather than read from
+each model response by hand, since LangGraph passes the config's callbacks to every
+model call in the turn, including the router's, which is made without an explicit
+config. See [Architecture](architecture/index.md#logging).
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

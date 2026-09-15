@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langchain_core.messages import AIMessage
+from langchain_core.outputs import ChatGeneration, LLMResult
 
 from blue_horizon.agents.exceptions import ConfigurationError, OperationalError
 from blue_horizon.agents.orchestration.manager import OrchestrationManager, Readiness
@@ -24,12 +25,21 @@ from blue_horizon.agents.orchestration.manager import OrchestrationManager, Read
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
 
+    from langchain_core.runnables import RunnableConfig
+
 # Long enough that a passing test never hits it under normal machine load,
 # short enough that a hung test (the loop wedged, or a readiness transition
 # that never happens) fails fast instead of joining the suite's stalled
 # tests.
 _POLL_TIMEOUT_S = 2.0
 _POLL_INTERVAL_S = 0.005
+_MANAGER_LOGGER = "blue_horizon.agents.orchestration.manager"
+_INPUT_TOKENS = 120
+_OUTPUT_TOKENS = 30
+# How long a test holds the LLM semaphore before letting a turn in, and the
+# least wait the turn line may then report, allowing for a coarse timer.
+_HOLD_S = 0.05
+_MIN_REPORTED_WAIT_MS = 30
 
 
 # ---------------------------------------------------------------------------
@@ -692,3 +702,194 @@ class TestFailedTurn:
         )
         assert result["turn_error"] == "internal"
         assert proposals.invalidate_thread.call_count == 2  # noqa: PLR2004
+
+
+# ---------------------------------------------------------------------------
+# Turn finished line
+#
+# The manager, not the graph, logs it: only the manager sees how long a turn
+# waited for the LLM semaphore before its first node ran.
+# ---------------------------------------------------------------------------
+
+
+class TestTurnFinishedLog:
+    """Each turn logs one line with its route, outcome, timing, and tokens."""
+
+    def test_stream_logs_route_timing_and_tokens(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """The stream path reads the route from the router node's own output."""
+        router_end = {
+            "event": "on_chain_end",
+            "name": "router",
+            "metadata": {"langgraph_node": "router"},
+            "data": {"output": {"route": "booking", "turn_error": None}},
+        }
+        manager = _make_manager(
+            agent=_reporting_usage(_mock_agent([_chain_start("router"), router_end])),
+        )
+
+        with caplog.at_level(logging.INFO, logger=_MANAGER_LOGGER):
+            asyncio.run(_run_stream(manager))
+
+        record = _turn_finished_record(caplog)
+        assert record.__dict__["route"] == "booking"
+        assert record.__dict__["outcome"] == "ok"
+        assert record.__dict__["input_tokens"] == _INPUT_TOKENS
+        assert record.__dict__["output_tokens"] == _OUTPUT_TOKENS
+        assert isinstance(record.__dict__["duration_ms"], int)
+        assert "route=booking outcome=ok" in record.getMessage()
+
+    def test_stream_failure_before_routing_reports_error_route(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """With no router output, the route is ``error`` and the code the outcome."""
+        manager = _make_manager(agent=_mock_agent([], turn_error="timeout"))
+
+        with caplog.at_level(logging.INFO, logger=_MANAGER_LOGGER):
+            asyncio.run(_run_stream(manager))
+
+        record = _turn_finished_record(caplog)
+        assert record.__dict__["route"] == "error"
+        assert record.__dict__["outcome"] == "timeout"
+        assert record.__dict__["input_tokens"] == 0
+
+    def test_semaphore_wait_is_reported(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A turn queued behind a held semaphore reports the time it waited."""
+        manager = _make_manager(agent=_mock_agent([]))
+        semaphore = manager._llm_semaphore  # noqa: SLF001
+
+        async def _run_while_semaphore_held() -> None:
+            await semaphore.acquire()
+            turn = asyncio.create_task(_run_stream(manager))
+            await asyncio.sleep(_HOLD_S)
+            semaphore.release()
+            await turn
+
+        with caplog.at_level(logging.INFO, logger=_MANAGER_LOGGER):
+            asyncio.run(_run_while_semaphore_held())
+
+        record = _turn_finished_record(caplog)
+        wait_ms = record.__dict__["semaphore_wait_ms"]
+        assert wait_ms >= _MIN_REPORTED_WAIT_MS
+        assert record.__dict__["duration_ms"] >= wait_ms
+
+    def test_ainvoke_logs_and_keeps_caller_callbacks(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """The non-streaming path logs too, without dropping the caller's callbacks."""
+        caller_callback = object()
+        seen: list[RunnableConfig] = []
+
+        async def _ainvoke(
+            state: dict[str, Any], *, config: RunnableConfig,
+        ) -> dict[str, Any]:
+            """Record the config, report usage, and return a finished state.
+
+            Args:
+                state: Unused input state.
+                config: The config the manager built for the turn.
+
+            Returns:
+                dict[str, Any]: A successful info turn's final state.
+
+            """
+            _ = state
+            seen.append(config)
+            _feed_usage(config)
+            return {"messages": [AIMessage(content="Reply.")], "route": "info"}
+
+        agent = MagicMock()
+        agent.ainvoke = AsyncMock(side_effect=_ainvoke)
+        manager = _make_manager(agent=agent)
+
+        with caplog.at_level(logging.INFO, logger=_MANAGER_LOGGER):
+            asyncio.run(
+                manager.ainvoke(
+                    thread_id="t1",
+                    user_text="hi",
+                    customer_id=1,
+                    callbacks=[caller_callback],
+                ),
+            )
+
+        record = _turn_finished_record(caplog)
+        assert record.__dict__["route"] == "info"
+        assert record.__dict__["outcome"] == "ok"
+        assert record.__dict__["output_tokens"] == _OUTPUT_TOKENS
+        assert cast("list[object]", seen[0].get("callbacks"))[0] is caller_callback
+
+
+def _reporting_usage(agent: MagicMock) -> MagicMock:
+    """Make a mock graph's `astream_events` report one model call's tokens.
+
+    Args:
+        agent: A mock built by `_mock_agent`.
+
+    Returns:
+        MagicMock: The same mock, now feeding the turn's callbacks before it
+        streams its events.
+
+    """
+    stream = agent.astream_events.return_value
+
+    def _astream_events(
+        state: dict[str, Any], *, config: RunnableConfig, version: str,
+    ) -> AsyncGenerator[dict[str, Any]]:
+        """Report usage to the config's callbacks, then return the stream.
+
+        Args:
+            state: Unused input state.
+            config: The config the manager built for the turn.
+            version: Unused event schema version.
+
+        Returns:
+            AsyncGenerator[dict[str, Any]]: The mock's scripted events.
+
+        """
+        _ = state, version
+        _feed_usage(config)
+        return stream
+
+    agent.astream_events.side_effect = _astream_events
+    return agent
+
+
+def _feed_usage(config: RunnableConfig) -> None:
+    """Report one model call's tokens to every callback in `config`.
+
+    Args:
+        config: A turn config whose callbacks include the manager's counter.
+
+    """
+    message = AIMessage(
+        content="",
+        usage_metadata={
+            "input_tokens": _INPUT_TOKENS,
+            "output_tokens": _OUTPUT_TOKENS,
+            "total_tokens": _INPUT_TOKENS + _OUTPUT_TOKENS,
+        },
+        response_metadata={"model_name": "test-model"},
+    )
+    result = LLMResult(generations=[[ChatGeneration(message=message)]])
+    for handler in cast("list[Any]", config.get("callbacks")):
+        if hasattr(handler, "on_llm_end"):
+            handler.on_llm_end(result)
+
+
+def _turn_finished_record(caplog: pytest.LogCaptureFixture) -> logging.LogRecord:
+    """Return the one captured turn finished record.
+
+    Args:
+        caplog: Pytest log capture fixture.
+
+    Returns:
+        logging.LogRecord: The record.
+
+    """
+    (record,) = [
+        r for r in caplog.records if r.getMessage().startswith("Turn finished")
+    ]
+    return record

@@ -97,14 +97,26 @@ carries a timestamp, level, logger name, and the conversation's `thread_id` and
 LangGraph runs for the turn inherits them, so a line logged inside a node or tool names
 its guest and conversation. A line logged outside any turn shows `-` for both.
 
+The container log is lost whenever the Space restarts, so when `AXIOM_API_KEY` and
+`AXIOM_DATASET` are set, the API also ships every record to that Axiom dataset over
+OTLP, using the OpenTelemetry SDK. Each record carries its message as the body, its
+level as the severity, `thread_id` and `customer_id` as attributes when they are bound,
+the source file, function, and line, any traceback, and `service.name` set to
+`blue-horizon-api`. The handler on the root logger only converts the record and queues
+it; the SDK's batch processor sends from its own thread, so logging never waits on the
+network. A batch that still fails after the exporter's retries is dropped and reported
+on stderr, and the exporter's own log lines are never shipped. Shutdown sends what is
+still queued.
+
 The log is written so that a turn can be audited without a LangSmith trace. At `INFO`
 it records:
 
 | Event | Logged by |
 |---|---|
-| Router decision, dispatch, and the turn's route and outcome | `orchestration/factory.py` |
+| Router decision and dispatch | `orchestration/factory.py` |
+| The turn's route, outcome, duration, LLM semaphore wait, and token counts | `orchestration/manager.py` |
 | Retrieval counts per source | `information/factory.py` |
-| Every `run_sql` statement, with its row count or error | `booking/resources.py` |
+| Every `run_sql` statement, with its row count or error and its duration | `booking/resources.py` |
 | A `propose_*` tool's refusal, with the `booking_id` the model named | `booking/factory.py` |
 | Every proposal created, confirmed, dismissed, refused, or not found | `booking/proposals.py` |
 
@@ -113,9 +125,29 @@ Each proposal line names the proposal, action, thread, guest, and dialog total, 
 `WARNING` it records a guest refused another guest's proposal or thread, a write blocked
 by the read-only role, and a commit that could not reach the database.
 
+Lines that measure something also carry the numbers as record attributes, so Axiom can
+chart and aggregate them without parsing text. The turn line carries `route`, `outcome`,
+`duration_ms`, `semaphore_wait_ms`, `input_tokens`, and `output_tokens`. The manager
+logs it rather than the graph, since only the manager sees how long the turn waited
+for one of the `llm_concurrency` slots before its first node ran. A wait that grows
+while model time does not means turns are queueing. Tokens are counted by a
+`UsageMetadataCallbackHandler` on the turn's config, which reaches every chat model
+call in the turn; embedding calls are not counted. Every `run_sql` line for a statement
+that passed the guardrail carries `duration_ms`, spanning its retries, so a cold
+database start shows there. A confirm that attempted a write carries `action` and
+`duration_ms`; a replayed confirm writes nothing and carries neither.
+
 Guest messages, model replies, and `run_sql` result rows are never logged.
 
-The UI logs at `INFO` under the `ui.app` logger: failed or timed-out chat requests with
-their `thread_id`, failures to reach the API, and unexpected confirm statuses.
+The UI logs at `INFO` under the `ui.app` logger: failed or timed-out chat requests,
+failures to reach the API, and unexpected confirm statuses. Each line names the
+`thread_id` and `customer_id` it concerns, where it has them.
 
-The log does not persist: it is lost when the Space restarts.
+Given the same two variables, the UI ships its records to the same dataset in the same
+way, with `service.name` set to `blue-horizon-ui`, so a query can filter by process.
+Because the UI imports no `blue_horizon` code, it does not use `logging_setup.py`: it
+builds its own handler and reads the endpoint and batching settings from
+`app_config.toml`'s `[logging.axiom]` section as data. A UI record carries `thread_id`
+and `customer_id` as attributes under the same names as the API's, passed explicitly on
+the logging call rather than bound per turn, so one query on either finds both
+processes' lines. The provider's exit hook sends what is still queued when Streamlit exits.

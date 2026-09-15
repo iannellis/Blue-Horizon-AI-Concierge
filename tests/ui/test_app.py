@@ -4,7 +4,8 @@ Covers the pure/semi-pure functions in ui/app.py that do not require a live
 Streamlit runtime: health polling, the unified chat stream (including
 its `proposal` and `error` events), SSE line parsing, HTTP error translation,
 the proposal-summary renderers that back the confirmation dialog, and
-`_fetch_bookings`'s None/empty-list distinction.
+`_fetch_bookings`'s None/empty-list distinction, and Axiom log shipping, with
+the OTLP exporter replaced by the SDK's in-memory one so nothing is sent.
 
 Not covered here: `st.dialog`-decorated flows, session-state-driven widgets
 (`_render_customer_picker`, `_render_reservations`, `_render_chat`,
@@ -22,18 +23,30 @@ environment (it lives in the optional ``ui`` dependency group).
 # ruff: noqa: S101
 
 import logging
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock, patch
 
 import httpx2
 import pytest
+from opentelemetry.instrumentation.logging.handler import LoggingHandler
+from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter
+
+from blue_horizon.config import AxiomLoggingConfig
+
+if TYPE_CHECKING:
+    from opentelemetry.sdk._logs import LoggerProvider
 
 streamlit = pytest.importorskip("streamlit", reason="streamlit not installed")
 
 from ui.app import (  # noqa: E402
     _GUEST_CLAIM_TTL_S,
     ChatTurnResult,
+    _axiom_config,
+    _axiom_exporter,
     _check_health,
+    _configure_logging,
     _confirm_proposal,
     _fetch_bookings,
     _guest_claims,
@@ -41,12 +54,15 @@ from ui.app import (  # noqa: E402
     _handle_stream_event,
     _http_error_message,
     _int_or_none,
+    _log_api_failure,
+    _not_from_export_thread,
     _parse_sse_line,
     _persist_guest_identity,
     _release_claim,
     _render_book_summary,
     _render_cancel_summary,
     _render_modify_summary,
+    _shipping_handler,
     _stream_message,
     _touch_claim,
     _try_claim_guest,
@@ -137,6 +153,41 @@ class TestApiFailureLogging:
             assert _fetch_bookings(13) is None
         assert len(caplog.records) == 1
         assert caplog.records[0].exc_info is not None
+
+    def test_context_is_named_and_attached(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """The thread and guest appear in the text and as the API's field names."""
+        with caplog.at_level(logging.WARNING, logger="ui.app"):
+            _log_api_failure(
+                httpx2.ReadTimeout("slow"),
+                "Chat request timed out",
+                thread_id="t-1",
+                customer_id=13,
+            )
+        (record,) = caplog.records
+        assert record.getMessage() == (
+            "Chat request timed out thread_id=t-1 customer_id=13: ReadTimeout('slow')"
+        )
+        assert record.__dict__["thread_id"] == "t-1"
+        assert record.__dict__["customer_id"] == 13  # noqa: PLR2004
+
+    def test_unknown_context_is_left_off(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A call made for no guest carries neither field."""
+        with caplog.at_level(logging.WARNING, logger="ui.app"):
+            _log_api_failure(
+                httpx2.ConnectError("refused"), "Could not fetch the guest list",
+            )
+        (record,) = caplog.records
+        assert record.getMessage() == (
+            "Could not fetch the guest list: ConnectError('refused')"
+        )
+        assert "thread_id" not in record.__dict__
+        assert "customer_id" not in record.__dict__
 
 
 # ---------------------------------------------------------------------------
@@ -897,3 +948,130 @@ class TestPersistGuestIdentity:
             _persist_guest_identity(7)
         mock_st.query_params.__setitem__.assert_any_call("sid", "session-a")
         mock_st.query_params.__setitem__.assert_any_call("cid", "7")
+
+
+# ---------------------------------------------------------------------------
+# Log shipping
+# ---------------------------------------------------------------------------
+
+
+def _shipping_handlers() -> list[LoggingHandler]:
+    """List the root logger's shipping handlers.
+
+    Returns:
+        list[LoggingHandler]: Every OpenTelemetry handler on the root logger.
+
+    """
+    return [h for h in logging.getLogger().handlers if isinstance(h, LoggingHandler)]
+
+
+def _shut_down(handler: LoggingHandler) -> None:
+    """Send what `handler` has queued and stop its batch processor thread.
+
+    Args:
+        handler: A handler built by `_shipping_handler`.
+
+    """
+    cast("LoggerProvider", handler._logger_provider).shutdown()  # noqa: SLF001
+
+
+@pytest.fixture
+def restore_root_logger() -> Iterator[None]:
+    """Restore the root logger's handlers and level after a test.
+
+    Any shipping handler the test added is shut down first, so no batch
+    processor thread outlives the test.
+
+    Yields:
+        None, while the test runs.
+
+    """
+    root = logging.getLogger()
+    handlers, level = list(root.handlers), root.level
+    yield
+    for handler in _shipping_handlers():
+        _shut_down(handler)
+    root.handlers[:] = handlers
+    root.setLevel(level)
+
+
+class TestLogShipping:
+    """The UI ships its records to Axiom only when both variables are set."""
+
+    def test_record_ships_as_the_ui_service_with_its_context(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A shipped record keeps its message, level, guest, and thread."""
+        exporter = InMemoryLogRecordExporter()
+        handler = _shipping_handler(_axiom_config(), exporter)
+        ui_logger = logging.getLogger("ui.app")
+        monkeypatch.setattr(ui_logger, "handlers", [handler])
+        monkeypatch.setattr(ui_logger, "propagate", False)
+        _log_api_failure(
+            httpx2.ConnectError("refused"),
+            "Chat request failed",
+            thread_id="t-1",
+            customer_id=13,
+        )
+        _shut_down(handler)
+
+        (record,) = exporter.get_finished_logs()
+        attributes = record.log_record.attributes or {}
+        assert str(record.log_record.body).startswith(
+            "Chat request failed thread_id=t-1 customer_id=13:",
+        )
+        # OpenTelemetry's name for Python's WARNING level.
+        assert record.log_record.severity_text == "WARN"
+        assert attributes["thread_id"] == "t-1"
+        assert attributes["customer_id"] == 13  # noqa: PLR2004
+        assert record.resource.attributes["service.name"] == "blue-horizon-ui"
+
+    @pytest.mark.usefixtures("restore_root_logger")
+    def test_reruns_add_one_shipping_handler(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Configuring on every Streamlit rerun still leaves one shipping handler."""
+        monkeypatch.setenv("AXIOM_API_KEY", "key")
+        monkeypatch.setenv("AXIOM_DATASET", "dataset")
+        monkeypatch.setattr(
+            "ui.app._axiom_exporter", lambda *_args: InMemoryLogRecordExporter(),
+        )
+        _configure_logging()
+        _configure_logging()
+        assert len(_shipping_handlers()) == 1
+
+    @pytest.mark.usefixtures("restore_root_logger")
+    @pytest.mark.parametrize(("api_key", "dataset"), [("key", ""), ("", "dataset")])
+    def test_ships_nothing_without_both_variables(
+        self, monkeypatch: pytest.MonkeyPatch, api_key: str, dataset: str,
+    ) -> None:
+        """A key without a dataset, or a dataset without a key, ships nothing."""
+        monkeypatch.setenv("AXIOM_API_KEY", api_key)
+        monkeypatch.setenv("AXIOM_DATASET", dataset)
+        _configure_logging()
+        assert not _shipping_handlers()
+
+    def test_reads_the_same_settings_the_api_types(self) -> None:
+        """The file's keys are exactly the API's, so a rename cannot go unnoticed."""
+        config = _axiom_config()
+        assert set(config) == set(AxiomLoggingConfig.model_fields)
+        AxiomLoggingConfig.model_validate(config)
+
+    def test_exporter_sends_the_token_and_dataset(self) -> None:
+        """The exporter targets the shared endpoint with Axiom's two headers."""
+        config = _axiom_config()
+        exporter = _axiom_exporter(config, "xaat-key", "ds")
+        assert exporter._endpoint == config["otlp_endpoint"]  # noqa: SLF001
+        assert exporter._headers == {  # noqa: SLF001
+            "Authorization": "Bearer xaat-key",
+            "X-Axiom-Dataset": "ds",
+        }
+        exporter.shutdown()
+
+    def test_export_thread_records_are_not_shipped(self) -> None:
+        """A record logged on the SDK's export thread is kept off the pipeline."""
+        record = logging.LogRecord("t", logging.WARNING, __file__, 1, "x", None, None)
+        record.threadName = "OtelBatchLogRecordProcessor"
+        assert _not_from_export_thread(record) is False
+        record.threadName = "MainThread"
+        assert _not_from_export_thread(record) is True

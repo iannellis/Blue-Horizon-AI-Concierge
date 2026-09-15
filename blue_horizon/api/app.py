@@ -37,7 +37,11 @@ from blue_horizon.agents.orchestration import (
     turn_error_message,
 )
 from blue_horizon.config import load_app_config
-from blue_horizon.logging_setup import configure_logging, log_context
+from blue_horizon.logging_setup import (
+    configure_logging,
+    log_context,
+    stop_log_shipping,
+)
 
 load_dotenv()
 
@@ -88,7 +92,8 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """Manage the lifespan of the FastAPI app.
 
     Configures logging and starts the agent orchestrator when the app is
-    launched, and stops the orchestrator when the app is shut down.
+    launched. At shutdown it stops the orchestrator, then sends the logs
+    still queued for Axiom, so the lines about the shutdown are shipped too.
 
     Arguments:
         _app: The FastAPI application (unused, required by FastAPI signature).
@@ -97,10 +102,18 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         None: Control to the application lifespan.
 
     """
-    configure_logging(load_app_config().logging)
-    await orchestrator.start()
-    yield
-    await orchestrator.stop()
+    app_config = load_app_config()
+    configure_logging(
+        app_config.logging,
+        axiom_api_key=app_config.axiom_api_key,
+        axiom_dataset=app_config.axiom_dataset,
+    )
+    try:
+        await orchestrator.start()
+        yield
+        await orchestrator.stop()
+    finally:
+        stop_log_shipping()
 
 
 app = FastAPI(lifespan=lifespan)

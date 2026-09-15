@@ -46,6 +46,11 @@ so that failure mode was silent for the read/write variables and only
 visibly broke (as a permanent skip) for the root one. Calling `load_dotenv()`
 here first closes that window: this hook now always sees `.env`'s contents
 before deciding whether to override them.
+
+It also blanks `AXIOM_API_KEY`, so a test that runs the app's real `lifespan`
+never ships its log lines to the Axiom dataset a developer's `.env` names.
+Blanking rather than removing matters: `AppConfig` reads `.env` itself, and
+only a variable present in the environment takes precedence over it.
 """
 
 from __future__ import annotations
@@ -78,3 +83,5 @@ def pytest_configure(config: object) -> None:  # noqa: ARG001
         eval_url = os.environ.get(eval_var)
         if eval_url:
             os.environ[target_var] = eval_url
+
+    os.environ["AXIOM_API_KEY"] = ""

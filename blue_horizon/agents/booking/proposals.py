@@ -15,6 +15,7 @@ inventory, since none is held.
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -290,28 +291,41 @@ class ProposalStore:
         # first place (invariant 6). Do not "optimise" this by skipping the
         # re-price on a retry: that lock is what makes retaining the
         # proposal across a failed attempt safe at all.
+        started = time.perf_counter()
         try:
             result = await _commit_proposal(write_pool, proposal)
         except write_ops.PricingMismatchError as exc:
             self._retire(proposal)
             # Nothing was written, but only a bug can cause this, so it is
             # logged as an error with its traceback, not as a refusal.
+            timing = _write_timing(proposal, started)
             logger.exception(
-                "Proposal refused on a pricing mismatch: %s computed_total=%s",
+                "Proposal refused on a pricing mismatch: %s computed_total=%s "
+                "duration_ms=%s",
                 _describe(proposal),
                 exc.computed_total,
+                timing["duration_ms"],
+                extra=timing,
             )
             raise
         except write_ops.BookingWriteError as exc:
             self._retire(proposal)
+            timing = _write_timing(proposal, started)
             logger.info(
-                "Proposal refused: %s reason=%r", _describe(proposal), str(exc),
+                "Proposal refused: %s reason=%r duration_ms=%s",
+                _describe(proposal),
+                str(exc),
+                timing["duration_ms"],
+                extra=timing,
             )
             raise
         except write_ops.BookingUnavailableError:
+            timing = _write_timing(proposal, started)
             logger.warning(
-                "Proposal commit could not reach the database: %s",
+                "Proposal commit could not reach the database: %s duration_ms=%s",
                 _describe(proposal),
+                timing["duration_ms"],
+                extra=timing,
             )
             # The commit itself could not tell whether it landed: the
             # connection may have died after COMMIT but before the ack
@@ -334,10 +348,14 @@ class ProposalStore:
                 if reconciled is not None:
                     self._retire(proposal)
                     self._results[proposal_id] = reconciled
+                    timing = _write_timing(proposal, started)
                     logger.info(
-                        "Proposal confirmed after a lost commit ack: %s %s",
+                        "Proposal confirmed after a lost commit ack: %s %s "
+                        "duration_ms=%s",
                         _describe(proposal),
                         _describe_result(reconciled),
+                        timing["duration_ms"],
+                        extra=timing,
                     )
                     return ConfirmOutcome(
                         proposal=proposal, result=reconciled, already_confirmed=False,
@@ -346,8 +364,13 @@ class ProposalStore:
 
         self._retire(proposal)
         self._results[proposal_id] = result
+        timing = _write_timing(proposal, started)
         logger.info(
-            "Proposal confirmed: %s %s", _describe(proposal), _describe_result(result),
+            "Proposal confirmed: %s %s duration_ms=%s",
+            _describe(proposal),
+            _describe_result(result),
+            timing["duration_ms"],
+            extra=timing,
         )
         return ConfirmOutcome(proposal=proposal, result=result, already_confirmed=False)
 
@@ -478,6 +501,27 @@ def _describe_result(result: WriteResult) -> str:
     if confirmation_number is not None:
         fields += f" confirmation_number={confirmation_number}"
     return fields
+
+
+def _write_timing(proposal: Proposal, started: float) -> dict[str, object]:
+    """Measure a confirm's write, as a log record's extra fields.
+
+    Attached to the record, so a shipped line carries the action and duration
+    as attributes that can be grouped and aggregated.
+
+    Args:
+        proposal: The proposal being confirmed.
+        started: `time.perf_counter` reading when the write began.
+
+    Returns:
+        dict[str, object]: ``action``, and ``duration_ms``, whole milliseconds
+        elapsed, including any reconciliation read.
+
+    """
+    return {
+        "action": proposal.action,
+        "duration_ms": round((time.perf_counter() - started) * 1000),
+    }
 
 
 async def _commit_proposal(

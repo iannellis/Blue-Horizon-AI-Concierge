@@ -132,7 +132,17 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
             "seeded_customer_count": EXPECTED_SEEDED_CUSTOMER_COUNT,
         },
     },
-    "logging": {"level": "INFO", "quiet_loggers": ["httpx"]},
+    "logging": {
+        "level": "INFO",
+        "quiet_loggers": ["httpx"],
+        "axiom": {
+            "otlp_endpoint": "https://example.invalid/v1/logs",
+            "batch_size": 100,
+            "max_queue_size": 1000,
+            "flush_interval_s": 1.0,
+            "export_timeout_s": 2.0,
+        },
+    },
 }
 
 

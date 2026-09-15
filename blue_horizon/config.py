@@ -463,6 +463,33 @@ class OrchestrationConfig(FrozenModel):
     messages: MessagesConfig
 
 
+class AxiomLoggingConfig(FrozenModel):
+    """Endpoint and batching for the API's log shipping to Axiom.
+
+    Shipping itself is switched on by the ``AXIOM_API_KEY`` and
+    ``AXIOM_DATASET`` environment variables, not by this section.
+
+    Attributes:
+        otlp_endpoint: Axiom's OTLP logs URL for the organization's region.
+        batch_size: Most records sent in one request. Must not exceed
+            `max_queue_size`.
+        max_queue_size: Most records held while Axiom is slow or
+            unreachable. Past it, the oldest queued record is dropped.
+        flush_interval_s: Seconds between scheduled sends. A full batch is
+            sent sooner.
+        export_timeout_s: Longest one send may take, retries included,
+            before its batch is dropped. Also bounds how long shutdown waits
+            on each remaining batch.
+
+    """
+
+    otlp_endpoint: str
+    batch_size: PositiveInt
+    max_queue_size: PositiveInt
+    flush_interval_s: Annotated[float, Field(gt=0)]
+    export_timeout_s: Annotated[float, Field(gt=0)]
+
+
 class LoggingConfig(FrozenModel):
     """Process-wide logging configuration for the API.
 
@@ -473,11 +500,13 @@ class LoggingConfig(FrozenModel):
         quiet_loggers: Third-party loggers held at ``WARNING`` whatever
             `level` is, because at ``INFO`` they log every outbound HTTP
             request.
+        axiom: Endpoint and batching for log shipping to Axiom.
 
     """
 
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
     quiet_loggers: tuple[str, ...]
+    axiom: AxiomLoggingConfig
 
 
 class AppConfig(BaseSettings):
@@ -511,6 +540,12 @@ class AppConfig(BaseSettings):
         pgsql_ro_db_url: PostgreSQL connection URL from environment,
             authenticated as the read-only booking agent role (``bh_agent_ro``).
             Used exclusively by the `run_sql` tool the model can reach.
+        axiom_api_key: Axiom API token with ingest permission, from
+            ``AXIOM_API_KEY``. Logs are shipped to Axiom only when this and
+            `axiom_dataset` are both non-empty.
+        axiom_dataset: Axiom dataset the logs are shipped to, from
+            ``AXIOM_DATASET``. An environment variable rather than a tunable
+            so each deployment can choose its own.
 
     """
 
@@ -531,6 +566,8 @@ class AppConfig(BaseSettings):
     )
     pgsql_rw_db_url: str = Field(validation_alias="PGSQL_RW_DB_URL")
     pgsql_ro_db_url: str = Field(validation_alias="PGSQL_RO_DB_URL")
+    axiom_api_key: str | None = Field(default=None, validation_alias="AXIOM_API_KEY")
+    axiom_dataset: str | None = Field(default=None, validation_alias="AXIOM_DATASET")
 
 
 @lru_cache(maxsize=1)

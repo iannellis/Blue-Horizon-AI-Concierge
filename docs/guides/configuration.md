@@ -12,7 +12,7 @@ The file is structured into sections that map to the Pydantic models in
 | `[booking]` | Booking agent LLM, SQL guardrails, DB pool settings |
 | `[booking.proposals]` | `ttl_s`, how long an unconfirmed proposal stays in the in-process store before it is purged |
 | `[load_data]` | Paths to the source data pickles, and `seeded_customer_count` |
-| `[logging]` | The API's root log level, and the third-party loggers kept quiet |
+| `[logging]` | The API's root log level, the third-party loggers kept quiet, and the endpoint and batching for log shipping to Axiom |
 
 Neon branch management (project ID, branch name, reset tuning) lives entirely in
 `eval/`, not here - the serving app has no Neon management awareness. See
@@ -120,6 +120,24 @@ only refusals and failures.
 `WARNING` whatever `level` is. At `INFO` they log every request to the model provider,
 which would outnumber the application's own lines several times over.
 
+**`[logging.axiom]`** tunes log shipping, which is switched on by the `AXIOM_API_KEY` and
+`AXIOM_DATASET` environment variables, not by this section. Both the API and the UI
+use it. The UI reads it straight from the TOML file, since it imports no `blue_horizon`
+code, so renaming a key breaks the UI's shipping even though the API's typed config
+would still load. `[logging].level` and `quiet_loggers` apply to the API only.
+
+- `otlp_endpoint` is Axiom's OTLP logs URL for the organization's edge region,
+  `us-east-1` here. An organization in another region needs that region's domain.
+- `batch_size` (default 512) caps the records in one request and must not exceed
+  `max_queue_size`, or startup fails.
+- `max_queue_size` (default 2048) caps the records held while Axiom is slow or
+  unreachable. Past it the oldest queued record is dropped, so an outage costs the
+  earliest lines of the outage, never memory.
+- `flush_interval_s` (default 2.0) is the time between scheduled sends. It is roughly
+  how far Axiom lags the process, and roughly the most a hard crash can lose.
+- `export_timeout_s` (default 10.0) bounds one send, retries included, before its batch
+  is dropped. It also bounds how long a restart waits on each batch still queued.
+
 **`statement_timeout` is not in this file.** It is set at the database role level, with
 `ALTER ROLE`, so that it applies under PgBouncer transaction pooling, where a
 per-connection `SET` would not reliably survive. It bounds every statement the booking
@@ -170,6 +188,8 @@ covers both processes when running locally.
 | `GOOGLE_CLIENT_ID` | Google OAuth client ID, enabling the login gate in the UI |
 | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret (required when `GOOGLE_CLIENT_ID` is set) |
 | `COOKIE_SECRET` | Secret used to sign the Streamlit auth session cookie (required when OAuth is enabled) |
+| `AXIOM_API_KEY` | Axiom API token with ingest permission. The API and the UI ship their logs to Axiom only when this and `AXIOM_DATASET` are both set. `tests/conftest.py` blanks it, so test runs never ship |
+| `AXIOM_DATASET` | Axiom dataset the API and the UI ship their logs to |
 
 ### The three root URLs
 

@@ -157,3 +157,16 @@ seeded_customer_count = 15
 level = "INFO"
 # Loggers kept at WARNING, since at INFO they log every outbound HTTP request
 quiet_loggers = ["httpx", "httpcore", "openai"]
+
+[logging.axiom]
+# Also read directly by ui/app.py, so renaming a key here breaks the UI
+# Axiom's OTLP logs endpoint for the organization's edge region
+otlp_endpoint = "https://us-east-1.aws.edge.axiom.co/v1/logs"
+# Most log records sent to Axiom in one request
+batch_size = 512
+# Most records held while Axiom is unreachable; the oldest are dropped past this
+max_queue_size = 2048
+# Seconds between scheduled sends
+flush_interval_s = 2.0
+# Seconds one send may take, retries included, before its batch is dropped
+export_timeout_s = 10.0

@@ -28,6 +28,10 @@ Optional Google OAuth can be enabled by setting `GOOGLE_CLIENT_ID`,
 `deploy/generate_secrets.py` writes the project-level `.streamlit/secrets.toml` that
 Streamlit's auth support expects from those environment variables at container start.
 
+The container log is lost on every restart. To keep it, set `AXIOM_API_KEY` as a Space
+secret and `AXIOM_DATASET` as a Space variable; both processes then ship their records
+to that Axiom dataset. See [Architecture](../architecture/index.md#logging).
+
 Both processes run as user `user` (uid 1000) rather than root. `data/` is excluded from
 the image entirely, since resets are performed via Neon branches rather than by
 reloading from source files.

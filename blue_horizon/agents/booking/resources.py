@@ -16,6 +16,7 @@ writing.
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING, Any, Literal, LiteralString, cast
 
 import psycopg
@@ -138,6 +139,19 @@ def _sql_error_result(error: str, *, error_kind: SqlErrorKind) -> dict[str, Any]
         "error": error,
         "error_kind": error_kind,
     }
+
+
+def _timing(started: float) -> dict[str, int]:
+    """Measure the time since `started`, as a log record's extra fields.
+
+    Args:
+        started: `time.perf_counter` reading when the work began.
+
+    Returns:
+        dict[str, int]: ``duration_ms``, whole milliseconds elapsed.
+
+    """
+    return {"duration_ms": round((time.perf_counter() - started) * 1000)}
 
 
 class BookingSqlResources:
@@ -373,6 +387,8 @@ class BookingSqlResources:
         # breaks.
         error_message = _tool_error_message_for_model()
         error_kind: SqlErrorKind = "unavailable"
+        # Spans every attempt and backoff, so a cold Neon start shows up here.
+        started = time.perf_counter()
         try:
             async for attempt in AsyncRetrying(
                 retry=retry_if_exception(_is_retryable),
@@ -386,18 +402,27 @@ class BookingSqlResources:
                     # The statement, never the rows: `bh_agent_ro` can read
                     # only rooms and availability, but a row count is all an
                     # audit needs to see what the model looked at.
+                    timing = _timing(started)
                     logger.info(
-                        "run_sql ok: rowcount=%s truncated=%s query=%r",
+                        "run_sql ok: rowcount=%s truncated=%s duration_ms=%s query=%r",
                         result["rowcount"],
                         result["truncated"],
+                        timing["duration_ms"],
                         query,
+                        extra=timing,
                     )
                     return result
 
         except _conn_errors as exc:
             # One line, no traceback: the stack under a pool checkout is
             # psycopg_pool internals and says nothing the exception does not.
-            logger.warning("run_sql connection error after retries: %r", exc)
+            timing = _timing(started)
+            logger.warning(
+                "run_sql connection error after retries: duration_ms=%s %r",
+                timing["duration_ms"],
+                exc,
+                extra=timing,
+            )
             error_message = _tool_error_message_for_model()
             error_kind = "unavailable"
 
@@ -408,7 +433,14 @@ class BookingSqlResources:
             # path -- so it is kept out of the generic psycopg.Error branch
             # below, which the prompt's retry instructions would otherwise
             # treat as "rewrite the query and try again".
-            logger.warning("run_sql blocked a write attempt: %s query=%r", exc, query)
+            timing = _timing(started)
+            logger.warning(
+                "run_sql blocked a write attempt: %s duration_ms=%s query=%r",
+                exc,
+                timing["duration_ms"],
+                query,
+                extra=timing,
+            )
             error_message = (
                 "Writes are not available through this tool. Use the propose "
                 "tools to book, cancel, or modify a reservation."
@@ -419,12 +451,25 @@ class BookingSqlResources:
             # SQL-level errors (type mismatches, syntax errors, constraint
             # violations, etc.) — expose the error text so the agent can
             # diagnose and rewrite the query per its retry instructions.
-            logger.warning("run_sql SQL error: %s query=%r", exc, query)
+            timing = _timing(started)
+            logger.warning(
+                "run_sql SQL error: %s duration_ms=%s query=%r",
+                exc,
+                timing["duration_ms"],
+                query,
+                extra=timing,
+            )
             error_message = f"SQL error: {exc}"
             error_kind = "sql"
 
         except Exception:
-            logger.exception("run_sql unexpected failure: query=%r", query)
+            timing = _timing(started)
+            logger.exception(
+                "run_sql unexpected failure: duration_ms=%s query=%r",
+                timing["duration_ms"],
+                query,
+                extra=timing,
+            )
             error_message = _tool_error_message_for_model()
             error_kind = "unexpected"
 

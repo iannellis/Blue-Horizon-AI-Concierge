@@ -243,6 +243,32 @@ class TestExecuteSqlTransientRetry:
         ]
         assert "couldn't get a connection in time" in record.getMessage()
         assert record.exc_info is None
+        assert isinstance(record.__dict__["duration_ms"], int)
+
+    @pytest.mark.parametrize(
+        ("outcome", "prefix"),
+        [
+            (None, "run_sql ok"),
+            (psycopg.errors.SyntaxError("syntax error at or near ..."), "run_sql SQL"),
+        ],
+    )
+    def test_statement_that_reached_the_pool_logs_its_duration(
+        self,
+        caplog: pytest.LogCaptureFixture,
+        outcome: BaseException | None,
+        prefix: str,
+    ) -> None:
+        """A statement's line carries its duration, as text and as an attribute."""
+        resources = _make_resources()
+        resources.pool = _fake_pool_with_outcomes([outcome])
+
+        with caplog.at_level(logging.INFO, logger=_RESOURCES_LOGGER):
+            asyncio.run(resources.execute_sql(_SELECT_QUERY))
+
+        [record] = [r for r in caplog.records if r.getMessage().startswith(prefix)]
+        duration_ms = record.__dict__["duration_ms"]
+        assert isinstance(duration_ms, int)
+        assert f"duration_ms={duration_ms}" in record.getMessage()
 
     def test_non_retryable_error_is_not_retried(self) -> None:
         """A plain SQL error isn't transient, so only one attempt is made."""

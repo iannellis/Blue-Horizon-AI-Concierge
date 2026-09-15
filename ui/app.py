@@ -38,7 +38,7 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-_API_BASE: str = os.getenv("BLUE_HORIZON_API_URL", "http://localhost:8000").rstrip("/")
+_API_BASE: str = os.getenv("BLUE_HORIZON_API_URL", "http://127.0.0.1:8000").rstrip("/")
 _AUTH_ENABLED: bool = bool(os.getenv("GOOGLE_CLIENT_ID"))
 _CHAT_TIMEOUT_S: float = 90.0
 _HEALTH_TIMEOUT_S: float = 3.0

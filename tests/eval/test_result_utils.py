@@ -11,6 +11,7 @@ from eval._result_utils import (
     _normalize_feedback,
     _summarize_results,
     compute_latency_summary,
+    format_latency_table,
 )
 
 
@@ -283,3 +284,34 @@ class TestComputeLatencySummary:
 
         assert booking_quantiles["p50_ms"] == expected_booking_p50
         assert info_quantiles["p95_ms"] == expected_info_p95
+
+    def test_latency_summary_includes_all_routes_entry(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """An ``all`` entry pools every turn, and the table prints it last."""
+        expected_all_p50 = 10.0
+        results_path = tmp_path / "results.jsonl"
+        row = {
+            "evaluators": _persisted_evaluators(
+                _feedback_item(
+                    "latency_per_turn",
+                    value=json.dumps(
+                        [
+                            {"route": "booking", "latency_ms": 10.0},
+                            {"route": "booking", "latency_ms": 20.0},
+                            {"route": "info", "latency_ms": 5.0},
+                        ],
+                    ),
+                ),
+            ),
+        }
+        results_path.write_text(f"{json.dumps(row)}\n", encoding="utf-8")
+
+        summary = compute_latency_summary(results_path)
+        quantiles = _as_dict(summary["latency_quantiles_ms"])
+        all_quantiles = _as_dict(quantiles["all"])
+        table_rows = format_latency_table(summary).strip().splitlines()
+
+        assert all_quantiles["p50_ms"] == expected_all_p50
+        assert table_rows[-1].split()[0] == "all"

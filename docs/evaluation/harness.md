@@ -257,7 +257,8 @@ Results are written to `results.jsonl` as LangSmith feedback items, then aggrega
 - `case_based_summary` - arithmetic means over case-level evaluator scores
 - `turn_based_summary` - turn-weighted or direct per-turn aggregates for metrics that
   expose turn-level scoring data
-- `latency_quantiles_ms` - per-route wall-clock latency quantiles
+- `latency_quantiles_ms` - wall-clock latency quantiles (p50/p95/p99) per route, plus an
+  `all` entry pooling every turn regardless of route
 
 ## Experiment metadata
 
@@ -291,4 +292,4 @@ python -m eval.ci_check eval/outputs/<experiment_name>/results.jsonl \
 ```
 
 Output is a table comparing each metric against its baseline and minimum threshold,
-followed by per-route p50/p95/p99 latency stats. Exits `0` on pass, `1` on any failure.
+followed by per-route p50/p95/p99 latency stats and an `all` row across every turn. Exits `0` on pass, `1` on any failure.

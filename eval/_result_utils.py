@@ -18,6 +18,8 @@ import pandas as pd
 
 from eval._utils import coerce_float, json_safe
 
+ALL_ROUTES_LATENCY_KEY = "all"
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -407,8 +409,9 @@ def compute_latency_summary(results_path: Path) -> dict[str, object]:
 
     Returns:
         Dict with a single ``"latency_quantiles_ms"`` key whose value is a
-        mapping of route name → ``{p50_ms, p95_ms, p99_ms}``.  Returns an
-        empty dict when no latency data is present.
+        mapping of route name → ``{p50_ms, p95_ms, p99_ms}``, plus an
+        ``"all"`` entry computed over every turn regardless of route.
+        Returns an empty dict when no latency data is present.
 
     """
     records: list[dict[str, object]] = []
@@ -430,19 +433,36 @@ def compute_latency_summary(results_path: Path) -> dict[str, object]:
 
     df = pd.DataFrame(records)
     df["route"] = df["route"].fillna("unknown")
-    grp = df.groupby("route")["latency_ms"]
+    # A single-column selection is always a Series; the stubs also allow a
+    # DataFrame to cover list-of-columns selection.
+    latencies = cast("pd.Series", df["latency_ms"])
+    result: dict[str, object] = {
+        str(route): _latency_quantiles(series)
+        for route, series in latencies.groupby(df["route"])
+    }
+    result[ALL_ROUTES_LATENCY_KEY] = _latency_quantiles(latencies)
+    return {"latency_quantiles_ms": result}
+
+
+def _latency_quantiles(series: pd.Series) -> dict[str, float]:
+    """Compute rounded p50/p95/p99 quantiles for a series of latencies.
+
+    Args:
+        series: Per-turn latencies in milliseconds.
+
+    Returns:
+        Dict with ``p50_ms``, ``p95_ms``, and ``p99_ms`` keys, each rounded
+        to one decimal place.
+
+    """
     # Series.quantile() is stubbed to also return a Series, to cover its
     # list-of-quantiles overload -- not the case for the single-float q used
     # here, which always returns one scalar.
-    result: dict[str, object] = {
-        str(route): {
-            "p50_ms": round(float(cast("float", series.quantile(0.50))), 1),
-            "p95_ms": round(float(cast("float", series.quantile(0.95))), 1),
-            "p99_ms": round(float(cast("float", series.quantile(0.99))), 1),
-        }
-        for route, series in grp
+    return {
+        "p50_ms": round(float(cast("float", series.quantile(0.50))), 1),
+        "p95_ms": round(float(cast("float", series.quantile(0.95))), 1),
+        "p99_ms": round(float(cast("float", series.quantile(0.99))), 1),
     }
-    return {"latency_quantiles_ms": result}
 
 
 def format_latency_table(latency: dict[str, object]) -> str:
@@ -453,8 +473,9 @@ def format_latency_table(latency: dict[str, object]) -> str:
             a ``"latency_quantiles_ms"`` key with per-route quantile data.
 
     Returns:
-        Multi-line string with a header and one row per route, or an empty
-        string when ``latency`` contains no quantile data.
+        Multi-line string with a header and one row per route, followed by
+        the all-routes row, or an empty string when ``latency`` contains no
+        quantile data.
 
     """
     quantiles = latency.get("latency_quantiles_ms")
@@ -462,7 +483,11 @@ def format_latency_table(latency: dict[str, object]) -> str:
         return ""
     header = f"  {'Route':<12} {'p50 ms':>8} {'p95 ms':>8} {'p99 ms':>8}"
     lines = ["\nPer-route latency (ms):", header, "  " + "-" * (len(header) - 2)]
-    for route, stats in sorted(quantiles.items()):
+    ordered = sorted(
+        quantiles.items(),
+        key=lambda item: (item[0] == ALL_ROUTES_LATENCY_KEY, item[0]),
+    )
+    for route, stats in ordered:
         if isinstance(stats, dict):
             lines.append(
                 f"  {route:<12} {stats['p50_ms']:>8.0f}"

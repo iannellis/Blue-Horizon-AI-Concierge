@@ -16,7 +16,6 @@ Environment variables:
 
 from __future__ import annotations
 
-import contextlib
 import dataclasses
 import json
 import logging
@@ -36,7 +35,10 @@ if TYPE_CHECKING:
 
 load_dotenv()
 
-logger = logging.getLogger(__name__)
+# Named explicitly: under `streamlit run` this module is `__main__`, which
+# would not identify the UI in a log shared with the API.
+logger = logging.getLogger("ui.app")
+_LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
 
 _API_BASE: str = os.getenv("BLUE_HORIZON_API_URL", "http://127.0.0.1:8000").rstrip("/")
 _AUTH_ENABLED: bool = bool(os.getenv("GOOGLE_CLIENT_ID"))
@@ -359,6 +361,14 @@ def _confirm_proposal(proposal_id: str, customer_id: int) -> ConfirmOutcome:
             status="confirmed", message=response.json()["message"], keep_pending=False,
         )
 
+    if response.status_code not in _CONFIRM_STATUS_BY_HTTP_CODE:
+        # The mapped statuses are logged by the API; this one was not
+        # expected, and the guest is told it is safe to try again.
+        logger.warning(
+            "Confirm of proposal_id=%s returned unexpected HTTP %s.",
+            proposal_id,
+            response.status_code,
+        )
     status = _CONFIRM_STATUS_BY_HTTP_CODE.get(response.status_code, "unreachable")
     detail = _response_detail(response)
     if status in ("unavailable", "unreachable"):
@@ -380,21 +390,25 @@ def _confirm_proposal(proposal_id: str, customer_id: int) -> ConfirmOutcome:
 def _dismiss_proposal(proposal_id: str, customer_id: int) -> None:
     """Dismiss a pending proposal, best-effort.
 
-    Failures are swallowed: the proposal's own server-side TTL is the
-    backstop, and the caller has already dropped it from local state either
-    way.
+    A failure to reach the API is logged and otherwise ignored: the
+    proposal's own server-side TTL is the backstop, and the caller has
+    already dropped it from local state either way. An error status is not
+    logged, since a 404 for a proposal the server already invalidated on the
+    guest's next message is the normal case.
 
     Args:
         proposal_id: Proposal to dismiss.
         customer_id: Guest dismissing it.
 
     """
-    with contextlib.suppress(Exception):
+    try:
         httpx2.post(
             f"{_API_BASE}/v1/booking/dismiss",
             json={"proposal_id": proposal_id, "customer_id": customer_id},
             timeout=_HEALTH_TIMEOUT_S,
         )
+    except Exception as exc:  # noqa: BLE001
+        _log_api_failure(exc, "Could not dismiss proposal_id=%s.", proposal_id)
 
 
 def _dismiss_pending_proposal() -> None:
@@ -869,13 +883,16 @@ def _stream_message(thread_id: str, customer_id: int, text: str) -> ChatTurnResu
                 if result is not None:
                     return result
     except httpx2.HTTPStatusError as exc:
+        _log_api_failure(exc, "Chat request for thread_id=%s failed.", thread_id)
         error_message = _http_error_message(exc)
     # None of the failure copy below tells the guest to try again: it is
     # rendered above the "Send again" button, which is that instruction.
-    except httpx2.TimeoutException:
+    except httpx2.TimeoutException as exc:
+        # Logged here only: the API may still be running the turn.
+        _log_api_failure(exc, "Chat request for thread_id=%s timed out.", thread_id)
         error_message = "The concierge took too long to reply."
     except Exception as exc:  # noqa: BLE001
-        _log_api_failure(exc, "Chat request failed.")
+        _log_api_failure(exc, "Chat request for thread_id=%s failed.", thread_id)
         error_message = "Could not reach the concierge."
     else:
         return ChatTurnResult(
@@ -1122,7 +1139,11 @@ def _render_chat() -> None:
 
 
 def main() -> None:
-    """Configure the Streamlit page and render all UI components."""
+    """Configure logging and the Streamlit page, and render all UI components."""
+    # A no-op on every rerun after the first, once the root logger has a
+    # handler. Called here rather than at import so tests importing this
+    # module leave logging alone.
+    logging.basicConfig(level=logging.INFO, format=_LOG_FORMAT)
     st.set_page_config(
         page_title="Blue Horizon Concierge",
         page_icon="🏨",

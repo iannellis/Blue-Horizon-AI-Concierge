@@ -132,6 +132,7 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
             "seeded_customer_count": EXPECTED_SEEDED_CUSTOMER_COUNT,
         },
     },
+    "logging": {"level": "INFO", "quiet_loggers": ["httpx"]},
 }
 
 
@@ -148,6 +149,7 @@ def test_parse_app_config_from_dict() -> None:
         cfg.load_data.booking_pgsql.seeded_customer_count
         == EXPECTED_SEEDED_CUSTOMER_COUNT
     )
+    assert cfg.logging.quiet_loggers == ("httpx",)
 
 
 def test_load_packaged_app_config() -> None:
@@ -175,6 +177,7 @@ def test_load_packaged_app_config() -> None:
     assert cfg.booking.proposals.ttl_s > 0
     assert isinstance(cfg.load_data.booking_pgsql.data_path, Path)
     assert cfg.load_data.booking_pgsql.seeded_customer_count > 0
+    assert cfg.logging.level
 
 
 class _PositiveModel(_FrozenModel):

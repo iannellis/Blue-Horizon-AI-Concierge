@@ -7,7 +7,7 @@ import tomllib
 from functools import lru_cache
 from importlib import resources as importlib_resources
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, BeforeValidator, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -463,6 +463,23 @@ class OrchestrationConfig(FrozenModel):
     messages: MessagesConfig
 
 
+class LoggingConfig(FrozenModel):
+    """Process-wide logging configuration for the API.
+
+    Attributes:
+        level: Root logger level. At ``INFO`` the log records each turn's
+            route and outcome, every `run_sql` statement, and every proposal
+            created, confirmed, dismissed, or refused.
+        quiet_loggers: Third-party loggers held at ``WARNING`` whatever
+            `level` is, because at ``INFO`` they log every outbound HTTP
+            request.
+
+    """
+
+    level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+    quiet_loggers: tuple[str, ...]
+
+
 class AppConfig(BaseSettings):
     """Parsed application configuration container.
 
@@ -475,6 +492,7 @@ class AppConfig(BaseSettings):
         info: Information agent settings.
         booking: Booking SQL agent settings.
         load_data: Data ingestion settings for local loaders.
+        logging: Log level and third-party loggers to quiet.
         redis_url: Redis connection URL from environment.
         pgsql_root_parent_db_url: PostgreSQL connection URL from environment
             (``PGSQL_ROOT_PARENT_DB_URL``), authenticated with schema-owner
@@ -506,6 +524,7 @@ class AppConfig(BaseSettings):
     info: InfoRagConfig
     booking: BookingSqlConfig
     load_data: LoadDataConfig
+    logging: LoggingConfig
     redis_url: str = Field(validation_alias="REDIS_URL")
     pgsql_root_parent_db_url: str | None = Field(
         default=None, validation_alias="PGSQL_ROOT_PARENT_DB_URL",

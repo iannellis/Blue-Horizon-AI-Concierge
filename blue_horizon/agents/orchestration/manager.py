@@ -223,7 +223,13 @@ class OrchestrationManager:
         if bound is None:
             self._thread_customers[thread_id] = customer_id
         elif bound != customer_id:
-            msg = f"thread_id {thread_id!r} is already bound to a different guest."
+            logger.warning(
+                "Refused thread_id=%s to customer_id=%s: bound to customer_id=%s",
+                thread_id,
+                customer_id,
+                bound,
+            )
+            msg =f"thread_id {thread_id!r} is already bound to a different guest."
             raise ThreadCustomerMismatchError(msg)
 
     def get_booking_resources(self) -> BookingSqlResources:

@@ -8,7 +8,7 @@ the pending-lookup/TTL/supersession machinery never touch the database, and
 correctness against a live database is covered separately by
 `tests/booking/test_write_ops.py` (`db_integration`). What is under test here
 is the store's own contract: single confirm-use, ownership, supersession,
-invalidation-on-new-turn, TTL expiry, the pricing-mismatch assertion, and
+invalidation-on-new-turn, TTL expiry, the pricing-mismatch refusal, and
 the reconciliation read that settles a lost commit ack (step 18).
 """
 # ruff: noqa: S101
@@ -16,6 +16,7 @@ the reconciliation read that settles a lost commit ack (step 18).
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, cast
@@ -41,6 +42,7 @@ _OTHER_THREAD_ID = "thread-2"
 _CUSTOMER_ID = 7
 _OTHER_CUSTOMER_ID = 9
 _DEFAULT_TTL_S = 1800.0
+_PROPOSALS_LOGGER = "blue_horizon.agents.booking.proposals"
 
 # confirm() forwards write_pool to a write_ops function monkeypatched out in
 # every test below, so its value is never actually inspected; typed as None
@@ -52,8 +54,9 @@ class _FakeCommitResult:
     """Stand-in for a `write_ops` result carrying only what `confirm()` reads.
 
     Attributes:
-        total_amount: Charged/new total, read for `book`/`modify` proposals.
-        refunded_amount: Refund amount, read for `cancel` proposals.
+        booking_id: Booking the result refers to, read by the audit log line.
+        total_amount: Charged or new total, as a real result carries.
+        refunded_amount: Refund amount, as a real cancel result carries.
 
     """
 
@@ -62,14 +65,17 @@ class _FakeCommitResult:
         *,
         total_amount: Decimal | None = None,
         refunded_amount: Decimal | None = None,
+        booking_id: int = 1,
     ) -> None:
         """Store whichever total field the calling test cares about.
 
         Args:
             total_amount: Value returned by `getattr(result, "total_amount")`.
             refunded_amount: Value returned by `getattr(result, "refunded_amount")`.
+            booking_id: Value logged when the proposal is confirmed.
 
         """
+        self.booking_id = booking_id
         if total_amount is not None:
             self.total_amount = total_amount
         if refunded_amount is not None:
@@ -289,6 +295,7 @@ class TestConfirm:
             *,
             customer_id: int,
             rooms: Sequence[write_ops.RoomRequest],
+            expected_total: Decimal | None = None,
         ) -> _FakeCommitResult:
             """Record the call and return a fixed result.
 
@@ -297,13 +304,20 @@ class TestConfirm:
                     argument (`None` in these tests) without inspecting it.
                 customer_id: Forwarded by `confirm()`, recorded for assertion.
                 rooms: Forwarded by `confirm()`, recorded for assertion.
+                expected_total: Forwarded by `confirm()`, recorded for assertion.
 
             Returns:
                 The fixed `fake_result`.
 
             """
             _ = write_pool
-            calls.append({"customer_id": customer_id, "rooms": rooms})
+            calls.append(
+                {
+                    "customer_id": customer_id,
+                    "rooms": rooms,
+                    "expected_total": expected_total,
+                },
+            )
             return fake_result
 
         monkeypatch.setattr(
@@ -320,7 +334,13 @@ class TestConfirm:
 
         assert outcome.result is fake_result
         assert outcome.already_confirmed is False
-        assert calls == [{"customer_id": _CUSTOMER_ID, "rooms": []}]
+        assert calls == [
+            {
+                "customer_id": _CUSTOMER_ID,
+                "rooms": [],
+                "expected_total": Decimal("100.00"),
+            },
+        ]
 
     def test_confirm_cancel_dispatches_to_cancel_booking(
         self, monkeypatch: pytest.MonkeyPatch,
@@ -343,6 +363,7 @@ class TestConfirm:
             customer_id: int,
             booking_id: int,
             rooms: Sequence[write_ops.CancelRoomInstruction] | None,
+            expected_total: Decimal | None = None,
         ) -> _FakeCommitResult:
             """Record the call and return a fixed result.
 
@@ -352,6 +373,7 @@ class TestConfirm:
                 customer_id: Forwarded by `confirm()`, recorded for assertion.
                 booking_id: Forwarded by `confirm()`, recorded for assertion.
                 rooms: Forwarded by `confirm()`, recorded for assertion.
+                expected_total: Forwarded by `confirm()`, recorded for assertion.
 
             Returns:
                 The fixed `fake_result`.
@@ -359,7 +381,12 @@ class TestConfirm:
             """
             _ = write_pool
             calls.append(
-                {"customer_id": customer_id, "booking_id": booking_id, "rooms": rooms},
+                {
+                    "customer_id": customer_id,
+                    "booking_id": booking_id,
+                    "rooms": rooms,
+                    "expected_total": expected_total,
+                },
             )
             return fake_result
 
@@ -377,7 +404,12 @@ class TestConfirm:
 
         assert outcome.result is fake_result
         assert calls == [
-            {"customer_id": _CUSTOMER_ID, "booking_id": 123, "rooms": None},
+            {
+                "customer_id": _CUSTOMER_ID,
+                "booking_id": 123,
+                "rooms": None,
+                "expected_total": Decimal("50.00"),
+            },
         ]
 
     def test_confirm_modify_dispatches_to_modify_booking(
@@ -405,6 +437,7 @@ class TestConfirm:
             customer_id: int,
             booking_id: int,
             changes: Sequence[write_ops.ModifyRoomInstruction],
+            expected_total: Decimal | None = None,
         ) -> _FakeCommitResult:
             """Record the call and return a fixed result.
 
@@ -414,6 +447,7 @@ class TestConfirm:
                 customer_id: Forwarded by `confirm()`, recorded for assertion.
                 booking_id: Forwarded by `confirm()`, recorded for assertion.
                 changes: Forwarded by `confirm()`, recorded for assertion.
+                expected_total: Forwarded by `confirm()`, recorded for assertion.
 
             Returns:
                 The fixed `fake_result`.
@@ -425,6 +459,7 @@ class TestConfirm:
                     "customer_id": customer_id,
                     "booking_id": booking_id,
                     "changes": changes,
+                    "expected_total": expected_total,
                 },
             )
             return fake_result
@@ -443,7 +478,12 @@ class TestConfirm:
 
         assert outcome.result is fake_result
         assert calls == [
-            {"customer_id": _CUSTOMER_ID, "booking_id": 456, "changes": changes},
+            {
+                "customer_id": _CUSTOMER_ID,
+                "booking_id": 456,
+                "changes": changes,
+                "expected_total": Decimal("75.00"),
+            },
         ]
 
     def test_second_confirm_replays_cached_result_without_recommitting(
@@ -464,6 +504,7 @@ class TestConfirm:
             *,
             customer_id: int,
             rooms: Sequence[write_ops.RoomRequest],
+            expected_total: Decimal | None = None,
         ) -> _FakeCommitResult:
             """Count the call and return a fixed result.
 
@@ -472,12 +513,13 @@ class TestConfirm:
                     argument (`None` in these tests) without inspecting it.
                 customer_id: Unused; only the call count matters here.
                 rooms: Unused; only the call count matters here.
+                expected_total: Unused; the total the real write checks before COMMIT.
 
             Returns:
                 The fixed `fake_result`.
 
             """
-            _ = write_pool, customer_id, rooms
+            _ = write_pool, customer_id, rooms, expected_total
             nonlocal call_count
             call_count += 1
             return fake_result
@@ -523,9 +565,10 @@ class TestConfirm:
             *,
             customer_id: int,
             rooms: Sequence[write_ops.RoomRequest],
+            expected_total: Decimal | None = None,
         ) -> _FakeCommitResult:
             """Refuse unconditionally, simulating nights taken in the meantime."""
-            _ = write_pool, customer_id, rooms
+            _ = write_pool, customer_id, rooms, expected_total
             msg = "Room 101 is not available for every night requested."
             raise proposals_module.write_ops.BookingWriteError(msg)
 
@@ -572,9 +615,10 @@ class TestConfirm:
             *,
             customer_id: int,
             rooms: Sequence[write_ops.RoomRequest],
+            expected_total: Decimal | None = None,
         ) -> _FakeCommitResult:
             """Simulate a dead pool on the first call only."""
-            _ = write_pool, customer_id, rooms
+            _ = write_pool, customer_id, rooms, expected_total
             msg = "Could not reach the database to complete this request."
             raise proposals_module.write_ops.BookingUnavailableError(msg)
 
@@ -619,9 +663,10 @@ class TestConfirm:
             *,
             customer_id: int,
             rooms: Sequence[write_ops.RoomRequest],
+            expected_total: Decimal | None = None,
         ) -> _FakeCommitResult:
             """Simulate the ack being lost after a commit that landed."""
-            _ = write_pool, customer_id, rooms
+            _ = write_pool, customer_id, rooms, expected_total
             msg = "Could not reach the database to complete this request."
             raise proposals_module.write_ops.BookingUnavailableError(msg)
 
@@ -689,9 +734,10 @@ class TestConfirm:
             *,
             customer_id: int,
             rooms: Sequence[write_ops.RoomRequest],
+            expected_total: Decimal | None = None,
         ) -> _FakeCommitResult:
             """Simulate a dead pool."""
-            _ = write_pool, customer_id, rooms
+            _ = write_pool, customer_id, rooms, expected_total
             msg = "Could not reach the database to complete this request."
             raise proposals_module.write_ops.BookingUnavailableError(msg)
 
@@ -752,9 +798,10 @@ class TestConfirm:
             customer_id: int,
             booking_id: int,
             rooms: Sequence[write_ops.CancelRoomInstruction] | None,
+            expected_total: Decimal | None = None,
         ) -> _FakeCommitResult:
             """Simulate a dead pool."""
-            _ = write_pool, customer_id, booking_id, rooms
+            _ = write_pool, customer_id, booking_id, rooms, expected_total
             msg = "Could not reach the database to complete this request."
             raise proposals_module.write_ops.BookingUnavailableError(msg)
 
@@ -812,9 +859,10 @@ class TestConfirm:
             *,
             customer_id: int,
             rooms: Sequence[write_ops.RoomRequest],
+            expected_total: Decimal | None = None,
         ) -> _FakeCommitResult:
             """Fail with BookingUnavailableError once, then succeed."""
-            _ = write_pool, customer_id, rooms
+            _ = write_pool, customer_id, rooms, expected_total
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -871,9 +919,10 @@ class TestConfirm:
             *,
             customer_id: int,
             rooms: Sequence[write_ops.RoomRequest],
+            expected_total: Decimal | None = None,
         ) -> _FakeCommitResult:
             """Simulate a dead pool."""
-            _ = write_pool, customer_id, rooms
+            _ = write_pool, customer_id, rooms, expected_total
             msg = "Could not reach the database to complete this request."
             raise proposals_module.write_ops.BookingUnavailableError(msg)
 
@@ -924,9 +973,10 @@ class TestConfirm:
             *,
             customer_id: int,
             rooms: Sequence[write_ops.RoomRequest],
+            expected_total: Decimal | None = None,
         ) -> _FakeCommitResult:
             """Simulate a dead pool."""
-            _ = write_pool, customer_id, rooms
+            _ = write_pool, customer_id, rooms, expected_total
             msg = "Could not reach the database to complete this request."
             raise proposals_module.write_ops.BookingUnavailableError(msg)
 
@@ -991,6 +1041,7 @@ class TestConfirm:
             *,
             customer_id: int,
             rooms: Sequence[write_ops.RoomRequest],
+            expected_total: Decimal | None = None,
         ) -> _FakeCommitResult:
             """Return a fixed successful result, ignoring all arguments.
 
@@ -999,12 +1050,13 @@ class TestConfirm:
                     argument (`None` in these tests) without inspecting it.
                 customer_id: Unused; the test only cares about the result.
                 rooms: Unused; the test only cares about the result.
+                expected_total: Unused; the total the real write checks before COMMIT.
 
             Returns:
                 A fixed result matching the proposal's total.
 
             """
-            _ = write_pool, customer_id, rooms
+            _ = write_pool, customer_id, rooms, expected_total
             return _FakeCommitResult(total_amount=Decimal("100.00"))
 
         monkeypatch.setattr(
@@ -1026,44 +1078,54 @@ class TestConfirm:
         with pytest.raises(ProposalOwnershipError):
             asyncio.run(_confirm_then_confirm_as_other())
 
-    def test_confirm_pricing_mismatch_raises_assertion_error(
-        self, monkeypatch: pytest.MonkeyPatch,
+    def test_pricing_mismatch_retires_proposal_and_logs_an_error(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """A commit total that disagrees with the dialog's total is a fatal bug.
+        """A write refused for a pricing mismatch retires the proposal loudly.
 
-        Prices are fixed and never rewritten, so this can only fire on a bug
-        in this codebase -- exactly the case where a guest would otherwise be
-        charged a number the dialog never showed.
+        The write raises `PricingMismatchError` before it commits, so nothing
+        was charged. Prices are fixed, so only a bug can cause it: the
+        proposal is retired like any other refusal, but the line is an error
+        rather than the info line an ordinary refusal gets.
         """
         store = _make_store()
         proposal = _create_book_proposal(store, total="100.00")
 
-        async def fake_commit_booking(
+        async def refuse_on_mismatch(
             write_pool: AsyncConnectionPool[Any],
             *,
             customer_id: int,
             rooms: Sequence[write_ops.RoomRequest],
+            expected_total: Decimal | None = None,
         ) -> _FakeCommitResult:
-            """Return a result whose total deliberately disagrees with the proposal.
+            """Refuse as the real write does when its total disagrees.
 
             Args:
                 write_pool: Unused; `confirm()` forwards its own `write_pool`
                     argument (`None` in these tests) without inspecting it.
                 customer_id: Unused; the test only cares about the mismatch.
                 rooms: Unused; the test only cares about the mismatch.
+                expected_total: Unused; the test only cares about the mismatch.
 
-            Returns:
-                A result whose total does not match the proposal's total.
+            Raises:
+                PricingMismatchError: Unconditionally.
 
             """
-            _ = write_pool, customer_id, rooms
-            return _FakeCommitResult(total_amount=Decimal("999.00"))
+            _ = write_pool, customer_id, rooms, expected_total
+            raise proposals_module.write_ops.PricingMismatchError(
+                expected_total=Decimal("100.00"), computed_total=Decimal("999.00"),
+            )
 
         monkeypatch.setattr(
-            proposals_module.write_ops, "commit_booking", fake_commit_booking,
+            proposals_module.write_ops, "commit_booking", refuse_on_mismatch,
         )
 
-        with pytest.raises(AssertionError):
+        with (
+            caplog.at_level(logging.INFO, logger=_PROPOSALS_LOGGER),
+            pytest.raises(proposals_module.write_ops.PricingMismatchError),
+        ):
             asyncio.run(
                 store.confirm(
                     proposal_id=proposal.proposal_id,
@@ -1071,3 +1133,97 @@ class TestConfirm:
                     write_pool=_UNUSED_WRITE_POOL,
                 ),
             )
+
+        assert store.get_pending_for_thread(_THREAD_ID) is None
+        records = [r for r in caplog.records if "pricing mismatch" in r.getMessage()]
+        assert len(records) == 1
+        assert records[0].levelno == logging.ERROR
+        assert "computed_total=999.00" in records[0].getMessage()
+
+
+class TestAuditLogging:
+    """Each proposal lifecycle event logs one self-contained line."""
+
+    def test_create_logs_the_proposal(self, caplog: pytest.LogCaptureFixture) -> None:
+        """A created proposal is logged with its id, action, thread, and guest."""
+        store = _make_store()
+        with caplog.at_level(logging.INFO, logger=_PROPOSALS_LOGGER):
+            proposal = _create_book_proposal(store)
+        message = _only_message(caplog, "Proposal created")
+        assert f"proposal_id={proposal.proposal_id}" in message
+        assert f"thread_id={_THREAD_ID}" in message
+        assert f"customer_id={_CUSTOMER_ID}" in message
+
+    def test_confirm_logs_the_booking_it_wrote(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A confirmed proposal's line names the booking the write produced."""
+        store = _make_store()
+        proposal = _create_book_proposal(store, total="100.00")
+        fake_result = _FakeCommitResult(total_amount=Decimal("100.00"), booking_id=42)
+
+        async def fake_commit_booking(
+            write_pool: AsyncConnectionPool[Any],
+            *,
+            customer_id: int,
+            rooms: Sequence[write_ops.RoomRequest],
+            expected_total: Decimal | None = None,
+        ) -> _FakeCommitResult:
+            """Return a fixed successful result, ignoring all arguments."""
+            _ = write_pool, customer_id, rooms, expected_total
+            return fake_result
+
+        monkeypatch.setattr(
+            proposals_module.write_ops, "commit_booking", fake_commit_booking,
+        )
+
+        with caplog.at_level(logging.INFO, logger=_PROPOSALS_LOGGER):
+            asyncio.run(
+                store.confirm(
+                    proposal_id=proposal.proposal_id,
+                    customer_id=_CUSTOMER_ID,
+                    write_pool=_UNUSED_WRITE_POOL,
+                ),
+            )
+
+        message = _only_message(caplog, "Proposal confirmed")
+        assert f"proposal_id={proposal.proposal_id}" in message
+        assert "booking_id=42" in message
+
+    def test_wrong_guest_is_logged_as_a_warning(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Another guest's attempt on a proposal is a warning naming both guests."""
+        store = _make_store()
+        proposal = _create_book_proposal(store, customer_id=_CUSTOMER_ID)
+        with (
+            caplog.at_level(logging.INFO, logger=_PROPOSALS_LOGGER),
+            pytest.raises(ProposalOwnershipError),
+        ):
+            store.dismiss(
+                proposal_id=proposal.proposal_id, customer_id=_OTHER_CUSTOMER_ID,
+            )
+        records = [r for r in caplog.records if "different guest" in r.getMessage()]
+        assert len(records) == 1
+        assert records[0].levelno == logging.WARNING
+        assert f"customer_id={_OTHER_CUSTOMER_ID} attempted" in records[0].getMessage()
+
+
+def _only_message(caplog: pytest.LogCaptureFixture, prefix: str) -> str:
+    """Return the one captured message starting with `prefix`.
+
+    Args:
+        caplog: Pytest log capture fixture.
+        prefix: Start of the message to find.
+
+    Returns:
+        str: The formatted message.
+
+    """
+    messages = [
+        r.getMessage() for r in caplog.records if r.getMessage().startswith(prefix)
+    ]
+    assert len(messages) == 1
+    return messages[0]

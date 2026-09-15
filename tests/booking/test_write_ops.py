@@ -358,7 +358,10 @@ class TestCommitBooking:
                 request, expected_total = await _find_available_block(pool, nights=2)
 
                 result = await write_ops.commit_booking(
-                    pool, customer_id=customer_id, rooms=[request],
+                    pool,
+                    customer_id=customer_id,
+                    rooms=[request],
+                    expected_total=expected_total,
                 )
                 try:
                     assert result.total_amount == expected_total
@@ -450,9 +453,73 @@ class TestCommitBooking:
 
         asyncio.run(_run())
 
+    def test_total_mismatch_books_nothing(self, rw_db_url: str) -> None:
+        """A total that differs from the expected one creates no booking.
+
+        `expected_total` is the total the guest's confirmation dialog showed.
+        The check runs inside the transaction, before any night is booked.
+        """
+
+        async def _run() -> None:
+            async with _rw_pool(rw_db_url) as pool:
+                customer_id, _ = await _first_two_customer_ids(pool)
+                request, total = await _find_available_block(pool, nights=1)
+                before = await write_ops.list_bookings(pool, customer_id=customer_id)
+
+                with pytest.raises(write_ops.PricingMismatchError) as caught:
+                    await write_ops.commit_booking(
+                        pool,
+                        customer_id=customer_id,
+                        rooms=[request],
+                        expected_total=total + Decimal("1.00"),
+                    )
+
+                assert caught.value.computed_total == total
+                status, _ = await _availability_status(
+                    pool, room_id=request.room_id, on_date=request.check_in,
+                )
+                assert status == "Available"
+                after = await write_ops.list_bookings(pool, customer_id=customer_id)
+                assert len(after) == len(before)
+
+        asyncio.run(_run())
+
 
 class TestCancelBooking:
     """`cancel_booking` -- whole-stay cancel and end-trim."""
+
+    def test_refund_mismatch_rolls_back_the_release(self, rw_db_url: str) -> None:
+        """A refund that differs from the expected one leaves the booking intact.
+
+        The check runs after the nights are released but before the
+        transaction commits, so the mismatch must roll that release back.
+        """
+
+        async def _run() -> None:
+            async with _rw_pool(rw_db_url) as pool:
+                customer_id, _ = await _first_two_customer_ids(pool)
+                request, total = await _find_available_block(pool, nights=1)
+                committed = await write_ops.commit_booking(
+                    pool, customer_id=customer_id, rooms=[request],
+                )
+                try:
+                    with pytest.raises(write_ops.PricingMismatchError):
+                        await write_ops.cancel_booking(
+                            pool,
+                            customer_id=customer_id,
+                            booking_id=committed.booking_id,
+                            expected_total=total + Decimal("1.00"),
+                        )
+                    status, _ = await _availability_status(
+                        pool, room_id=request.room_id, on_date=request.check_in,
+                    )
+                    assert status == "Booked"
+                finally:
+                    await write_ops.cancel_booking(
+                        pool, customer_id=customer_id, booking_id=committed.booking_id,
+                    )
+
+        asyncio.run(_run())
 
     def test_full_cancel_round_trip_preserves_price_and_reopens_night(
         self, rw_db_url: str,

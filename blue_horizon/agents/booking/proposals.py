@@ -164,6 +164,7 @@ class ProposalStore:
         )
         self._proposals[proposal.proposal_id] = proposal
         self._by_thread[thread_id] = proposal.proposal_id
+        logger.info("Proposal created: %s", _describe(proposal))
         return proposal
 
     def get_pending_for_thread(self, thread_id: str) -> Proposal | None:
@@ -214,6 +215,7 @@ class ProposalStore:
         self._purge_expired()
         proposal = self._get_pending_and_validate(proposal_id, customer_id)
         self._retire(proposal)
+        logger.info("Proposal dismissed: %s", _describe(proposal))
         return proposal
 
     async def confirm(
@@ -251,6 +253,11 @@ class ProposalStore:
                 example, the proposed nights were taken in the meantime).
                 Retires the proposal: this is a deterministic refusal, and a
                 retry would only re-evaluate the same now-known outcome.
+            write_ops.PricingMismatchError: If the write computed a different
+                total from the one the confirmation dialog showed. A
+                `BookingWriteError` subclass, raised before the write
+                commits, so nothing was written and the proposal is retired
+                as above. Logged as an error, since only a bug can cause it.
             write_ops.BookingUnavailableError: If the database could not be
                 reached at all, and either the action was not `"book"` or
                 the reconciliation read below found nothing. Leaves the
@@ -263,8 +270,12 @@ class ProposalStore:
         cached = self._results.get(proposal_id)
         if cached is not None:
             proposal = self._proposals[proposal_id]
-            if proposal.customer_id != customer_id:
-                raise ProposalOwnershipError(_OWNERSHIP_MSG)
+            _check_owner(proposal, customer_id)
+            logger.info(
+                "Proposal confirm replayed: %s %s",
+                _describe(proposal),
+                _describe_result(cached),
+            )
             return ConfirmOutcome(
                 proposal=proposal, result=cached, already_confirmed=True,
             )
@@ -281,10 +292,27 @@ class ProposalStore:
         # proposal across a failed attempt safe at all.
         try:
             result = await _commit_proposal(write_pool, proposal)
-        except write_ops.BookingWriteError:
+        except write_ops.PricingMismatchError as exc:
             self._retire(proposal)
+            # Nothing was written, but only a bug can cause this, so it is
+            # logged as an error with its traceback, not as a refusal.
+            logger.exception(
+                "Proposal refused on a pricing mismatch: %s computed_total=%s",
+                _describe(proposal),
+                exc.computed_total,
+            )
+            raise
+        except write_ops.BookingWriteError as exc:
+            self._retire(proposal)
+            logger.info(
+                "Proposal refused: %s reason=%r", _describe(proposal), str(exc),
+            )
             raise
         except write_ops.BookingUnavailableError:
+            logger.warning(
+                "Proposal commit could not reach the database: %s",
+                _describe(proposal),
+            )
             # The commit itself could not tell whether it landed: the
             # connection may have died after COMMIT but before the ack
             # returned. Settle it with a read instead of guessing, but only
@@ -306,6 +334,11 @@ class ProposalStore:
                 if reconciled is not None:
                     self._retire(proposal)
                     self._results[proposal_id] = reconciled
+                    logger.info(
+                        "Proposal confirmed after a lost commit ack: %s %s",
+                        _describe(proposal),
+                        _describe_result(reconciled),
+                    )
                     return ConfirmOutcome(
                         proposal=proposal, result=reconciled, already_confirmed=False,
                     )
@@ -313,6 +346,9 @@ class ProposalStore:
 
         self._retire(proposal)
         self._results[proposal_id] = result
+        logger.info(
+            "Proposal confirmed: %s %s", _describe(proposal), _describe_result(result),
+        )
         return ConfirmOutcome(proposal=proposal, result=result, already_confirmed=False)
 
     def _get_pending_and_validate(self, proposal_id: str, customer_id: int) -> Proposal:
@@ -336,10 +372,15 @@ class ProposalStore:
             and self._by_thread.get(proposal.thread_id) == proposal_id
         )
         if not still_pending:
+            logger.info(
+                "Proposal not pending (unknown, expired, or used): "
+                "proposal_id=%s customer_id=%s",
+                proposal_id,
+                customer_id,
+            )
             raise ProposalNotFoundError(_EXPIRED_MSG)
         proposal = cast("Proposal", proposal)
-        if proposal.customer_id != customer_id:
-            raise ProposalOwnershipError(_OWNERSHIP_MSG)
+        _check_owner(proposal, customer_id)
         return proposal
 
     def _retire(self, proposal: Proposal) -> None:
@@ -378,6 +419,67 @@ _EXPIRED_MSG = "That request has expired, shall I check those dates again?"
 _OWNERSHIP_MSG = "That request does not belong to this guest."
 
 
+def _describe(proposal: Proposal) -> str:
+    """Render a proposal's identifying fields for a log line.
+
+    Every proposal lifecycle line carries these, so each line stands on its
+    own in an audit without being joined to the line that created the
+    proposal.
+
+    Args:
+        proposal: The proposal to describe.
+
+    Returns:
+        str: ``key=value`` pairs for the proposal id, action, thread, guest,
+        and the total shown in the confirmation dialog.
+
+    """
+    return (
+        f"proposal_id={proposal.proposal_id} action={proposal.action} "
+        f"thread_id={proposal.thread_id} customer_id={proposal.customer_id} "
+        f"total={proposal.summary['total']}"
+    )
+
+
+def _check_owner(proposal: Proposal, customer_id: int) -> None:
+    """Refuse, and log, an action on a proposal by a guest who does not own it.
+
+    Args:
+        proposal: The proposal being acted on.
+        customer_id: The guest requesting the action.
+
+    Raises:
+        ProposalOwnershipError: If `customer_id` does not own `proposal`.
+
+    """
+    if proposal.customer_id == customer_id:
+        return
+    logger.warning(
+        "Proposal refused to a different guest: customer_id=%s attempted %s",
+        customer_id,
+        _describe(proposal),
+    )
+    raise ProposalOwnershipError(_OWNERSHIP_MSG)
+
+
+def _describe_result(result: WriteResult) -> str:
+    """Render a write result's identifying fields for a log line.
+
+    Args:
+        result: The `write_ops` result of a confirmed proposal.
+
+    Returns:
+        str: ``booking_id=...``, plus ``confirmation_number=...`` for a new
+        booking.
+
+    """
+    fields = f"booking_id={result.booking_id}"
+    confirmation_number = getattr(result, "confirmation_number", None)
+    if confirmation_number is not None:
+        fields += f" confirmation_number={confirmation_number}"
+    return fields
+
+
 async def _commit_proposal(
     write_pool: AsyncConnectionPool[Any],
     proposal: Proposal,
@@ -393,52 +495,40 @@ async def _commit_proposal(
 
     Raises:
         write_ops.BookingWriteError: If the write fails.
-        AssertionError: If the computed total unexpectedly diverges from the
-            total shown in the confirmation dialog. Prices are fixed and
-            never written by any operation, so this can only fire on a bug
-            in this codebase -- exactly the case where a guest would
-            otherwise be charged a number the dialog never showed.
+        write_ops.PricingMismatchError: If the total the write computes
+            differs from the total shown in the confirmation dialog. The
+            write checks this inside its transaction, so nothing is written.
 
     """
+    # Checked by the write before it commits, not here after it returns: by
+    # then the guest would already have been charged a number the dialog
+    # never showed.
+    expected_total = Decimal(proposal.summary["total"])
     # `Proposal.details` is an opaque, `action`-shaped payload (see the class
     # docstring): its concrete shape is guaranteed by `ProposalStore.create()`'s
     # caller, not by the type system, so each branch casts it to the shape
     # `action` promises.
-    result: WriteResult
     if proposal.action == "book":
-        result = await write_ops.commit_booking(
+        return await write_ops.commit_booking(
             write_pool,
             customer_id=proposal.customer_id,
             rooms=cast("list[write_ops.RoomRequest]", proposal.details),
+            expected_total=expected_total,
         )
-    elif proposal.action == "cancel":
+    if proposal.action == "cancel":
         booking_id, instructions = cast("CancelDetails", proposal.details)
-        result = await write_ops.cancel_booking(
+        return await write_ops.cancel_booking(
             write_pool,
             customer_id=proposal.customer_id,
             booking_id=booking_id,
             rooms=instructions,
+            expected_total=expected_total,
         )
-    else:
-        booking_id, changes = cast("ModifyDetails", proposal.details)
-        result = await write_ops.modify_booking(
-            write_pool,
-            customer_id=proposal.customer_id,
-            booking_id=booking_id,
-            changes=changes,
-        )
-
-    committed_total = (
-        getattr(result, "total_amount", None)
-        if proposal.action != "cancel"
-        else getattr(result, "refunded_amount", None)
+    booking_id, changes = cast("ModifyDetails", proposal.details)
+    return await write_ops.modify_booking(
+        write_pool,
+        customer_id=proposal.customer_id,
+        booking_id=booking_id,
+        changes=changes,
+        expected_total=expected_total,
     )
-    proposed_total = Decimal(proposal.summary["total"])
-    if committed_total != proposed_total:
-        msg = (
-            f"Internal pricing mismatch on proposal {proposal.proposal_id}: "
-            f"dialog showed {proposed_total}, commit computed {committed_total}."
-        )
-        raise AssertionError(msg)
-
-    return result

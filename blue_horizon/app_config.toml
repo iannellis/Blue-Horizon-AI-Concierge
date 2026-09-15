@@ -151,3 +151,9 @@ data_path = "data/pandas"
 data_path = "data/pandas"
 # Customers remapped to the dense customer_id range [1, N] and loaded first
 seeded_customer_count = 15
+
+[logging]
+# Root log level for the API process
+level = "INFO"
+# Loggers kept at WARNING, since at INFO they log every outbound HTTP request
+quiet_loggers = ["httpx", "httpcore", "openai"]

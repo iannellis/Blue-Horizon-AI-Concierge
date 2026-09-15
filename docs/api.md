@@ -148,7 +148,7 @@ chat message on the same thread supersedes any pending proposal.
 | `200` | Committed. `already_confirmed` distinguishes a fresh write from a replayed cached result (a duplicate confirm) | Retired |
 | `404` | Unknown or expired (`ProposalNotFoundError`) | Already gone |
 | `403` | Belongs to a different guest (`ProposalOwnershipError`) | Unchanged |
-| `409` | The write was evaluated and refused - most commonly, another guest took one of the nights in the meantime. `detail` carries the app-authored reason verbatim | Retired |
+| `409` | The write was evaluated and refused - most commonly, another guest took one of the nights in the meantime. On a defect, the write's total differed from the dialog's and nothing was written. `detail` carries the app-authored reason verbatim | Retired |
 | `503` | The database could not be reached at all; nothing was decided either way. `Retry-After` header included | **Kept pending** - confirming again is safe and is a real retry, not a duplicate |
 
 The `503` case is why a client should keep its confirm dialog open (Confirm still

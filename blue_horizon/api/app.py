@@ -37,6 +37,7 @@ from blue_horizon.agents.orchestration import (
     turn_error_message,
 )
 from blue_horizon.config import load_app_config
+from blue_horizon.logging_setup import configure_logging, log_context
 
 load_dotenv()
 
@@ -86,8 +87,8 @@ orchestrator = OrchestrationManager()
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """Manage the lifespan of the FastAPI app.
 
-    Starts the agent orchestrator when the app is launched and stops it when the app
-    is shutdown.
+    Configures logging and starts the agent orchestrator when the app is
+    launched, and stops the orchestrator when the app is shut down.
 
     Arguments:
         _app: The FastAPI application (unused, required by FastAPI signature).
@@ -96,6 +97,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         None: Control to the application lifespan.
 
     """
+    configure_logging(load_app_config().logging)
     await orchestrator.start()
     yield
     await orchestrator.stop()
@@ -381,11 +383,14 @@ async def chat(payload: ChatPayload, request: Request) -> Response:
         return StreamingResponse(_event_stream(payload), media_type=_SSE_MEDIA_TYPE)
 
     try:
-        result = await orchestrator.ainvoke(
-            thread_id=payload.thread_id,
-            user_text=payload.text,
-            customer_id=payload.customer_id,
-        )
+        with log_context(
+            thread_id=payload.thread_id, customer_id=payload.customer_id,
+        ):
+            result = await orchestrator.ainvoke(
+                thread_id=payload.thread_id,
+                user_text=payload.text,
+                customer_id=payload.customer_id,
+            )
     except ThreadCustomerMismatchError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -424,19 +429,30 @@ async def _event_stream(payload: ChatPayload) -> AsyncGenerator[str]:
     queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
 
     async def _pump() -> None:
-        """Drive the orchestrator's stream and forward events onto the queue."""
-        try:
-            async for event in orchestrator.ainvoke_stream(
-                thread_id=payload.thread_id,
-                user_text=payload.text,
-                customer_id=payload.customer_id,
-            ):
-                await queue.put(event)
-        except Exception as exc:
-            logger.warning("chat stream failed: %s", exc, exc_info=True)
-            await queue.put(_error_event(exc))
-        finally:
-            await queue.put(None)
+        """Drive the orchestrator's stream and forward events onto the queue.
+
+        The log context is bound here, inside the task, rather than around
+        the generator: a context variable set in an async generator can be
+        reset from a different context when the generator is closed.
+        """
+        with log_context(
+            thread_id=payload.thread_id, customer_id=payload.customer_id,
+        ):
+            try:
+                async for event in orchestrator.ainvoke_stream(
+                    thread_id=payload.thread_id,
+                    user_text=payload.text,
+                    customer_id=payload.customer_id,
+                ):
+                    await queue.put(event)
+            except ThreadCustomerMismatchError as exc:
+                # The manager already logged the refusal; it is not a defect.
+                await queue.put(_error_event(exc))
+            except Exception as exc:
+                logger.exception("Chat stream failed")
+                await queue.put(_error_event(exc))
+            finally:
+                await queue.put(None)
 
     pump_task = asyncio.create_task(_pump())
     try:

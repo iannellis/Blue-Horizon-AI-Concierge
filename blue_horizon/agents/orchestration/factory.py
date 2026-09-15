@@ -254,6 +254,11 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
         }
         if turn_error is not None:
             patch["turn_error"] = turn_error
+        logger.info(
+            "Turn finished: route=%s outcome=%s",
+            state.get("route", "error"),
+            turn_error or "ok",
+        )
         return patch
 
     graph = StateGraph(ConversationState)

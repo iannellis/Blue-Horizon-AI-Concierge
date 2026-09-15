@@ -348,7 +348,7 @@ class BookingSqlResources:
             )
         except ValueError as exc:
             msg = str(exc)
-            logger.info("run_sql rejected by guardrails: %s", msg)
+            logger.info("run_sql rejected by guardrails: %s query=%r", msg, query)
             return _sql_error_result(msg, error_kind="guardrail")
 
         retry_cfg = self.config.db.retry
@@ -382,7 +382,17 @@ class BookingSqlResources:
                 reraise=True,
             ):
                 with attempt:
-                    return await self._execute_once(query)
+                    result = await self._execute_once(query)
+                    # The statement, never the rows: `bh_agent_ro` can read
+                    # only rooms and availability, but a row count is all an
+                    # audit needs to see what the model looked at.
+                    logger.info(
+                        "run_sql ok: rowcount=%s truncated=%s query=%r",
+                        result["rowcount"],
+                        result["truncated"],
+                        query,
+                    )
+                    return result
 
         except _conn_errors as exc:
             # One line, no traceback: the stack under a pool checkout is
@@ -398,7 +408,7 @@ class BookingSqlResources:
             # path -- so it is kept out of the generic psycopg.Error branch
             # below, which the prompt's retry instructions would otherwise
             # treat as "rewrite the query and try again".
-            logger.info("run_sql blocked a write attempt: %s", exc)
+            logger.warning("run_sql blocked a write attempt: %s query=%r", exc, query)
             error_message = (
                 "Writes are not available through this tool. Use the propose "
                 "tools to book, cancel, or modify a reservation."
@@ -409,12 +419,12 @@ class BookingSqlResources:
             # SQL-level errors (type mismatches, syntax errors, constraint
             # violations, etc.) — expose the error text so the agent can
             # diagnose and rewrite the query per its retry instructions.
-            logger.warning("run_sql SQL error: %s", exc)
+            logger.warning("run_sql SQL error: %s query=%r", exc, query)
             error_message = f"SQL error: {exc}"
             error_kind = "sql"
 
         except Exception:
-            logger.exception("run_sql unexpected failure")
+            logger.exception("run_sql unexpected failure: query=%r", query)
             error_message = _tool_error_message_for_model()
             error_kind = "unexpected"
 

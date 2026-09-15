@@ -67,6 +67,14 @@ retryable: if the database cannot be reached at all
 evaluated and the nights are unavailable) retires the proposal, because that outcome is
 already known and a retry would just re-ask a question that has been answered.
 
+**The total the guest saw is checked before the write commits.** The confirm path passes
+the proposal's total to the `write_ops` function, which compares it with the total it
+computes under lock. If they differ, it raises `write_ops.PricingMismatchError` inside
+the transaction, so the write rolls back. Prices are never written, so only a bug can
+cause a mismatch, for example preview pricing drifting from commit pricing. The error is
+a `BookingWriteError`, so the proposal is retired and the guest gets a `409`, but it is
+logged as an error rather than as an ordinary refusal.
+
 **Invariant 6 (double-booking is structurally impossible) is what makes retaining a
 pending proposal across a failed attempt safe.** A retried commit re-prices every
 night from scratch under the same `SELECT ... FOR UPDATE` lock described below, so it

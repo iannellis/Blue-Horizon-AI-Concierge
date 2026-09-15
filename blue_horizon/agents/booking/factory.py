@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import logging
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Required, TypedDict
 
@@ -40,6 +41,8 @@ if TYPE_CHECKING:
 
     from blue_horizon.agents.booking.resources import BookingSqlResources
     from blue_horizon.config import BookingSqlConfig
+
+logger = logging.getLogger(__name__)
 
 # `@tool` names a tool after its function, so this matches `run_sql` below.
 _RUN_SQL_TOOL_NAME = "run_sql"
@@ -182,6 +185,7 @@ def build_booking_agent(
         bookings = await write_ops.list_bookings(
             resources.get_write_pool(), customer_id=customer_id,
         )
+        logger.info("list_my_bookings returned %d bookings", len(bookings))
         return {"bookings": [write_ops.serialize_booking(b) for b in bookings]}
 
     @tool(parse_docstring=True)
@@ -221,7 +225,7 @@ def build_booking_agent(
                 resources.get_write_pool(), requests,
             )
         except write_ops.BookingWriteError as exc:
-            return {"status": "error", "error": str(exc)}
+            return _tool_refusal("propose_booking", exc)
 
         total = sum((stay.total_amount for stay in priced), Decimal("0.00"))
         summary = {
@@ -272,7 +276,7 @@ def build_booking_agent(
                 resources.get_write_pool(), booking=booking, rooms=rooms,
             )
         except write_ops.BookingWriteError as exc:
-            return {"status": "error", "error": str(exc)}
+            return _tool_refusal("propose_cancellation", exc, booking_id=booking_id)
 
         summary = {"rooms": summary_rooms, "total": write_ops.fmt_money(total)}
         proposal = resources.proposals.create(
@@ -319,7 +323,7 @@ def build_booking_agent(
                 resources.get_write_pool(), booking=booking, changes=changes,
             )
         except write_ops.BookingWriteError as exc:
-            return {"status": "error", "error": str(exc)}
+            return _tool_refusal("propose_modification", exc, booking_id=booking_id)
 
         summary = {"changes": summary_changes, "total": write_ops.fmt_money(total)}
         proposal = resources.proposals.create(
@@ -419,6 +423,33 @@ async def _room_id_for_number(pool: Any, room_number: int) -> int:  # noqa: ANN4
         msg = f"Room {room_number} does not exist."
         raise write_ops.BookingWriteError(msg)
     return row["room_id"]
+
+
+def _tool_refusal(
+    tool_name: str,
+    exc: write_ops.BookingWriteError,
+    *,
+    booking_id: int | None = None,
+) -> dict[str, Any]:
+    """Log a `propose_*` tool's refusal and build the result the model sees.
+
+    A refusal that names a `booking_id` the guest does not own is how a
+    model reaching for another guest's reservation shows up, so the id the
+    model supplied is logged even though the model-facing message omits it.
+
+    Args:
+        tool_name: The refusing tool, such as ``"propose_booking"``.
+        exc: The refusal raised while pricing the proposal.
+        booking_id: The booking the model named, for tools that take one.
+
+    Returns:
+        dict[str, Any]: ``{"status": "error", "error": str(exc)}``.
+
+    """
+    logger.info(
+        "%s refused: booking_id=%s reason=%r", tool_name, booking_id, str(exc),
+    )
+    return {"status": "error", "error": str(exc)}
 
 
 async def _find_owned_booking(

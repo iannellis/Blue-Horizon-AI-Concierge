@@ -86,3 +86,36 @@ docs/                  # This documentation site
    ever writes a booking. The application, not the model, authors the receipt.
 
 See the [API Reference](../api.md) for the wire-level detail.
+
+## Logging
+
+Both processes log to stderr, which `supervisord` forwards to the container log. The
+API's logging is set up in its `lifespan` by `blue_horizon/logging_setup.py`, at the
+level in `[logging]` (see [Configuration](../guides/configuration.md)). Every line
+carries a timestamp, level, logger name, and the conversation's `thread_id` and
+`customer_id`. The API binds those two values when a chat turn starts, and every task
+LangGraph runs for the turn inherits them, so a line logged inside a node or tool names
+its guest and conversation. A line logged outside any turn shows `-` for both.
+
+The log is written so that a turn can be audited without a LangSmith trace. At `INFO`
+it records:
+
+| Event | Logged by |
+|---|---|
+| Router decision, dispatch, and the turn's route and outcome | `orchestration/factory.py` |
+| Retrieval counts per source | `information/factory.py` |
+| Every `run_sql` statement, with its row count or error | `booking/resources.py` |
+| A `propose_*` tool's refusal, with the `booking_id` the model named | `booking/factory.py` |
+| Every proposal created, confirmed, dismissed, refused, or not found | `booking/proposals.py` |
+
+Each proposal line names the proposal, action, thread, guest, and dialog total, plus the
+`booking_id` and confirmation number once written, so it stands on its own. At
+`WARNING` it records a guest refused another guest's proposal or thread, a write blocked
+by the read-only role, and a commit that could not reach the database.
+
+Guest messages, model replies, and `run_sql` result rows are never logged.
+
+The UI logs at `INFO` under the `ui.app` logger: failed or timed-out chat requests with
+their `thread_id`, failures to reach the API, and unexpected confirm statuses.
+
+The log does not persist: it is lost when the Space restarts.

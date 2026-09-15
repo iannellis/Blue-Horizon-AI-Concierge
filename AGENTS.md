@@ -113,6 +113,7 @@ is dismantling a guarantee.
 | `blue_horizon/agents/booking/proposals.py` | In-process `ProposalStore`, propose to confirm/dismiss lifecycle |
 | `blue_horizon/agents/booking/guardrails.py` | `sqlglot` AST allowlist |
 | `blue_horizon/api/app.py` | FastAPI app, SSE streaming, the confirm and dismiss endpoints |
+| `blue_horizon/logging_setup.py` | `configure_logging()` and `log_context()`, which puts `thread_id` and `customer_id` on every log line in a turn |
 | `blue_horizon/load_data/` | Redis and PostgreSQL loaders, plus `schema.sql`, `maintenance_booking_guard.sql`, and `regrant_booking_agent_role.sql` |
 | `eval/` | LangSmith harness, evaluators, 206-case dataset, concurrency stress test |
 | `eval/neon.py` | Neon branch reset utility, used by `eval/booking_db_manager.py` and CI; not imported anywhere under `blue_horizon/` |

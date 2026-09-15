@@ -124,7 +124,7 @@ def build_info_agent(  # noqa: C901, PLR0915
             exc: Exception that was raised.
 
         """
-        logger.exception("Info DAG node %s failed: %s", node_name, exc)
+        logger.error("Info DAG node %s failed", node_name, exc_info=exc)
 
     def _make_retrieval_node(
         source: Source,
@@ -242,11 +242,18 @@ def build_info_agent(  # noqa: C901, PLR0915
             State patch with ``top_results`` populated, sorted by score.
 
         """
-        all_results = [
-            *state.get("faq_results", []),
-            *state.get("amenities_results", []),
-            *state.get("services_results", []),
-        ]
+        faq = state.get("faq_results", [])
+        amenities = state.get("amenities_results", [])
+        services = state.get("services_results", [])
+        # Counts only: an empty retrieval is a correct answer, and the count
+        # is what lets an audit tell "nothing matched" from a bad reply.
+        logger.info(
+            "Info retrieval: faq=%d amenities=%d services=%d",
+            len(faq),
+            len(amenities),
+            len(services),
+        )
+        all_results = [*faq, *amenities, *services]
         ranked = sorted(all_results, key=lambda x: x.score, reverse=True)
         return {"top_results": ranked[:max_context_items]}
 

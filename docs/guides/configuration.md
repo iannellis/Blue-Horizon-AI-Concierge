@@ -12,6 +12,7 @@ The file is structured into sections that map to the Pydantic models in
 | `[booking]` | Booking agent LLM, SQL guardrails, DB pool settings |
 | `[booking.proposals]` | `ttl_s`, how long an unconfirmed proposal stays in the in-process store before it is purged |
 | `[load_data]` | Paths to the source data pickles, and `seeded_customer_count` |
+| `[logging]` | The API's root log level, and the third-party loggers kept quiet |
 
 Neon branch management (project ID, branch name, reset tuning) lives entirely in
 `eval/`, not here - the serving app has no Neon management awareness. See
@@ -109,6 +110,15 @@ startup attempt was classified permanent. Unlike `.unavailable` (shown for `STAR
 carrying no retry instruction because recovery is expected on its own), this string must
 not offer a retry affordance the guest cannot act on - the process itself keeps
 retrying regardless, but nothing the guest does changes that.
+
+**`[logging].level`** (default `INFO`) sets the API's root log level. `INFO` is the level
+the log is designed to be audited at; see
+[Architecture](../architecture/index.md#logging) for what it records. `WARNING` keeps
+only refusals and failures.
+
+**`[logging].quiet_loggers`** (default `httpx`, `httpcore`, `openai`) are held at
+`WARNING` whatever `level` is. At `INFO` they log every request to the model provider,
+which would outnumber the application's own lines several times over.
 
 **`statement_timeout` is not in this file.** It is set at the database role level, with
 `ALTER ROLE`, so that it applies under PgBouncer transaction pooling, where a

@@ -8,6 +8,10 @@
 
 ::: blue_horizon.config
 
+## Logging
+
+::: blue_horizon.logging_setup
+
 ## Data loading
 
 ::: blue_horizon.load_data.information_redis

@@ -47,6 +47,41 @@ class BookingWriteError(Exception):
     """
 
 
+_PRICING_MISMATCH_MSG = (
+    "The price of this request changed before it could be confirmed, so "
+    "nothing was changed. Shall I check again?"
+)
+
+
+class PricingMismatchError(BookingWriteError):
+    """Raised when a write's total differs from the total the guest was shown.
+
+    Prices are fixed and never written, so this can only fire on a bug in
+    this codebase, such as preview pricing drifting from commit pricing. It
+    is raised inside the write's transaction, before it commits, so the
+    guest is never charged or refunded a number the confirmation dialog did
+    not show. As a `BookingWriteError` it retires the proposal, since a
+    retry would compute the same total again.
+
+    Attributes:
+        expected_total: Total shown in the confirmation dialog.
+        computed_total: Total the write computed under lock.
+
+    """
+
+    def __init__(self, *, expected_total: Decimal, computed_total: Decimal) -> None:
+        """Store both totals behind a guest-facing message.
+
+        Args:
+            expected_total: Total shown in the confirmation dialog.
+            computed_total: Total the write computed under lock.
+
+        """
+        super().__init__(_PRICING_MISMATCH_MSG)
+        self.expected_total = expected_total
+        self.computed_total = computed_total
+
+
 class BookingUnavailableError(Exception):
     """Raised when a booking write cannot reach the database at all.
 
@@ -392,6 +427,7 @@ async def commit_booking(
     *,
     customer_id: int,
     rooms: Sequence[RoomRequest],
+    expected_total: Decimal | None = None,
 ) -> CommitResult:
     """Book every requested room-night, all-or-nothing, in one transaction.
 
@@ -399,6 +435,9 @@ async def commit_booking(
         pool: Read-write booking database pool (`bh_agent_rw`).
         customer_id: Server-injected identity of the booking guest.
         rooms: Room, date-range requests to book.
+        expected_total: Total the guest's confirmation dialog showed. When
+            set, nothing is booked unless the total priced under lock
+            matches it. ``None`` skips the check.
 
     Returns:
         CommitResult: The new booking's id, confirmation number, and priced
@@ -411,6 +450,8 @@ async def commit_booking(
             `room_availability` and `booking_rooms` have drifted out of
             sync, since the `FOR UPDATE` lock above already re-validates
             availability). No partial writes are made either way.
+        PricingMismatchError: If `expected_total` is set and differs from
+            the total priced under lock. Nothing is written.
         BookingUnavailableError: If the database could not be reached at
             all. No statement was necessarily sent, so a retry is a clean
             first attempt (see `reraise_operational_as_unavailable`).
@@ -422,6 +463,10 @@ async def commit_booking(
                 priced = [
                     await _price_one_room(cur, room, lock=True) for room in rooms
                 ]
+                total_amount = sum(
+                    (stay.total_amount for stay in priced), Decimal("0.00"),
+                )
+                _require_expected_total(expected_total, total_amount)
 
                 booking_id = await _insert_booking(cur, customer_id=customer_id)
                 for stay in priced:
@@ -449,9 +494,6 @@ async def commit_booking(
                     (confirmation_number, booking_id),
                 )
 
-            total_amount = sum(
-                (stay.total_amount for stay in priced), Decimal("0.00"),
-            )
             return CommitResult(
                 booking_id=booking_id,
                 confirmation_number=confirmation_number,
@@ -466,6 +508,7 @@ async def cancel_booking(
     customer_id: int,
     booking_id: int,
     rooms: Sequence[CancelRoomInstruction] | None = None,
+    expected_total: Decimal | None = None,
 ) -> CancelResult:
     """Cancel whole room-stays, or shrink one from either end, in one transaction.
 
@@ -475,6 +518,9 @@ async def cancel_booking(
         booking_id: Booking to cancel or shrink.
         rooms: Per-room-stay instructions. ``None`` cancels every room-stay on
             the booking outright.
+        expected_total: Refund the guest's confirmation dialog showed. When
+            set, the transaction is rolled back unless the refund computed
+            under lock matches it. ``None`` skips the check.
 
     Returns:
         CancelResult: Refunded amount and whether the booking is now fully
@@ -485,6 +531,8 @@ async def cancel_booking(
             is already cancelled, references an unknown `booking_room_id`, or
             any instruction would leave a mid-stay hole. No partial writes
             are made.
+        PricingMismatchError: If `expected_total` is set and differs from
+            the refund computed under lock. The transaction is rolled back.
         BookingUnavailableError: If the database could not be reached at
             all. No statement was necessarily sent, so a retry is a clean
             first attempt (see `reraise_operational_as_unavailable`).
@@ -510,6 +558,7 @@ async def cancel_booking(
                     msg = "That room-stay is not on this booking."
                     raise BookingWriteError(msg)
                 refunded += await _apply_cancel_instruction(cur, row, instruction)
+            _require_expected_total(expected_total, refunded)
 
             await cur.execute(
                 "SELECT COUNT(*) AS remaining FROM booking_rooms WHERE booking_id = %s",
@@ -539,6 +588,7 @@ async def modify_booking(
     customer_id: int,
     booking_id: int,
     changes: Sequence[ModifyRoomInstruction],
+    expected_total: Decimal | None = None,
 ) -> ModifyResult:
     """Release and reacquire room-stays atomically; nothing changes unless all succeed.
 
@@ -548,6 +598,10 @@ async def modify_booking(
         booking_id: Booking to modify.
         changes: Replacement room, date-range requests, one per existing
             `booking_rooms` row being changed.
+        expected_total: Booking total after modification that the guest's
+            confirmation dialog showed. When set, the transaction is rolled
+            back unless the total after the changes matches it. ``None``
+            skips the check.
 
     Returns:
         ModifyResult: The booking's priced room-stays after modification.
@@ -561,6 +615,9 @@ async def modify_booking(
             drifted out of sync, since the `FOR UPDATE` lock above already
             re-validates availability). No partial writes are made either
             way.
+        PricingMismatchError: If `expected_total` is set and differs from
+            the booking's total after the changes. The transaction is
+            rolled back.
         BookingUnavailableError: If the database could not be reached at
             all. No statement was necessarily sent, so a retry is a clean
             first attempt (see `reraise_operational_as_unavailable`).
@@ -624,19 +681,22 @@ async def modify_booking(
                 (booking_id,),
             )
             rows = cast("list[dict[str, Any]]", await cur.fetchall())
-
-        rooms_out = tuple(
-            PricedRoomStay(
-                booking_room_id=row["booking_room_id"],
-                room_id=row["room_id"],
-                room_number=row["room_number"],
-                check_in=row["check_in"],
-                check_out=row["check_out"],
-                total_amount=row["total_amount"],
+            rooms_out = tuple(
+                PricedRoomStay(
+                    booking_room_id=row["booking_room_id"],
+                    room_id=row["room_id"],
+                    room_number=row["room_number"],
+                    check_in=row["check_in"],
+                    check_out=row["check_out"],
+                    total_amount=row["total_amount"],
+                )
+                for row in rows
             )
-            for row in rows
-        )
-        total_amount = sum((stay.total_amount for stay in rooms_out), Decimal("0.00"))
+            total_amount = sum(
+                (stay.total_amount for stay in rooms_out), Decimal("0.00"),
+            )
+            _require_expected_total(expected_total, total_amount)
+
         return ModifyResult(
             booking_id=booking_id, rooms=rooms_out, total_amount=total_amount,
         )
@@ -1142,6 +1202,30 @@ async def _insert_booking(
     )
     row = cast("dict[str, Any]", await cur.fetchone())
     return cast("int", row["booking_id"])
+
+
+def _require_expected_total(
+    expected_total: Decimal | None, computed_total: Decimal,
+) -> None:
+    """Refuse a write whose total differs from the one the guest was shown.
+
+    Called inside the write's transaction, before it commits, so raising
+    here rolls the whole write back.
+
+    Args:
+        expected_total: Total shown in the confirmation dialog, or ``None``
+            to skip the check.
+        computed_total: Total the write computed under lock.
+
+    Raises:
+        PricingMismatchError: If `expected_total` is set and differs from
+            `computed_total`.
+
+    """
+    if expected_total is not None and computed_total != expected_total:
+        raise PricingMismatchError(
+            expected_total=expected_total, computed_total=computed_total,
+        )
 
 
 async def _lock_booking_rooms(

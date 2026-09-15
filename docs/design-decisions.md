@@ -461,6 +461,49 @@ whose cause chain holds that error records `unavailable` and logs one line. Catc
 error inside each tool and returning an error result was rejected: it would hand the
 model an outage to narrate, which is the problem the entry above removed.
 
+### The logs could not be used to audit a turn
+
+**Status:** adopted.
+
+Nothing in the API or UI configured logging, so Python's fallback handler printed only
+`WARNING` and above, as bare message text with no timestamp, level, or logger name.
+Every `INFO` line was discarded, including the router's decision and the guardrail's
+refusals. The events an audit most needs were not logged at any level: no line recorded
+a proposal being confirmed or dismissed, a booking being written, or a guest acting on
+another guest's proposal. No line named a thread or a guest, so lines from concurrent
+turns could not be told apart. LangSmith tracing covered turns in the demo, but a
+production deployment would not trace every conversation, and the confirm and dismiss
+endpoints run outside the graph and were never traced at all.
+
+**The log now carries the context and the events itself.** A logging filter adds the
+`thread_id` and `customer_id` bound in `contextvars` when the turn starts, so no function
+signature changed to carry them. Each proposal line repeats its own ids instead of
+relying on that context, because the confirm and dismiss endpoints only learn the thread
+after looking the proposal up. The model's SQL is logged because `bh_agent_ro` cannot
+read guest data, but result rows, guest messages, and model replies are not, so the log
+never holds the conversation itself. Logging the guest's text was left out: it would
+make the log sensitive enough to need the retention controls a trace store has.
+See [Architecture](architecture/index.md#logging).
+
+### The pricing check ran after the charge
+
+**Status:** adopted.
+
+Confirming a proposal compared the total the write computed with the total the
+confirmation dialog showed, and raised `AssertionError` if they differed. The comparison
+ran after the `write_ops` function returned, and each of those functions commits its own
+transaction, so a mismatch was reported with the booking already written at a price the
+guest never saw. Nothing caught the error either: the proposal stayed pending, the API
+answered `500`, and the UI told the guest to confirm again. A retried booking then failed
+because its nights were taken, by the guest's own booking.
+
+**The check now runs inside the transaction.** Each `write_ops` function takes the
+expected total and raises `PricingMismatchError` before it commits, so the write rolls
+back. Making it a `BookingWriteError` reuses the retire-and-`409` path, which suits an
+outcome a retry would only repeat. The parameter is optional so tests can call `write_ops`
+directly without a proposal; the confirm path always passes it. See
+[Booking agent](architecture/booking-agent.md#3-the-proposeconfirm-flow).
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

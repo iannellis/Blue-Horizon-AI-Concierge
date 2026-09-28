@@ -30,9 +30,6 @@ _INFO_REQUIRED_TOOLS = (
     "merge",
 )
 
-# Tool names used by rooms agent SQL generation
-_SQL_TOOL_NAMES = ("run_sql",)
-
 
 
 def _iter_turn_outputs(run: Run) -> list[TurnOutput]:

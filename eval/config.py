@@ -61,7 +61,7 @@ class _EvalDbSettings(BaseSettings):
             ``PGSQL_RW_DB_URL`` for the booking agent's write pool,
             propose/write tools, and evaluator pool connections.
         pgsql_ro_eval_db_url: Read-only PostgreSQL database URL override
-            (`bh_agent_ro`), used exclusively by `run_sql`. When set, takes
+            (`bh_agent_ro`), used exclusively by `search_rooms`. When set, takes
             precedence over ``PGSQL_RO_DB_URL``. Must be set alongside
             `pgsql_rw_eval_db_url` and point at the same database -- leaving
             it unset while overriding the read-write URL runs the model's

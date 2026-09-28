@@ -83,15 +83,15 @@ class OrchestrationResources:
 
         Args:
             pgsql_rw_db_url: Optional read-write database URL override for the
-                booking SQL agent (`bh_agent_rw`).  When provided, takes
+                booking agent (`bh_agent_rw`).  When provided, takes
                 precedence over the ``PGSQL_RW_DB_URL`` value from the
                 application configuration.  Pass this when the caller (e.g.,
                 the eval/stress harnesses) operates against a separate
                 database and needs the agent to write to that same database
                 so that reconciliation queries see the changes.
             pgsql_ro_db_url: Optional read-only database URL override for the
-                booking SQL agent (`bh_agent_ro`), used exclusively by
-                `run_sql`.  When provided, takes precedence over the
+                booking agent (`bh_agent_ro`), used exclusively by
+                `search_rooms`.  When provided, takes precedence over the
                 ``PGSQL_RO_DB_URL`` application configuration value.  Must be
                 overridden together with `pgsql_rw_db_url`: the two must point
                 at the same database, just different roles.

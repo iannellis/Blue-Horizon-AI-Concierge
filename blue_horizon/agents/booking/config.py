@@ -1,4 +1,4 @@
-"""Configuration loading and prompt rendering for the booking SQL agent."""
+"""Configuration loading and prompt rendering for the booking agent."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ from blue_horizon.config import BookingSqlConfig, load_app_config
 if TYPE_CHECKING:
     from pathlib import Path
     from string import Template
+
+    from blue_horizon.agents.booking.search import RoomsMetadata
 
 
 def load_booking_config(config_path: Path | str | None = None) -> BookingSqlConfig:
@@ -28,24 +30,22 @@ def load_booking_config(config_path: Path | str | None = None) -> BookingSqlConf
     return app_config.booking
 
 
-def render_system_prompt(  # noqa: PLR0913
+def render_system_prompt(
     *,
     template: Template,
     top_k: int,
-    enum_values: dict[str, list[str]],
-    basic_amenities: list[str],
-    additional_amenities: list[str],
-    view_types: list[str],
+    meta: RoomsMetadata,
 ) -> str:
     """Render the system prompt template with runtime substitutions.
 
+    The searchable values themselves are not rendered: the `search_rooms`
+    tool schema lists them, so the prompt needs only the bounds a guest's
+    wording has to be mapped onto.
+
     Args:
         template: String Template loaded from the booking prompt resource.
-        top_k: Maximum number of rooms to surface in the prompt.
-        enum_values: Mapping of enum type name to list of valid values.
-        basic_amenities: Distinct basic amenity values from the database.
-        additional_amenities: Distinct additional amenity values from the database.
-        view_types: Distinct view type values from the database.
+        top_k: Maximum number of rooms a search returns.
+        meta: Rooms metadata supplying the date window and top floor.
 
     Returns:
         Rendered system prompt string with all placeholders substituted.
@@ -53,11 +53,8 @@ def render_system_prompt(  # noqa: PLR0913
     """
     return template.safe_substitute(
         top_k=top_k,
-        room_type=enum_values.get("room_type", []),
-        basic_amenities=basic_amenities,
-        additional_amenities=additional_amenities,
-        room_bed_type=enum_values.get("room_bed_type", []),
-        view_types=view_types,
-        room_status_type=enum_values.get("room_status_type", []),
-        availability_status_type=enum_values.get("availability_status_type", []),
+        first_night=meta.first_night.isoformat(),
+        last_night=meta.last_night.isoformat(),
+        last_check_out=meta.last_check_out.isoformat(),
+        max_floor=meta.max_floor,
     )

@@ -110,7 +110,7 @@ async def _run_workload(
 
                 latency_ms = (time.perf_counter() - t0) * 1000.0
 
-                sql_calls = _collect_run_sql_calls(callback.tool_summary)
+                search_calls = _collect_search_calls(callback.tool_summary)
                 outcome = _classify_outcome(
                     op_type=build.op_type,
                     assistant_text=assistant_text,
@@ -132,7 +132,7 @@ async def _run_workload(
                     old_room=build.old_room,
                     old_check_in=build.old_check_in,
                     old_check_out=build.old_check_out,
-                    sql_calls=sql_calls,
+                    search_calls=search_calls,
                 )
 
                 local_ops.append(op_entry)
@@ -433,28 +433,28 @@ async def _invoke_orchestration(  # noqa: PLR0913
     return assistant_text, None
 
 
-def _collect_run_sql_calls(
+def _collect_search_calls(
     tool_summary: list[dict[str, object]],
 ) -> list[dict[str, object]]:
-    """Collect ``run_sql`` entries from a callback tool summary.
+    """Collect ``search_rooms`` entries from a callback tool summary.
 
     Args:
         tool_summary: Tool summary entries captured during orchestration.
 
     Returns:
-        List of ``run_sql`` tool entries in original order.
+        List of ``search_rooms`` tool entries in original order.
 
     """
-    sql_calls: list[dict[str, object]] = []
+    search_calls: list[dict[str, object]] = []
 
     for entry in tool_summary:
         if not isinstance(entry, dict):
             continue
-        if entry.get("tool") != "run_sql":
+        if entry.get("tool") != "search_rooms":
             continue
-        sql_calls.append(entry)
+        search_calls.append(entry)
 
-    return sql_calls
+    return search_calls
 
 
 def _classify_outcome(
@@ -468,7 +468,7 @@ def _classify_outcome(
 
     Three sources are tried in order, most stable first: a Python-level
     invocation error, the turn's propose+confirm pair, and -- when neither
-    fired -- the last ``run_sql`` call's structured ``error_kind``. Assistant
+    fired -- the last ``search_rooms`` call's structured ``error_kind``. Assistant
     text is the last resort, used only when none of the above produced an
     answer (for example, the agent refused or asked a clarifying question
     with no tool call behind it).
@@ -478,7 +478,7 @@ def _classify_outcome(
         assistant_text: Assistant response text.
         err_text: Python-level error text from orchestration invocation, if any.
         tool_summary: Captured tool summary entries for the turn, including
-            any ``run_sql``, ``propose_*``, and ``confirm_booking`` entries.
+            any ``search_rooms``, ``propose_*``, and ``confirm_booking`` entries.
 
     Returns:
         One of ``"success"``, ``"conflict"``, or ``"error"``.
@@ -492,9 +492,9 @@ def _classify_outcome(
     if propose_confirm_outcome is not None:
         return propose_confirm_outcome
 
-    run_sql_outcome = _classify_run_sql_outcome(tool_summary)
-    if run_sql_outcome is not None:
-        return run_sql_outcome
+    search_outcome = _classify_search_outcome(tool_summary)
+    if search_outcome is not None:
+        return search_outcome
 
     return _classify_text_outcome(assistant_text)
 
@@ -560,29 +560,29 @@ def _last_propose_and_confirm(
     return propose_entry, confirm_entry
 
 
-def _classify_run_sql_outcome(tool_summary: list[dict[str, object]]) -> str | None:
-    """Classify an outcome from the turn's last ``run_sql`` call, if it failed.
+def _classify_search_outcome(tool_summary: list[dict[str, object]]) -> str | None:
+    """Classify an outcome from the turn's last ``search_rooms`` call, if it failed.
 
     Reads ``error_kind`` (see ``resources.SqlErrorKind``), a message-
     independent classification, instead of matching the tool's error text.
     Only ``"unavailable"`` -- the database itself unreachable after
-    retrying, not an ordinary query error -- is decisive here; every other
-    ``error_kind`` (a query error, a guardrail rejection, ...) is left to
+    retrying, not a rejected search -- is decisive here; every other
+    ``error_kind`` (rejected arguments, an unexpected failure) is left to
     the text fallback, which already reads those correctly.
 
     Args:
         tool_summary: Captured tool summary entries for the turn.
 
     Returns:
-        ``"error"`` when the last ``run_sql`` call failed with
+        ``"error"`` when the last ``search_rooms`` call failed with
         ``error_kind == "unavailable"``, else ``None`` so the caller falls
         through to the text heuristic.
 
     """
-    sql_calls = _collect_run_sql_calls(tool_summary)
-    if not sql_calls:
+    search_calls = _collect_search_calls(tool_summary)
+    if not search_calls:
         return None
-    last_call = sql_calls[-1]
+    last_call = search_calls[-1]
     failed = last_call.get("status") == "error"
     if failed and last_call.get("error_kind") == "unavailable":
         return "error"
@@ -675,7 +675,7 @@ def _build_op_entry(  # noqa: PLR0913
     old_room: int | None,
     old_check_in: str | None,
     old_check_out: str | None,
-    sql_calls: list[dict[str, object]],
+    search_calls: list[dict[str, object]],
 ) -> dict[str, object]:
     """Create a normalized operation log entry.
 
@@ -696,7 +696,7 @@ def _build_op_entry(  # noqa: PLR0913
         old_room: The prior room number before the operation.
         old_check_in: The prior check-in date before the operation.
         old_check_out: The prior check-out date before the operation.
-        sql_calls: Compact summaries of run_sql tool calls from the callback.
+        search_calls: Compact summaries of search_rooms tool calls from the callback.
 
     Returns:
         The operation log dictionary.
@@ -714,8 +714,8 @@ def _build_op_entry(  # noqa: PLR0913
         "agent_response": assistant_text or "",
         "assistant_text_trunc": _truncate(assistant_text or "", 300),
     }
-    if sql_calls:
-        op_entry["sql_calls"] = sql_calls
+    if search_calls:
+        op_entry["search_calls"] = search_calls
 
     if op_type == "MODIFY":
         op_entry.update(

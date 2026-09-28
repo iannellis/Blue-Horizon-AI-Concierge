@@ -162,6 +162,7 @@ the agent never reported a success that did not actually commit.
 An occasional "SSL connection closed" warning appears right after a Neon branch reset,
 and is retried automatically by design. It is self-healing and not a failure.
 
-`stress_failures.jsonl` flags any `run_sql` call that returned an error, which is not
-the same thing as a connectivity failure. A correctly-refused conflict is not a failure;
-a malformed query the agent recovered from on retry will still appear there.
+`stress_failures.jsonl` flags any `search_rooms` call that returned an error, which is
+not the same thing as a connectivity failure. A correctly-refused conflict is not a
+failure; a search with invalid arguments that the agent corrected on retry will still
+appear there. Each operation's search calls are logged under `search_calls`.

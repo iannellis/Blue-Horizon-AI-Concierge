@@ -52,17 +52,21 @@ class ToolSummaryEntry(BaseModel):
     """One compact tool-call summary captured by ``EvalCaptureCallback``.
 
     Only the fields evaluators actually read are declared here. Every other
-    key the callback captures (``input_keys``, ``k``, ``sql_query``,
+    key the callback captures (``input_keys``, ``k``, ``search_args``,
     ``count``, ``filters``, ``rows``, ``proposal_id``, ``action``,
     ``result``, ...) survives parsing via ``extra="allow"`` and remains
     reachable with ``getattr(entry, key, None)``, but has no typed
     attribute here.
 
     Attributes:
-        tool: Tool name, e.g. "run_sql", "propose_booking", "confirm_booking".
+        tool: Tool name, e.g. "search_rooms", "propose_booking",
+            "confirm_booking".
         status: Tool status string ("ok", "error", "started", "proposed", ...).
         error: User-facing error message, present when the tool failed.
-        rowcount: Rows returned or affected, present on run_sql entries.
+        error_kind: Message-independent failure classification, present on
+            failed search_rooms entries.
+        matching_count: Rooms matching the search, present on search_rooms
+            entries.
         already_confirmed: Whether a confirm_booking entry replayed a
             cached result rather than performing a new write.
         filters_norm: Canonicalized amenity/service filters, when the info
@@ -83,7 +87,8 @@ class ToolSummaryEntry(BaseModel):
     tool: str | None = None
     status: str | None = None
     error: str | None = None
-    rowcount: int | None = None
+    error_kind: str | None = None
+    matching_count: int | None = None
     already_confirmed: bool | None = None
     filters_norm: dict[str, Any] | None = None
     filters_unknown_keys: list[str] = Field(default_factory=list)

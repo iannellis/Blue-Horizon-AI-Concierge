@@ -18,9 +18,9 @@ The only code paths that write a booking.
 
 ::: blue_horizon.agents.booking.factory
 
-## SQL guardrails
+## Room search
 
-::: blue_horizon.agents.booking.guardrails
+::: blue_horizon.agents.booking.search
 
 ## Database utilities
 

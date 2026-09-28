@@ -112,8 +112,12 @@ folder = "system_prompts"
 system_prompt_filename = "booking.txt"
 
 [booking.agent]
-# The default number of rooms to return to the user
+# Most rooms one search returns to the model
 top_k = 4
+# Most searches the model may run in one guest turn
+max_search_calls_per_turn = 4
+# Most room numbers one search may name
+max_search_room_numbers = 10
 
 [booking.db.pool]
 # Connections opened on demand only (min) and the pool ceiling (max)
@@ -126,14 +130,8 @@ max_idle_s = 240.0
 # Seconds a failed background connect keeps retrying before the pool gives up
 reconnect_timeout_s = 30.0
 
-[booking.db.guardrails]
-# Maximum rows returned by one run_sql call
-max_rows = 50
-# Restrict queries to known hotel tables
-allow_only_hotel_tables = true
-
 [booking.db.retry]
-# Retries for transient connection errors on the read-only run_sql pool
+# Retries for transient connection errors on the read-only search pool
 max_transient_retries = 3
 # Backoff before each retry
 transient_retry_backoff_s = 0.15

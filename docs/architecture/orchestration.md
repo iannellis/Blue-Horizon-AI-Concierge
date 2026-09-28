@@ -77,7 +77,7 @@ the graph state instead of writing a reply:
 | Sub-agent timeout (`info_timeout_s`, `booking_timeout_s`) | `timeout` |
 | Sub-agent exception | `internal` |
 | Booking agent exception caused by `BookingUnavailableError`, raised by a booking tool that could not reach the database | `unavailable` |
-| Booking agent returned, but a `run_sql` result this turn carried `error_kind` `unavailable` | `unavailable` |
+| Booking agent returned, but a `search_rooms` result this turn carried `error_kind` `unavailable` | `unavailable` |
 | No final assistant message for the turn | `internal`, set by `finalize` |
 
 `finalize` then removes the failed turn from history entirely. The manager reads
@@ -89,11 +89,11 @@ for `unavailable` and `[orchestration.messages].error` for the other codes.
 
 The two `unavailable` rows cover the two ways a booking tool reports an outage.
 `list_my_bookings` and the `propose_*` tools raise `BookingUnavailableError`, which
-`create_agent` does not catch, so it escapes the booking agent. `run_sql` instead returns
+`create_agent` does not catch, so it escapes the booking agent. `search_rooms` instead returns
 its outage as a result, so the second row discards a reply the agent did produce. After a database
 outage the model writes its own account of it, which would reach the guest as an
 ordinary answer, free to invite a retry in its own words, and without the Send again
-button. The booking dispatch node reads the `error_kind` of the turn's `run_sql` results,
+button. The booking dispatch node reads the `error_kind` of the turn's `search_rooms` results,
 never the reply text, and only results since the turn's own guest message count.
 
 A router or sub-agent exception whose cause chain contains a `BookingUnavailableError` or

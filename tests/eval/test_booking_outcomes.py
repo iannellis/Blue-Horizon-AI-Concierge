@@ -89,16 +89,18 @@ class TestHasToolError:
 
     def test_status_error_is_an_error(self) -> None:
         """A status of 'error' (any case) counts as an error."""
-        assert _has_tool_error(ToolSummaryEntry(tool="run_sql", status="Error")) is True
+        entry = ToolSummaryEntry(tool="search_rooms", status="Error")
+        assert _has_tool_error(entry) is True
 
     def test_error_message_without_status_is_an_error(self) -> None:
         """A non-empty error message counts even without an error status."""
-        entry = ToolSummaryEntry(tool="run_sql", status="ok", error="refused")
+        entry = ToolSummaryEntry(tool="search_rooms", status="ok", error="refused")
         assert _has_tool_error(entry) is True
 
     def test_ok_status_no_error_message_is_not_an_error(self) -> None:
         """A status of 'ok' with no error message is not an error."""
-        assert _has_tool_error(ToolSummaryEntry(tool="run_sql", status="ok")) is False
+        entry = ToolSummaryEntry(tool="search_rooms", status="ok")
+        assert _has_tool_error(entry) is False
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +114,7 @@ class TestDetectProposeConfirm:
     def test_no_propose_call_returns_all_none(self) -> None:
         """A turn with no propose_* call returns (None, None, None)."""
         action, propose, confirm = _detect_propose_confirm(
-            [ToolSummaryEntry(tool="run_sql")],
+            [ToolSummaryEntry(tool="search_rooms")],
         )
         assert action is None
         assert propose is None
@@ -211,7 +213,7 @@ class TestScoreOutcomeMatch:
     def test_no_propose_call_returns_none(self) -> None:
         """A pure-search turn (no propose_* call) has nothing to score."""
         matched, detail = _score_outcome_match(
-            turn_idx=0, tool_summary=[ToolSummaryEntry(tool="run_sql")],
+            turn_idx=0, tool_summary=[ToolSummaryEntry(tool="search_rooms")],
             expected_success=None,
         )
         assert matched is None
@@ -359,20 +361,38 @@ class TestScoreBookingToolOutcomes:
         assert "booking_tool_errors" not in by_key
         assert "booking_no_unexpected_failure_rate" not in by_key
 
-    def test_run_sql_rowcount_sanity(self) -> None:
-        """run_sql calls with a rowcount present score full rowcount sanity."""
+    def test_search_count_sanity(self) -> None:
+        """search_rooms calls with matching_count present score full sanity."""
         run = _make_run(
             [
                 {
                     "route_pred": "booking",
-                    "tool_summary": [{"tool": "run_sql", "rowcount": 2}],
+                    "tool_summary": [{"tool": "search_rooms", "matching_count": 2}],
                 },
             ],
         )
         example = _make_example([{"user": "any rooms free?"}])
         results = _score_booking_tool_outcomes(run, example, _make_cfg())
         by_key = {r["key"]: r for r in results}
-        assert by_key["booking_rowcount_sanity"]["score"] == 1.0
+        assert by_key["booking_search_count_sanity"]["score"] == 1.0
+
+    def test_search_count_missing_scores_below_one(self) -> None:
+        """A search_rooms entry without matching_count lowers the score."""
+        run = _make_run(
+            [
+                {
+                    "route_pred": "booking",
+                    "tool_summary": [
+                        {"tool": "search_rooms", "matching_count": 2},
+                        {"tool": "search_rooms"},
+                    ],
+                },
+            ],
+        )
+        example = _make_example([{"user": "any rooms free?"}])
+        results = _score_booking_tool_outcomes(run, example, _make_cfg())
+        by_key = {r["key"]: r for r in results}
+        assert by_key["booking_search_count_sanity"]["score"] == 0.5  # noqa: PLR2004
 
 
 # ---------------------------------------------------------------------------

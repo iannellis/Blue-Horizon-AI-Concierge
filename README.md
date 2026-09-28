@@ -27,7 +27,7 @@ it to one of two specialised sub-agents:
 
 - **Information agent** answers questions about services, amenities, and policies using
   RAG over a Redis vector store.
-- **Booking agent** searches room availability with LLM-generated, **read-only** SQL,
+- **Booking agent** searches room availability with a typed, **read-only** search tool,
   and proposes bookings, cancellations, and modifications for the guest to confirm.
 
 Anything outside those two jobs is refused.
@@ -44,8 +44,9 @@ the server-side commit. The application, not the model, authors the confirmation
 
 **Safety is structural, not instructed.** That guarantee is enforced in four independent
 places: two PostgreSQL roles (`bh_agent_ro` has `SELECT` on two tables and nothing
-else), a `sqlglot` AST allowlist, the propose/confirm split itself, and a startup check
-that refuses to boot if a trial write through the read-only connection succeeds. Double
+else), a search tool that runs fixed queries and never accepts SQL from the model, the
+propose/confirm split itself, and a startup check that refuses to boot if a trial write
+through the read-only connection succeeds. Double
 booking is prevented by a GiST exclusion constraint that makes overlapping reservations
 impossible to insert, not by a check that runs afterward.
 

@@ -162,7 +162,7 @@ async def ensure_orchestration_ready(cfg: EvalConfig) -> OrchestrationManager:
     The manager is constructed with ``pgsql_rw_eval_db_url`` and
     ``pgsql_ro_eval_db_url`` from the eval config so that the booking agent's
     write pool and evaluator pool connections use the same read-write
-    database that ``run_sql`` reads from via the read-only role. When either
+    database that ``search_rooms`` reads from via the read-only role. When either
     override is not set, the corresponding value is ``None`` and the agent
     falls back to ``PGSQL_RW_DB_URL`` / ``PGSQL_RO_DB_URL``.
 

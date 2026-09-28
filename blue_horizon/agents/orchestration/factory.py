@@ -286,7 +286,7 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
 
 
 def _booking_turn_failure(result: dict[str, Any]) -> TurnErrorCode | None:
-    """Fail a booking turn whose `run_sql` could not reach the database.
+    """Fail a booking turn whose `search_rooms` could not reach the database.
 
     The booking agent returns normally after such an outage, with a reply the
     model wrote itself. That reply would reach the guest as an ordinary
@@ -298,7 +298,7 @@ def _booking_turn_failure(result: dict[str, Any]) -> TurnErrorCode | None:
         result: The booking agent's completed state.
 
     Returns:
-        ``"unavailable"`` if a `run_sql` call this turn found the database
+        ``"unavailable"`` if a `search_rooms` call this turn found the database
         unreachable, otherwise ``None``.
 
     """
@@ -313,7 +313,7 @@ def _record_turn_failure(source: str, exc: BaseException) -> TurnErrorCode:
 
     A booking tool that could not reach its database raises
     `BookingUnavailableError`, which records ``"unavailable"``: the same code
-    a `run_sql` outage records, so every booking-database outage reaches the
+    a `search_rooms` outage records, so every booking-database outage reaches the
     guest the same way. An unreachable model provider or dependency raises
     through several layers of client library, each chaining the last, so its
     traceback runs to well over a hundred lines and says nothing the root

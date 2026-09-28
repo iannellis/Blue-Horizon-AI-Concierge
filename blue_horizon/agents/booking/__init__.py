@@ -1,4 +1,4 @@
-"""Booking SQL agent package.
+"""Booking agent package.
 
 Re-exports the public API so callers can use the same import paths as before:
 
@@ -14,7 +14,6 @@ from blue_horizon.agents.booking.factory import (
     build_booking_agent,
     database_unavailable_this_turn,
 )
-from blue_horizon.agents.booking.guardrails import validate_sql
 from blue_horizon.agents.booking.proposals import (
     Proposal,
     ProposalError,
@@ -23,6 +22,11 @@ from blue_horizon.agents.booking.proposals import (
     ProposalStore,
 )
 from blue_horizon.agents.booking.resources import BookingSqlResources
+from blue_horizon.agents.booking.search import (
+    RoomsMetadata,
+    build_search_args_model,
+    run_room_search,
+)
 from blue_horizon.agents.booking.write_ops import BookingWriteError
 
 __all__ = [
@@ -34,10 +38,12 @@ __all__ = [
     "ProposalNotFoundError",
     "ProposalOwnershipError",
     "ProposalStore",
+    "RoomsMetadata",
     "build_booking_agent",
+    "build_search_args_model",
     "database_unavailable_this_turn",
     "fetch_rooms_metadata",
     "load_booking_config",
     "render_system_prompt",
-    "validate_sql",
+    "run_room_search",
 ]

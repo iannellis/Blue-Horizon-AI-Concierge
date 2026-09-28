@@ -25,20 +25,20 @@ def _propose_entry(tool: str, *, status: str = "proposed") -> dict[str, object]:
     return entry
 
 
-def _run_sql_entry(*, error_kind: str | None = None) -> dict[str, object]:
-    """Build a minimal `run_sql` tool-summary entry.
+def _search_entry(*, error_kind: str | None = None) -> dict[str, object]:
+    """Build a minimal `search_rooms` tool-summary entry.
 
     Args:
         error_kind: `SqlErrorKind` string to attach, or `None` for a
             successful call (`status="ok"`, no `error_kind`).
 
     Returns:
-        `run_sql` summary dictionary.
+        `search_rooms` summary dictionary.
 
     """
     if error_kind is None:
-        return {"tool": "run_sql", "status": "ok"}
-    return {"tool": "run_sql", "status": "error", "error_kind": error_kind}
+        return {"tool": "search_rooms", "status": "ok"}
+    return {"tool": "search_rooms", "status": "error", "error_kind": error_kind}
 
 
 def _confirm_entry(*, status: str = "ok") -> dict[str, object]:
@@ -144,8 +144,8 @@ class TestClassifyOutcome:
 
         assert outcome == "conflict"
 
-    def test_run_sql_unavailable_error_kind_beats_conflict_sounding_text(self) -> None:
-        """A DB-unavailable run_sql call classifies as error, not text-matched.
+    def test_search_unavailable_error_kind_beats_conflict_sounding_text(self) -> None:
+        """A DB-unavailable search_rooms call classifies as error, not text-matched.
 
         The assistant text below contains "unavailable", which
         `_classify_text_outcome` alone would read as a room conflict. The
@@ -156,30 +156,30 @@ class TestClassifyOutcome:
             op_type="BOOK",
             assistant_text="The booking system is temporarily unavailable right now.",
             err_text=None,
-            tool_summary=[_run_sql_entry(error_kind="unavailable")],
+            tool_summary=[_search_entry(error_kind="unavailable")],
         )
 
         assert outcome == "error"
 
-    def test_run_sql_sql_error_kind_falls_back_to_text(self) -> None:
+    def test_search_sql_error_kind_falls_back_to_text(self) -> None:
         """A non-unavailable error_kind (an ordinary query error) is not decisive."""
         outcome = _classify_outcome(
             op_type="BOOK",
             assistant_text="That room isn't available for those nights.",
             err_text=None,
-            tool_summary=[_run_sql_entry(error_kind="sql")],
+            tool_summary=[_search_entry(error_kind="unexpected")],
         )
 
         assert outcome == "conflict"
 
-    def test_successful_run_sql_call_does_not_short_circuit(self) -> None:
-        """A run_sql call with no error still falls through to other sources."""
+    def test_successful_search_call_does_not_short_circuit(self) -> None:
+        """A search_rooms call with no error still falls through to other sources."""
         outcome = _classify_outcome(
             op_type="BOOK",
             assistant_text="Booked successfully.",
             err_text=None,
             tool_summary=[
-                _run_sql_entry(),
+                _search_entry(),
                 _propose_entry("propose_booking"),
                 _confirm_entry(),
             ],

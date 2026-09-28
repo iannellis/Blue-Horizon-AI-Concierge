@@ -1,6 +1,6 @@
 """Async callback handler for capturing routing and tool artifacts.
 
-Contains ``RunSqlOutput`` (the typed SQL tool payload model) and
+Contains ``SearchRoomsOutput`` (the typed room search payload model) and
 ``EvalCaptureCallback`` (the per-turn capture handler).
 """
 
@@ -33,6 +33,9 @@ from eval.langsmith_target._text_utils import (
 
 _ROUTE_KEY = "route"  # key from orchestration.py
 
+# Matches blue_horizon.agents.booking.factory._SEARCH_TOOL_NAME.
+_SEARCH_TOOL_NAME = "search_rooms"
+
 # Maps a propose_* tool name to the proposal action it creates -- mirrors
 # eval.evaluators._booking._PROPOSE_ACTIONS and proposals.ProposalAction.
 _PROPOSE_TOOL_NAMES: frozenset[str] = frozenset(
@@ -43,7 +46,7 @@ _PROPOSE_TOOL_NAMES: frozenset[str] = frozenset(
 def _parse_tool_message_content(output: Any) -> Any:  # noqa: ANN401
     """Unwrap a `ToolMessage` and parse its string content into Python data.
 
-    Shared by the `run_sql` and `propose_*` capture paths, both of which
+    Shared by the `search_rooms` and `propose_*` capture paths, both of which
     receive either a raw dict (direct tool return) or a `ToolMessage` whose
     `content` is a JSON or Python-repr string (needing `Decimal(...)` /
     `datetime.date(...)` preprocessing before `ast.literal_eval`).
@@ -110,20 +113,19 @@ def _compact_rows(
     return safe_rows
 
 
-class RunSqlOutput(BaseModel):
-    """Typed payload returned by the rooms ``run_sql`` tool.
+class SearchRoomsOutput(BaseModel):
+    """Typed payload returned by the booking agent's ``search_rooms`` tool.
 
     This model captures the subset of fields the evaluation harness cares about
-    when summarizing tool activity. The raw tool output may include additional
-    keys (e.g., rows), but we avoid storing those in summaries to keep artifacts
-    compact and stable across runs.
+    when summarizing tool activity. Only a one-room sample of ``rooms`` is kept
+    in summaries, to keep artifacts compact and stable across runs.
 
     Attributes:
-        status: Tool status string (e.g., "ok" or "error").
-        rowcount: Number of rows returned or affected by the statement.
-        rows: Result rows returned by the tool, when present.
-        truncated: Whether the tool output was truncated by the agent guardrails.
-        error: User-facing error message when the tool fails.
+        status: Tool status string ("ok" or "error").
+        matching_count: Number of rooms matching the search, of which at
+            most ``top_k`` are returned.
+        rooms: The rooms returned, when present.
+        error: Error message when the tool fails.
         error_kind: Message-independent failure classification (see
             `resources.SqlErrorKind`), present only on failure. Lets a
             consumer like the stress harness's outcome classifier key off
@@ -132,31 +134,30 @@ class RunSqlOutput(BaseModel):
     """
 
     status: str | None = None
-    rowcount: int | None = None
-    truncated: bool | None = None
+    matching_count: int | None = None
     error: str | None = None
     error_kind: str | None = None
-    rows: list[dict[str, Any]] | None = None
+    rooms: list[dict[str, Any]] | None = None
 
 
-def _parse_run_sql_payload(
-    output: RunSqlOutput | Mapping[str, object],
-) -> RunSqlOutput | None:
-    """Coerce a run_sql tool output into a validated `RunSqlOutput`.
+def _parse_search_rooms_payload(
+    output: SearchRoomsOutput | Mapping[str, object],
+) -> SearchRoomsOutput | None:
+    """Coerce a search_rooms tool output into a validated `SearchRoomsOutput`.
 
     Args:
-        output: Raw or already-typed run_sql tool output.
+        output: Raw or already-typed search_rooms tool output.
 
     Returns:
         The validated payload, or `None` if `output` is neither a
-        `RunSqlOutput` nor a mapping that validates as one.
+        `SearchRoomsOutput` nor a mapping that validates as one.
 
     """
-    if isinstance(output, RunSqlOutput):
+    if isinstance(output, SearchRoomsOutput):
         return output
     if isinstance(output, Mapping):
         try:
-            return RunSqlOutput.model_validate(dict(output))
+            return SearchRoomsOutput.model_validate(dict(output))
         except ValidationError:
             return None
     return None
@@ -436,10 +437,8 @@ class EvalCaptureCallback(AsyncCallbackHandler):
             k_value = _coerce_int(raw_k)
             if k_value is not None:
                 entry["k"] = k_value
-            if tool_name == "run_sql":
-                raw_sql = inputs.get("query")
-                if isinstance(raw_sql, str):
-                    entry["sql_query"] = raw_sql
+            if tool_name == _SEARCH_TOOL_NAME:
+                entry["search_args"] = _json_safe(dict(inputs))
         self._pending_tool_entries[run_id] = entry
 
     async def on_tool_end(
@@ -467,10 +466,10 @@ class EvalCaptureCallback(AsyncCallbackHandler):
         if tool_name is None and isinstance(entry, dict):
             tool_name = entry.get("tool")
 
-        if tool_name == "run_sql":
+        if tool_name == _SEARCH_TOOL_NAME:
             actual_output = _parse_tool_message_content(output)
             if isinstance(actual_output, Mapping):
-                self._capture_run_sql(actual_output, entry)
+                self._capture_search_rooms(actual_output, entry)
             return
         if tool_name in _PROPOSE_TOOL_NAMES:
             actual_output = _parse_tool_message_content(output)
@@ -508,28 +507,27 @@ class EvalCaptureCallback(AsyncCallbackHandler):
         entry["error_preview"] = _preview(error)
         self.tool_summary.append(entry)
 
-    def _capture_run_sql(
+    def _capture_search_rooms(
         self,
-        output: RunSqlOutput | Mapping[str, object],
+        output: SearchRoomsOutput | Mapping[str, object],
         base_entry: dict[str, Any] | None = None,
     ) -> None:
-        """Capture a compact run_sql summary, including a tiny row sample.
+        """Capture a compact search_rooms summary, including a one-room sample.
 
         Args:
-            output: run_sql tool output.
+            output: search_rooms tool output.
             base_entry: Optional base entry with input previews.
 
         """
-        payload = _parse_run_sql_payload(output)
+        payload = _parse_search_rooms_payload(output)
         if payload is None:
             return
         summary = dict(base_entry or {})
-        summary["tool"] = "run_sql"
+        summary["tool"] = _SEARCH_TOOL_NAME
         summary["status"] = payload.status or summary.get("status") or "ok"
-        summary["rowcount"] = payload.rowcount
-        summary["truncated"] = payload.truncated
-        if isinstance(payload.rows, list) and payload.rows:
-            summary["rows"] = _compact_rows(payload.rows, max_rows=1)
+        summary["matching_count"] = payload.matching_count
+        if isinstance(payload.rooms, list) and payload.rooms:
+            summary["rows"] = _compact_rows(payload.rooms, max_rows=1)
         if payload.error:
             summary["error"] = payload.error
         if payload.error_kind:
@@ -537,22 +535,25 @@ class EvalCaptureCallback(AsyncCallbackHandler):
         summary["output_preview"] = _preview(
             {
                 "status": payload.status,
-                "rowcount": payload.rowcount,
-                "truncated": payload.truncated,
+                "matching_count": payload.matching_count,
+                "returned": len(payload.rooms or []),
             },
         )
         self.tool_summary.append(summary)
 
-        # Add SQL results to contexts_used for judge LLM evaluation
-        if isinstance(payload.rows, list) and payload.rows:
-            for row in payload.rows:
-                if isinstance(row, Mapping):
-                    # Format as readable key-value pairs
-                    row_str = ", ".join(
-                        f"{k}: {v}" for k, v in row.items() if v is not None
-                    )
-                    if row_str:
-                        self.contexts_used.append(f"SQL result: {row_str}")
+        # Add search results to contexts_used for judge LLM evaluation
+        if payload.matching_count is not None and payload.status == "ok":
+            self.contexts_used.append(
+                f"Room search: {payload.matching_count} matching rooms",
+            )
+        for room in payload.rooms or []:
+            if isinstance(room, Mapping):
+                # Format as readable key-value pairs
+                room_str = ", ".join(
+                    f"{k}: {v}" for k, v in room.items() if v is not None
+                )
+                if room_str:
+                    self.contexts_used.append(f"Room search result: {room_str}")
 
     def _capture_propose(
         self,

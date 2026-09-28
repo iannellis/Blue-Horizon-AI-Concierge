@@ -55,7 +55,7 @@ for the incident that surfaced this.
 ```
 tests/
   api/            # FastAPI endpoints, content negotiation, SSE events
-  booking/        # write_ops, proposals, guardrails, DB invariants, role privileges
+  booking/        # write_ops, proposals, room search, DB invariants, role privileges
   information/    # Parser, retrieval, graph nodes
   orchestration/  # Router and manager
   load_data/      # Pure pandas helpers: overlap resolution, clamping, customer ranking

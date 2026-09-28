@@ -37,7 +37,7 @@ class StressRunConfig:
             for the booking agent's write pool and the reconciliation/
             invariant-check pool.
         ro_db_url: The read-only Postgres connection URL (`bh_agent_ro`),
-            used exclusively by the booking agent's `run_sql` tool.
+            used exclusively by the booking agent's `search_rooms` tool.
 
     """
 

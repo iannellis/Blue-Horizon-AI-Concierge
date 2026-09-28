@@ -1,7 +1,8 @@
 # Booking agent
 
-The booking agent searches availability via LLM-generated, read-only SQL against a
-PostgreSQL database hosted on [Neon](https://neon.tech). It never writes.
+The booking agent searches availability with a typed search tool over a PostgreSQL
+database hosted on [Neon](https://neon.tech). The model chooses filter values; the
+application runs a fixed, read-only query. It never writes.
 
 ## The model proposes, the application decides
 
@@ -14,28 +15,62 @@ Two roles enforce read-only access at the database level, not just in applicatio
 
 | Role | Grants | Used by |
 |---|---|---|
-| `bh_agent_ro` | `SELECT` only, on `rooms` and `room_availability` | The model's `run_sql` tool, exclusively |
+| `bh_agent_ro` | `SELECT` only, on `rooms` and `room_availability` | The model's `search_rooms` tool, exclusively |
 | `bh_agent_rw` | Read-write | Server-side write functions, `/v1/customers`, `/v1/bookings` |
 
 `customers`, `bookings`, and `booking_rooms` are off the read-only role's grants
 entirely, so guest profile data cannot reach a third-party inference provider through
-free-form SQL even in principle.
+a search, even if a later change widened what the search queries.
 
 `startup_check` refuses to start the application if a trial write through
 `PGSQL_RO_DB_URL` succeeds, which catches the configuration mistake of pointing both
 URLs at the same role and silently defeating the guarantee.
 
-### 2. SQL guardrails
+### 2. Fixed parameterized search
 
-A `sqlglot`-parsed AST allowlist restricts queries to `SELECT` against the two permitted
-tables and caps results at 50 rows before they reach the LLM, limiting context size and
-cost. This is deliberately redundant with the grant. The grant is the guarantee; the
-guardrail is a belt-and-braces layer that also produces better error messages than a
-raw Postgres privilege refusal.
+The model never writes SQL. Its one read tool, `search_rooms`, takes typed filters:
 
-A privilege refusal (`ReadOnlySqlTransaction`, `InsufficientPrivilege`) is caught
-separately from an ordinary SQL error and returned as a flat, non-retryable refusal, so
-the model does not waste turns trying to rephrase its way past a permission boundary.
+| Filter | Meaning |
+|---|---|
+| `check_in`, `check_out` | A stay. Only rooms free and priced for every night come back, with the stay's total. Omit both to search rooms in general. |
+| `room_numbers`, `room_types`, `bed_types` | Any of these |
+| `amenities` | The room has all of these |
+| `view_types` | The room has any of these |
+| `min_floor`, `max_floor` | A floor range; "top floor" is both set to the highest floor |
+| `min_occupancy`, `min_square_feet`, `accessible` | Room attributes |
+| `max_nightly_price` | Every night at or below this; needs dates |
+| `sort_by` | Cheapest stay, highest floor, largest room, or room number |
+
+The allowed values for room type, bed type, amenity, and view type are read from the
+database at startup (`db_utils.fetch_rooms_metadata`) and become `Literal` types in the
+tool's argument model, so the schema the model sees lists every legal value, and an
+unknown one is rejected before any SQL runs. The same startup read supplies the floor
+range and the availability window, which bound the floor and date fields and are
+rendered into the system prompt. Nothing about the data's dates is hardcoded.
+
+`blue_horizon/agents/booking/search.py` then runs one of two fixed queries, one for a
+dated stay and one without dates, with the filter values bound as parameters. Each
+query returns at most `[booking.agent].top_k` rooms, each with a fixed set of
+guest-facing fields, plus `matching_count`, the number of rooms that matched, so a "how
+many" question needs no second query. Internal identifiers, the room-level status, the
+rate columns, and renovation dates are never selected.
+
+This bounds what one search can cost. The free-form `run_sql` tool it replaced capped
+rows, not size: a single aggregated row could carry millions of characters. It also
+keeps the rules in code rather than in the prompt, which matters for any client that
+brings its own prompt, such as a future MCP server. `search.py` imports nothing from
+LangChain so that such a server can wrap it directly.
+
+Rejected arguments come back as a result with `error_kind` `invalid_arguments` and a
+message naming the problem (for example, the availability window), not as an
+exception, so the model can correct itself or ask the guest. A
+`ToolCallLimitMiddleware` caps `search_rooms` at
+`[booking.agent].max_search_calls_per_turn` calls per guest turn; later calls are
+refused and the model must answer with what it has.
+
+The grant in layer 1 is still the guarantee that search cannot write. The fixed query
+and the read-only transaction each search runs in are what the model can actually
+reach.
 
 ### 3. The propose/confirm flow
 
@@ -108,7 +143,7 @@ defenses hold.
 
 | Tool | Access | Returns |
 |---|---|---|
-| `run_sql` | `bh_agent_ro`, `SELECT` only | Up to 50 rows |
+| `search_rooms` | `bh_agent_ro`, fixed parameterized query | Up to `top_k` rooms plus `matching_count` |
 | `list_my_bookings` | Server-injected `customer_id` via `RunnableConfig` | This guest's reservations |
 | `propose_booking` | None (in-process) | A proposal id |
 | `propose_cancellation` | None (in-process) | A proposal id |

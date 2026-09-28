@@ -17,8 +17,8 @@ other tools support imports.
 
 An AI hotel concierge. A router LLM classifies each guest message and dispatches it to
 one of two sub-agents: an **information agent** (RAG over three Redis vector indices)
-and a **booking agent** (read-only NL-to-SQL search against PostgreSQL on Neon, plus
-proposals the guest confirms). Anything outside those two jobs is refused.
+and a **booking agent** (a typed, read-only room search against PostgreSQL on Neon,
+plus proposals the guest confirms). Anything outside those two jobs is refused.
 
 The organising principle of the whole system: **the model proposes, the application
 decides.** The model can search and suggest. It cannot write to the database, cannot
@@ -30,10 +30,10 @@ These are load-bearing. Breaking one is a defect even if the tests pass and the 
 works. Each says why, so you can tell when a change is genuinely adjacent versus when it
 is dismantling a guarantee.
 
-1. **The model never writes to the database.** Its `run_sql` tool connects as
+1. **The model never writes to the database.** Its `search_rooms` tool connects as
    `bh_agent_ro`, which holds `SELECT` on `rooms` and `room_availability` and nothing
    else. `customers`, `bookings`, and `booking_rooms` are off that role entirely, so
-   guest data cannot reach a third-party inference provider through free-form SQL.
+   guest data cannot reach a third-party inference provider through a search.
 2. **`blue_horizon/agents/booking/write_ops.py` is the only module that writes bookings,
    and `POST /v1/booking/confirm` is its only caller.** Do not add a second write path.
 3. **`propose_*` tools return a proposal id and nothing else.** Never success text. The
@@ -54,9 +54,11 @@ is dismantling a guarantee.
 7. **`startup_check` must keep refusing to boot when a trial write through
    `PGSQL_RO_DB_URL` succeeds.** It catches the configuration mistake of pointing both
    URLs at the same role, which would silently defeat invariant 1.
-8. **The SQL guardrail (`booking/guardrails.py`) stays even though the grant makes it
-   redundant.** Two independent mechanisms is the point. It also produces better error
-   messages than a raw privilege refusal.
+8. **Room search is a fixed parameterized query (`booking/search.py`).** The model
+   supplies filter values, validated against vocabularies read from the database, never
+   SQL. Do not reintroduce a free-form SQL tool: its output size is unbounded (row caps
+   do not bound one aggregated row), and a client such as an MCP server brings its own
+   prompt, so any limit that lives only in `booking.txt` stops applying.
 9. **The information agent is a fixed DAG, not a tool-calling agent.** Do not reintroduce
    retrieval tools or a decision loop. An empty retrieval is a correct answer, and the
    previous tool-calling version treated it as a malfunction: retrying, widening filters
@@ -91,9 +93,8 @@ is dismantling a guarantee.
   four files with nothing keeping them in sync.
 - System prompts are `.txt` files in `blue_horizon/system_prompts/`, referenced by
   filename through config, never inlined in Python.
-- Retry policy is `tenacity`. SQL parsing is `sqlglot`. DataFrame validation is `pandera`.
-  Four bespoke backoff implementations and a regex SQL guardrail preceded these; do not
-  hand-roll replacements.
+- Retry policy is `tenacity`. DataFrame validation is `pandera`. Four bespoke backoff
+  implementations preceded these; do not hand-roll replacements.
 - Guest-facing failure copy is classified by retry-safety tier (idempotent read, chat
   turn, confirm write), not by where the error happened to surface. See
   `docs/design-decisions.md#asking-the-guest-to-try-again-was-hiding-three-different-failures`.
@@ -109,10 +110,10 @@ is dismantling a guarantee.
 | `blue_horizon/agents/_llm.py` | `build_chat_model()`, shared `ChatOpenAI` construction from an agent's LLM config |
 | `blue_horizon/agents/orchestration/` | LangGraph router and manager, `MemorySaver` checkpointing per `thread_id` |
 | `blue_horizon/agents/information/` | Parse, three parallel retrievers, merge, respond |
-| `blue_horizon/agents/booking/factory.py` | Tool construction: `run_sql` (read-only) and the `propose_*` tools |
+| `blue_horizon/agents/booking/factory.py` | Tool construction: `search_rooms` (read-only) and the `propose_*` tools |
 | `blue_horizon/agents/booking/write_ops.py` | `commit_booking` / `cancel_booking` / `modify_booking`, the only writers |
 | `blue_horizon/agents/booking/proposals.py` | In-process `ProposalStore`, propose to confirm/dismiss lifecycle |
-| `blue_horizon/agents/booking/guardrails.py` | `sqlglot` AST allowlist |
+| `blue_horizon/agents/booking/search.py` | `search_rooms` argument model and its fixed queries; no LangChain imports, so an MCP server can reuse it |
 | `blue_horizon/api/app.py` | FastAPI app, SSE streaming, the confirm and dismiss endpoints |
 | `blue_horizon/logging_setup.py` | `configure_logging()` and `log_context()`, which puts `thread_id` and `customer_id` on every log line in a turn; ships records to Axiom when `AXIOM_API_KEY` and `AXIOM_DATASET` are set |
 | `blue_horizon/load_data/` | Redis and PostgreSQL loaders, plus `schema.sql`, `maintenance_booking_guard.sql`, and `regrant_booking_agent_role.sql` |

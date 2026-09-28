@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from eval.models import ExampleTurn, ToolSummaryEntry, TurnOutput, _validate_list
 
-_ROWCOUNT = 3
+_MATCHING_COUNT = 3
 _K_VALUE = 5
 _LATENCY_MS = 42
 
@@ -23,20 +23,28 @@ class TestToolSummaryEntry:
     def test_declared_fields_parse(self) -> None:
         """Declared fields are typed and attribute-accessible."""
         entry = ToolSummaryEntry.model_validate(
-            {"tool": "run_sql", "status": "ok", "rowcount": _ROWCOUNT},
+            {
+                "tool": "search_rooms",
+                "status": "error",
+                "matching_count": _MATCHING_COUNT,
+                "error_kind": "unavailable",
+            },
         )
-        assert entry.tool == "run_sql"
-        assert entry.status == "ok"
-        assert entry.rowcount == _ROWCOUNT
+        assert entry.tool == "search_rooms"
+        assert entry.status == "error"
+        assert entry.matching_count == _MATCHING_COUNT
+        assert entry.error_kind == "unavailable"
 
     def test_unknown_key_survives_as_extra(self) -> None:
         """A key the callback captures but this model doesn't declare survives."""
-        entry = ToolSummaryEntry.model_validate({"tool": "run_sql", "sql_query": "x"})
-        assert entry.sql_query == "x"  # type: ignore[attr-defined]
+        entry = ToolSummaryEntry.model_validate(
+            {"tool": "search_rooms", "search_args": {"min_floor": 20}},
+        )
+        assert entry.search_args == {"min_floor": 20}  # type: ignore[attr-defined]
 
     def test_undeclared_speculative_field_is_absent(self) -> None:
         """A field this entry never had at all is absent, not None-by-default."""
-        entry = ToolSummaryEntry.model_validate({"tool": "run_sql"})
+        entry = ToolSummaryEntry.model_validate({"tool": "search_rooms"})
         assert getattr(entry, "query", "MISSING") == "MISSING"
 
     def test_filters_unknown_keys_defaults_to_empty_list(self) -> None:
@@ -46,10 +54,10 @@ class TestToolSummaryEntry:
 
     def test_model_dump_includes_extras(self) -> None:
         """model_dump() round-trips extras -- _judge.py's transcript relies on it."""
-        entry = ToolSummaryEntry.model_validate({"tool": "run_sql", "k": _K_VALUE})
+        entry = ToolSummaryEntry.model_validate({"tool": "search_rooms", "k": _K_VALUE})
         dumped = entry.model_dump(mode="json", exclude_none=True)
         assert dumped["k"] == _K_VALUE
-        assert dumped["tool"] == "run_sql"
+        assert dumped["tool"] == "search_rooms"
 
 
 class TestTurnOutput:
@@ -69,7 +77,7 @@ class TestTurnOutput:
                 "tool_summary": [
                     {"tool": "query_faq", "status": "ok"},
                     "not a dict",
-                    {"rowcount": "not a number"},
+                    {"matching_count": "not a number"},
                 ],
             },
         )

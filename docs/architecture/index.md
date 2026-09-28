@@ -15,7 +15,7 @@ incoming message, dispatches it, and maintains conversation history.
 
 | Component | Technology | Role |
 |---|---|---|
-| Agent backend | LangGraph + FastAPI | Routing, RAG, NL-to-SQL, proposal lifecycle |
+| Agent backend | LangGraph + FastAPI | Routing, RAG, typed room search, proposal lifecycle |
 | Chat UI | Streamlit | Guest session, stage indicator, confirmation dialog |
 | Vector store | Redis (via LlamaIndex) | FAQ, amenities, and services indices |
 | Relational store | PostgreSQL on [Neon](https://neon.tech) | Rooms, availability, customers, bookings |
@@ -31,12 +31,12 @@ configuration. See [Deployment and CI](../guides/deployment.md).
 blue_horizon/          # Main application package
   agents/
     information/       # RAG-based information agent
-    booking/           # Read-only NL-to-SQL search + server-owned booking writes
-      factory.py         # Agent/tool construction: run_sql (read-only) + propose_* tools
+    booking/           # Read-only typed room search + server-owned booking writes
+      factory.py         # Agent/tool construction: search_rooms (read-only) + propose_* tools
+      search.py          # search_rooms argument model and its two fixed, parameterized queries
       write_ops.py       # commit_booking / cancel_booking / modify_booking -- the only writers
       proposals.py       # In-process ProposalStore: propose -> confirm/dismiss lifecycle
       receipts.py        # App-authored confirmation/cancellation/modification receipt text
-      guardrails.py      # SQL AST allowlist (redundant with the read-only DB role, belt-and-braces)
     orchestration/     # LangGraph router and manager
   api/
     app.py             # FastAPI application
@@ -116,14 +116,14 @@ it records:
 | Router decision and dispatch | `orchestration/factory.py` |
 | The turn's route, outcome, duration, LLM semaphore wait, and token counts | `orchestration/manager.py` |
 | Retrieval counts per source | `information/factory.py` |
-| Every `run_sql` statement, with its row count or error and its duration | `booking/resources.py` |
-| A `propose_*` tool's refusal, with the `booking_id` the model named | `booking/factory.py` |
+| Every `search_rooms` call, with its arguments, match count or error, and duration | `booking/resources.py` |
+| A `propose_*` tool's refusal, with the `booking_id` the model named, and rejected `search_rooms` arguments | `booking/factory.py` |
 | Every proposal created, confirmed, dismissed, refused, or not found | `booking/proposals.py` |
 
 Each proposal line names the proposal, action, thread, guest, and dialog total, plus the
 `booking_id` and confirmation number once written, so it stands on its own. At
-`WARNING` it records a guest refused another guest's proposal or thread, a write blocked
-by the read-only role, and a commit that could not reach the database.
+`WARNING` it records a guest refused another guest's proposal or thread, a search or
+commit that could not reach the database, and a search that failed unexpectedly.
 
 Lines that measure something also carry the numbers as record attributes, so Axiom can
 chart and aggregate them without parsing text. The turn line carries `route`, `outcome`,
@@ -132,12 +132,12 @@ logs it rather than the graph, since only the manager sees how long the turn wai
 for one of the `llm_concurrency` slots before its first node ran. A wait that grows
 while model time does not means turns are queueing. Tokens are counted by a
 `UsageMetadataCallbackHandler` on the turn's config, which reaches every chat model
-call in the turn; embedding calls are not counted. Every `run_sql` line for a statement
-that passed the guardrail carries `duration_ms`, spanning its retries, so a cold
-database start shows there. A confirm that attempted a write carries `action` and
+call in the turn; embedding calls are not counted. Every `search_rooms` line that
+reached the database carries `duration_ms`, spanning its retries, so a cold database
+start shows there. A confirm that attempted a write carries `action` and
 `duration_ms`; a replayed confirm writes nothing and carries neither.
 
-Guest messages, model replies, and `run_sql` result rows are never logged.
+Guest messages, model replies, and `search_rooms` result rooms are never logged.
 
 The UI logs at `INFO` under the `ui.app` logger: failed or timed-out chat requests,
 failures to reach the API, and unexpected confirm statuses. Each line names the

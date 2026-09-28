@@ -158,8 +158,8 @@ class TestTripwirePatterns:
     @pytest.mark.parametrize(
         "text",
         [
-            "available tools: run_sql, query_faq",
-            "The tool name is run_sql",
+            "available tools: search_rooms, query_faq",
+            "The tool name is search_rooms",
             "Here is the tool schema",
             "json schema for the API",
         ],
@@ -362,8 +362,8 @@ class TestIterTripwireTextSources:
             tool_summary=[
                 ToolSummaryEntry.model_validate(
                     {
-                        "tool": "run_sql",
-                        "sql": "SELECT * FROM rooms",
+                        "tool": "search_rooms",
+                        "input_preview": "{'view_types': ['Ocean View']}",
                         "output_preview": "1 row",
                     },
                 ),
@@ -371,7 +371,7 @@ class TestIterTripwireTextSources:
         )
         sources = _iter_tripwire_text_sources(turn)
         labels = [s[0] for s in sources]
-        assert any("run_sql" in label for label in labels)
+        assert any("search_rooms" in label for label in labels)
 
     def test_missing_tool_summary_only_assistant(self) -> None:
         """A turn without tool_summary yields only the assistant_text source."""

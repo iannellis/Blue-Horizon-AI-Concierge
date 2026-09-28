@@ -12,7 +12,7 @@ from blue_horizon.config import AppConfig, NonNegInt, PositiveInt
 from blue_horizon.config import FrozenModel as _FrozenModel
 
 EXPECTED_BATCH_SIZE = 64
-EXPECTED_MAX_ROWS = 50
+EXPECTED_MAX_SEARCH_CALLS = 4
 EXPECTED_HEALTH_CHECK_INTERVAL_S = 30
 EXPECTED_ROOMS_TOP_K = 4
 EXPECTED_DATA_PATH = Path("data/pandas")
@@ -105,7 +105,11 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
             "folder": "system_prompts",
             "system_prompt_filename": "rooms_sql_prompt.txt",
         },
-        "agent": {"top_k": EXPECTED_ROOMS_TOP_K},
+        "agent": {
+            "top_k": EXPECTED_ROOMS_TOP_K,
+            "max_search_calls_per_turn": EXPECTED_MAX_SEARCH_CALLS,
+            "max_search_room_numbers": 10,
+        },
         "db": {
             "pool": {
                 "min_size": 0,
@@ -113,10 +117,6 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
                 "timeout_s": 10.0,
                 "max_idle_s": 240.0,
                 "reconnect_timeout_s": 30.0,
-            },
-            "guardrails": {
-                "max_rows": EXPECTED_MAX_ROWS,
-                "allow_only_hotel_tables": True,
             },
             "retry": {
                 "max_transient_retries": 1,
@@ -151,7 +151,7 @@ def test_parse_app_config_from_dict() -> None:
     cfg = AppConfig.model_validate(SAMPLE_APP_CONFIG)
     assert cfg.orchestration.llm.model == "gpt-5-nano"
     assert cfg.info.embeddings.batch_size == EXPECTED_BATCH_SIZE
-    assert cfg.booking.db.guardrails.max_rows == EXPECTED_MAX_ROWS
+    assert cfg.booking.agent.max_search_calls_per_turn == EXPECTED_MAX_SEARCH_CALLS
     assert cfg.booking.agent.top_k == EXPECTED_ROOMS_TOP_K
     assert cfg.booking.proposals.ttl_s == EXPECTED_PROPOSAL_TTL_S
     assert cfg.load_data.information_redis.data_path == EXPECTED_DATA_PATH

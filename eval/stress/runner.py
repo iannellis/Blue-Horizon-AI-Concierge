@@ -111,15 +111,15 @@ async def _start_orchestration(
     """Start the orchestrator and wait for readiness with a configured timeout.
 
     ``db_url`` and ``ro_db_url`` are forwarded to :class:`OrchestrationManager`
-    so that the booking SQL agent's write pool and reconciliation pool share
-    one read-write database, while `run_sql` reads through the read-only role
+    so that the booking agent's write pool and reconciliation pool share
+    one read-write database, while `search_rooms` reads through the read-only role
     on the same database. When ``PGSQL_RW_EVAL_DB_URL`` / ``PGSQL_RO_EVAL_DB_URL``
     are set, these are those eval URLs; without them, they fall back to
     ``PGSQL_RW_DB_URL`` / ``PGSQL_RO_DB_URL``.
 
     Args:
         db_url: Read-write Postgres connection URL used by the booking agent.
-        ro_db_url: Read-only Postgres connection URL used by `run_sql`.
+        ro_db_url: Read-only Postgres connection URL used by `search_rooms`.
         ready_timeout_s: Maximum number of seconds to wait for readiness.
 
     Returns:

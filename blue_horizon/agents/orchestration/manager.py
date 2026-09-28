@@ -130,14 +130,14 @@ class OrchestrationManager:
 
         Args:
             pgsql_rw_db_url: Optional read-write database URL override forwarded
-                to the booking SQL agent (`bh_agent_rw`).  When set, the
+                to the booking agent (`bh_agent_rw`).  When set, the
                 booking agent uses this URL instead of the ``PGSQL_RW_DB_URL``
                 application setting.  Use this in test harnesses that operate
                 against a separate evaluation database so that the agent's
                 writes are visible to the reconciliation pool.
             pgsql_ro_db_url: Optional read-only database URL override
-                forwarded to the booking SQL agent (`bh_agent_ro`), used
-                exclusively by `run_sql`.  When overriding `pgsql_rw_db_url` for
+                forwarded to the booking agent (`bh_agent_ro`), used
+                exclusively by `search_rooms`.  When overriding `pgsql_rw_db_url` for
                 a test harness, this must be overridden alongside it and
                 point at the same database.
 

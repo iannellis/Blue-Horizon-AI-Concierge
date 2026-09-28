@@ -19,7 +19,6 @@ dependencies = [
     "pydantic-settings (>=2.12.0,<3.0.0)",
     "fastapi[standard] (>=0.129.0)",
     "tenacity (>=8.2.0,<10.0.0)",
-    "sqlglot (>=30.0.3,<31.0.0)",
     "pandera[pandas] (>=0.30.1,<1.0.0)",
     "httpx2 (>=2.0.0,<3.0.0)",
     "opentelemetry-sdk>=1.30.0,<2.0.0",

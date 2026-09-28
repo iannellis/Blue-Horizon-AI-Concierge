@@ -1,26 +1,24 @@
-"""Long-lived resources for the booking SQL agent.
+"""Long-lived resources for the booking agent.
 
 Owns two async connection pools -- a read-only pool used exclusively by the
-model-facing `run_sql` tool, and a read-write pool used by write_ops,
+model-facing `search_rooms` tool, and a read-write pool used by write_ops,
 list_bookings, and the customers/bookings API endpoints -- plus the rendered
-system prompt and the in-process proposal store.
+system prompt, the search argument model, and the in-process proposal store.
 
-The read-only pool authenticates as the `bh_agent_ro` Postgres role, whose
-grants are exactly the guardrail's table allowlist (see
-`blue_horizon/load_data/regrant_booking_agent_role.sql`). This is the actual
-enforcement boundary: the AST guardrail in `guardrails.py` is a redundant,
-code-level restatement of the same rule, not the thing keeping the model from
-writing.
+The read-only pool authenticates as the `bh_agent_ro` Postgres role, which can
+read only `rooms` and `room_availability` (see
+`blue_horizon/load_data/regrant_booking_agent_role.sql`). The model never
+supplies SQL: `search_rooms` runs one of the fixed queries in `search.py`
+with arguments validated against the search argument model.
 """
 
 from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING, Any, Literal, LiteralString, cast
+from typing import TYPE_CHECKING, Any, Literal
 
 import psycopg
-from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 from tenacity import (
     AsyncRetrying,
@@ -34,16 +32,21 @@ from blue_horizon.agents._lifecycle import require
 from blue_horizon.agents.booking.config import render_system_prompt
 from blue_horizon.agents.booking.db_utils import (
     _tool_error_message_for_model,
-    _truncate_rows,
     fetch_rooms_metadata,
     is_transient_conn_error,
 )
-from blue_horizon.agents.booking.guardrails import validate_sql
 from blue_horizon.agents.booking.proposals import ProposalStore
+from blue_horizon.agents.booking.search import (
+    RoomsMetadata,
+    build_search_args_model,
+    run_room_search,
+)
 from blue_horizon.agents.exceptions import ConfigurationError, OperationalError
 from blue_horizon.agents.prompt_utils import load_prompt_template, prompt_resource_path
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
+
     from blue_horizon.config import BookingSqlConfig
 
 logger = logging.getLogger(__name__)
@@ -53,10 +56,12 @@ logger = logging.getLogger(__name__)
 # even if the assertion this guards against has already failed.
 _READ_ONLY_PROBE_SQL = "UPDATE room_availability SET status = status WHERE id = -1"
 
-# Coarse classification of a run_sql failure, independent of message text, so
-# evaluators (see eval/stress/workload.py) can assert on structure rather than
-# matching prose that guest-facing or model-facing copy changes could move.
-SqlErrorKind = Literal["unavailable", "sql", "guardrail", "privilege", "unexpected"]
+# Coarse classification of a search_rooms failure, independent of message
+# text, so evaluators (see eval/stress/workload.py) can assert on structure
+# rather than matching prose that guest-facing or model-facing copy changes
+# could move. "invalid_arguments" is produced by the tool layer, which rejects
+# arguments before this module sees them.
+SqlErrorKind = Literal["unavailable", "invalid_arguments", "unexpected"]
 
 # libpq reports a rejected password with no SQLSTATE at connection time, so
 # this message fragment is the only signal available.
@@ -120,7 +125,7 @@ async def _check_credentials(url: str, env_var: str, *, timeout_s: float) -> Non
 
 
 def _sql_error_result(error: str, *, error_kind: SqlErrorKind) -> dict[str, Any]:
-    """Build a standard SQL tool error result dict.
+    """Build a standard `search_rooms` error result dict.
 
     Args:
         error: The error message to include in the result.
@@ -128,14 +133,13 @@ def _sql_error_result(error: str, *, error_kind: SqlErrorKind) -> dict[str, Any]
             failure.
 
     Returns:
-        A result dict with ``status="error"`` and zero rows.
+        A result dict with ``status="error"`` and no rooms.
 
     """
     return {
         "status": "error",
-        "rowcount": 0,
-        "rows": [],
-        "truncated": False,
+        "matching_count": 0,
+        "rooms": [],
         "error": error,
         "error_kind": error_kind,
     }
@@ -155,20 +159,22 @@ def _timing(started: float) -> dict[str, int]:
 
 
 class BookingSqlResources:
-    """Own long-lived resources for the booking SQL agent.
+    """Own long-lived resources for the booking agent.
 
-    Both pools, the rendered system prompt, and the proposal store live here.
+    Both pools, the rendered system prompt, the search argument model, and the
+    proposal store live here.
 
     Attributes:
         config: Parsed configuration.
         pgsql_ro_db_url: Read-only database URL (`bh_agent_ro`), used only by
-            `run_sql`.
+            `search_rooms`.
         pgsql_rw_db_url: Read-write database URL (`bh_agent_rw`), used by
             write_ops, list_bookings, and the propose_* tools.
         pool: Async connection pool for `pgsql_ro_db_url`.
         write_pool: Async connection pool for `pgsql_rw_db_url`.
         proposals: In-process store of pending booking proposals.
         system_prompt: Rendered system prompt used to build the agent.
+        rooms_metadata: Search vocabulary and bounds read at startup.
 
     """
 
@@ -179,6 +185,8 @@ class BookingSqlResources:
     write_pool: AsyncConnectionPool[Any] | None
     proposals: ProposalStore
     system_prompt: str | None
+    rooms_metadata: RoomsMetadata | None
+    _search_args_model: type[BaseModel] | None
     _system_prompt_resource: str
 
     def __init__(
@@ -214,6 +222,8 @@ class BookingSqlResources:
         self.write_pool: AsyncConnectionPool[Any] | None = None
         self.proposals = ProposalStore(ttl_s=config.proposals.ttl_s)
         self.system_prompt = None
+        self.rooms_metadata = None
+        self._search_args_model = None
 
         self._system_prompt_resource = prompt_resource_path(
             self.config.prompts.folder, self.config.prompts.system_prompt_filename,
@@ -223,8 +233,8 @@ class BookingSqlResources:
         """Initialize resources and validate readiness.
 
         Opens both pools, proves the read-only pool's role really cannot
-        write, fetches metadata used by the system prompt template, and
-        renders the final system prompt.
+        write, fetches the rooms metadata, and from it builds the search
+        argument model and renders the final system prompt.
 
         Raises:
             ConfigurationError: If either database URL is missing, blank, or
@@ -271,6 +281,18 @@ class BookingSqlResources:
 
         """
         return require(self.system_prompt, "BookingSqlResources")
+
+    def get_search_args_model(self) -> type[BaseModel]:
+        """Get the `search_rooms` argument model built at startup.
+
+        Returns:
+            The Pydantic model whose instances `search_rooms` accepts.
+
+        Raises:
+            RuntimeError: If ``startup_check()`` has not been called or failed.
+
+        """
+        return require(self._search_args_model, "BookingSqlResources")
 
     def get_read_pool(self) -> AsyncConnectionPool[Any]:
         """Get the read-only connection pool, narrowed to non-optional.
@@ -324,47 +346,26 @@ class BookingSqlResources:
         self.write_pool = None
         self.system_prompt = None
 
-    async def execute_sql(self, query: str) -> dict[str, Any]:
-        """Execute a single read-only SQL statement and return rows.
+    async def search_rooms(self, args: BaseModel) -> dict[str, Any]:
+        """Run a room search and return a bounded result.
 
-        Each attempt borrows a connection from the read-only pool and executes
-        *query* directly. ``statement_timeout`` is set at the database role
-        level rather than in code, so it bounds this model-authored SQL
-        without a per-connection ``SET``; ``search_path`` relies on the
-        PostgreSQL default of ``"$user", public``. All SQL through this path
-        is a read, so it is always safe to retry on a transient connection
-        error.
+        Each attempt borrows a connection from the read-only pool and runs the
+        fixed query `search.run_room_search` selects for *args*. A search is a
+        read, so it is always safe to retry on a transient connection error.
 
         Args:
-            query: One SQL statement (no semicolons). Must be SELECT.
+            args: An instance of `get_search_args_model()`.
 
         Returns:
-            Dict with keys:
-
-                - status: str ("ok" or "error")
-                - rows: list[dict[str, Any]]
-                - truncated: bool
-                - rowcount: int
-                - error: str (only present on failure)
-                - error_kind: SqlErrorKind (only present on failure; a
-                  message-independent classification for evaluators)
+            On success, `run_room_search`'s result: ``status="ok"``,
+            ``matching_count``, and at most ``top_k`` ``rooms``. On failure,
+            ``status="error"`` with ``error`` and ``error_kind``.
 
         Raises:
             RuntimeError: If resources were not initialized.
 
         """
         require(self.pool, "BookingSqlResources")
-
-        try:
-            validate_sql(
-                query,
-                allow_only_hotel_tables=self.config.db.guardrails.allow_only_hotel_tables,
-            )
-        except ValueError as exc:
-            msg = str(exc)
-            logger.info("run_sql rejected by guardrails: %s query=%r", msg, query)
-            return _sql_error_result(msg, error_kind="guardrail")
-
         retry_cfg = self.config.db.retry
 
         _conn_errors = (
@@ -373,20 +374,10 @@ class BookingSqlResources:
             PoolTimeout,
             TimeoutError,
         )
-        _privilege_errors = (
-            psycopg.errors.ReadOnlySqlTransaction,
-            psycopg.errors.InsufficientPrivilege,
-        )
 
         def _is_retryable(exc: BaseException) -> bool:
             return isinstance(exc, _conn_errors) and is_transient_conn_error(exc)
 
-        # Defaults only reached if AsyncRetrying's loop completes without
-        # returning or raising, which tenacity does not do in practice -- this
-        # guards against a silent UnboundLocalError if that assumption ever
-        # breaks.
-        error_message = _tool_error_message_for_model()
-        error_kind: SqlErrorKind = "unavailable"
         # Spans every attempt and backoff, so a cold Neon start shows up here.
         started = time.perf_counter()
         try:
@@ -398,17 +389,17 @@ class BookingSqlResources:
                 reraise=True,
             ):
                 with attempt:
-                    result = await self._execute_once(query)
-                    # The statement, never the rows: `bh_agent_ro` can read
-                    # only rooms and availability, but a row count is all an
+                    result = await self._search_once(args)
+                    # The arguments, never the rooms: the counts are all an
                     # audit needs to see what the model looked at.
                     timing = _timing(started)
                     logger.info(
-                        "run_sql ok: rowcount=%s truncated=%s duration_ms=%s query=%r",
-                        result["rowcount"],
-                        result["truncated"],
+                        "search_rooms ok: matching_count=%s returned=%s "
+                        "duration_ms=%s args=%r",
+                        result["matching_count"],
+                        len(result["rooms"]),
                         timing["duration_ms"],
-                        query,
+                        args,
                         extra=timing,
                     )
                     return result
@@ -418,80 +409,51 @@ class BookingSqlResources:
             # psycopg_pool internals and says nothing the exception does not.
             timing = _timing(started)
             logger.warning(
-                "run_sql connection error after retries: duration_ms=%s %r",
+                "search_rooms connection error after retries: duration_ms=%s %r",
                 timing["duration_ms"],
                 exc,
                 extra=timing,
             )
-            error_message = _tool_error_message_for_model()
-            error_kind = "unavailable"
-
-        except _privilege_errors as exc:
-            # A write blocked by the read-only role or the belt-and-braces
-            # READ ONLY transaction wrapper. This is not a SQL error to
-            # diagnose and retry -- writes are simply not available on this
-            # path -- so it is kept out of the generic psycopg.Error branch
-            # below, which the prompt's retry instructions would otherwise
-            # treat as "rewrite the query and try again".
-            timing = _timing(started)
-            logger.warning(
-                "run_sql blocked a write attempt: %s duration_ms=%s query=%r",
-                exc,
-                timing["duration_ms"],
-                query,
-                extra=timing,
+            return _sql_error_result(
+                _tool_error_message_for_model(), error_kind="unavailable",
             )
-            error_message = (
-                "Writes are not available through this tool. Use the propose "
-                "tools to book, cancel, or modify a reservation."
-            )
-            error_kind = "privilege"
-
-        except psycopg.Error as exc:
-            # SQL-level errors (type mismatches, syntax errors, constraint
-            # violations, etc.) — expose the error text so the agent can
-            # diagnose and rewrite the query per its retry instructions.
-            timing = _timing(started)
-            logger.warning(
-                "run_sql SQL error: %s duration_ms=%s query=%r",
-                exc,
-                timing["duration_ms"],
-                query,
-                extra=timing,
-            )
-            error_message = f"SQL error: {exc}"
-            error_kind = "sql"
 
         except Exception:
+            # The SQL is fixed and the arguments validated, so anything else
+            # (a psycopg.Error included) is a bug, not something the model
+            # can fix by searching differently.
             timing = _timing(started)
             logger.exception(
-                "run_sql unexpected failure: duration_ms=%s query=%r",
+                "search_rooms unexpected failure: duration_ms=%s args=%r",
                 timing["duration_ms"],
-                query,
+                args,
                 extra=timing,
             )
-            error_message = _tool_error_message_for_model()
-            error_kind = "unexpected"
+            return _sql_error_result(
+                _tool_error_message_for_model(), error_kind="unexpected",
+            )
 
-        return _sql_error_result(error_message, error_kind=error_kind)
+        # Unreachable: AsyncRetrying either returns from the loop body or
+        # reraises. Kept so a broken assumption fails closed, not silently.
+        return _sql_error_result(
+            _tool_error_message_for_model(), error_kind="unexpected",
+        )
 
-    async def _execute_once(self, query: str) -> dict[str, Any]:
-        """Execute the SQL statement exactly once without any retry logic.
+    async def _search_once(self, args: BaseModel) -> dict[str, Any]:
+        """Run the search exactly once without any retry logic.
 
         Args:
-            query: SQL statement that has already passed ``validate_sql``.
+            args: Validated search arguments.
 
         Returns:
-            Dict with keys ``status``, ``rows``, ``truncated``, and ``rowcount``.
+            `run_room_search`'s result.
 
         Raises:
             psycopg.OperationalError: On connection-level failures.
             psycopg.InterfaceError: On connection-level failures.
             psycopg_pool.PoolTimeout: When a pool connection cannot be acquired.
             TimeoutError: On network timeout.
-            psycopg.Error: On SQL-level errors (syntax, constraints, types),
-                including a blocked write.
-            Exception: On any other unexpected failure.
+            psycopg.Error: On any other database error.
 
         """
         async with (
@@ -504,34 +466,7 @@ class BookingSqlResources:
             # engage, but it costs nothing and covers the window between a
             # misconfiguration and the next restart's startup assertion.
             await conn.execute("SET TRANSACTION READ ONLY")
-
-            async with conn.cursor(row_factory=dict_row) as cur:
-                # NOTE: psycopg's type stubs expect a LiteralString for
-                # `execute()`. This cast is only to satisfy static type
-                # checkers. Runtime safety is provided by `validate_sql(...)`
-                # above and by the database role's own grants.
-                await cur.execute(cast("LiteralString", query))
-
-                if cur.description is None:
-                    return {
-                        "status": "ok",
-                        "rows": [],
-                        "truncated": False,
-                        "rowcount": cur.rowcount,
-                    }
-
-                rows_raw = await cur.fetchall()
-                rows = [dict(r) for r in rows_raw]
-                rows, truncated = _truncate_rows(
-                    rows,
-                    max_rows=self.config.db.guardrails.max_rows,
-                )
-                return {
-                    "status": "ok",
-                    "rows": rows,
-                    "truncated": truncated,
-                    "rowcount": len(rows),
-                }
+            return await run_room_search(conn, args, top_k=self.config.agent.top_k)
 
     async def _open_pools(self) -> None:
         """Open the read-only and read-write async connection pools.
@@ -638,7 +573,10 @@ class BookingSqlResources:
         raise ConfigurationError(msg)
 
     async def _render_system_prompt(self) -> None:
-        """Render and store the system prompt.
+        """Load rooms metadata, then build the search model and system prompt.
+
+        Both come from the same metadata, so the values the prompt describes
+        and the values the tool accepts cannot drift apart.
 
         Raises:
             ConfigurationError: If the packaged prompt template is missing or
@@ -650,21 +588,15 @@ class BookingSqlResources:
 
         """
         try:
-            (
-                enum_values,
-                basic_amenities,
-                additional_amenities,
-                view_types,
-            ) = await fetch_rooms_metadata(self.pgsql_ro_db_url)
+            meta = await fetch_rooms_metadata(self.pgsql_ro_db_url)
+            self._search_args_model = build_search_args_model(
+                meta, max_room_numbers=self.config.agent.max_search_room_numbers,
+            )
+            self.rooms_metadata = meta
 
             template = load_prompt_template(self._system_prompt_resource)
             self.system_prompt = render_system_prompt(
-                template=template,
-                top_k=self.config.agent.top_k,
-                enum_values=enum_values,
-                basic_amenities=basic_amenities,
-                additional_amenities=additional_amenities,
-                view_types=view_types,
+                template=template, top_k=self.config.agent.top_k, meta=meta,
             )
 
         except ConfigurationError:

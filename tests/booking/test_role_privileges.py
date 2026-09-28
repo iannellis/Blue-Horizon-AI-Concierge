@@ -2,11 +2,10 @@
 
 These tests connect directly to a real Postgres as `bh_agent_ro` (via
 `PGSQL_RO_DB_URL`) and `bh_agent_rw` (via `PGSQL_RW_DB_URL`) and assert what
-Postgres itself will and will not allow -- with the AST guardrail
-(`blue_horizon.agents.booking.guardrails`) and the application code entirely
-out of the picture. That is the point: the guardrail is a redundant,
-code-level restatement of the same rule, not the thing actually keeping the
-model from writing (see `blue_horizon/load_data/regrant_booking_agent_role.sql`
+Postgres itself will and will not allow -- with the application code entirely
+out of the picture. That is the point: the fixed queries in
+`blue_horizon.agents.booking.search` never write, but the grant is what
+guarantees it (see `blue_horizon/load_data/regrant_booking_agent_role.sql`
 and `blue_horizon/agents/booking/resources.py`).
 
 Marked `db_integration` and excluded from the default `pytest` run -- see
@@ -131,7 +130,7 @@ def _privileges(conn: psycopg.Connection[Any]) -> dict[str, bool]:
 
 
 class TestReadOnlyRolePrivileges:
-    """`bh_agent_ro` -- the only role the model's `run_sql` tool ever uses."""
+    """`bh_agent_ro` -- the only role the model's `search_rooms` tool ever uses."""
 
     def test_can_select_hotel_tables(
         self, ro_conn: psycopg.Connection[Any],
@@ -156,7 +155,7 @@ class TestReadOnlyRolePrivileges:
 
         This is what stops a guest's identity and reservation history from
         ever reaching a third-party inference provider through the model's
-        free-text `run_sql` tool, even in principle.
+        `search_rooms` tool, even if a later change widened its queries.
         """
         privileges = _privileges(ro_conn)
         assert privileges["customers_select"] is False

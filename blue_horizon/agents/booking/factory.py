@@ -1,6 +1,7 @@
-"""Factory for building the booking SQL agent.
+"""Factory for building the booking agent.
 
-Every tool built here is read-only or propose-only. Nothing the model calls
+Every tool built here is read-only or propose-only. The one read tool,
+`search_rooms`, takes typed filter values rather than SQL. Nothing the model calls
 mutates `bookings`, `booking_rooms`, or `room_availability` -- that authority
 belongs entirely to `blue_horizon.agents.booking.write_ops`, reached only
 through a human confirming a proposal via `POST /v1/booking/confirm`.
@@ -18,6 +19,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Required, TypedDict
 
 from langchain.agents import create_agent
+from langchain.agents.middleware import ToolCallLimitMiddleware
 from langchain_core.messages import HumanMessage, ToolMessage
 
 # Kept out of the TYPE_CHECKING block despite TC002: `@tool` resolves its
@@ -26,7 +28,7 @@ from langchain_core.messages import HumanMessage, ToolMessage
 # `NameError` the first time a tool with a `config: RunnableConfig`
 # parameter is built.
 from langchain_core.runnables import RunnableConfig  # noqa: TC002
-from langchain_core.tools import tool
+from langchain_core.tools import StructuredTool, tool
 from psycopg.rows import dict_row
 
 from blue_horizon.agents._llm import build_chat_model
@@ -38,14 +40,22 @@ if TYPE_CHECKING:
     from langchain_core.messages import BaseMessage
     from langgraph.graph.state import CompiledStateGraph
     from psycopg_pool import AsyncConnectionPool
+    from pydantic import ValidationError
 
     from blue_horizon.agents.booking.resources import BookingSqlResources
     from blue_horizon.config import BookingSqlConfig
 
 logger = logging.getLogger(__name__)
 
-# `@tool` names a tool after its function, so this matches `run_sql` below.
-_RUN_SQL_TOOL_NAME = "run_sql"
+_SEARCH_TOOL_NAME = "search_rooms"
+
+_SEARCH_TOOL_DESCRIPTION = (
+    "Search the hotel's rooms. With check_in and check_out, returns only rooms "
+    "free and priced for every night of the stay, with the stay's total price. "
+    "Without dates, searches room attributes in general. Returns matching_count "
+    "(every matching room) and at most a few example rooms, so use "
+    "matching_count to answer 'how many' questions."
+)
 
 
 class BookingRoomRequest(TypedDict):
@@ -144,25 +154,27 @@ def build_booking_agent(
     """
     system_prompt = resources.get_system_prompt()
     llm = build_chat_model(config.llm)
+    search_args_model = resources.get_search_args_model()
 
-    @tool(parse_docstring=True)
-    async def run_sql(query: str) -> dict[str, Any]:
-        """Execute a single read-only SQL statement and return rows.
+    async def _search_rooms(**kwargs: Any) -> dict[str, Any]:  # noqa: ANN401
+        """Run a room search with arguments LangChain has already validated.
 
         Args:
-            query: One SELECT statement (no semicolons).
+            **kwargs: The search arguments the model supplied.
 
         Returns:
-            Dict with keys:
-              - status: str ("ok" or "error")
-              - rows: list[dict[str, Any]]
-              - truncated: bool
-              - rowcount: int
-              - error: str (only present on failure)
-              - error_kind: str (only present on failure)
+            The result of `BookingSqlResources.search_rooms`.
 
         """
-        return await resources.execute_sql(query)
+        return await resources.search_rooms(search_args_model.model_validate(kwargs))
+
+    search_rooms = StructuredTool.from_function(
+        coroutine=_search_rooms,
+        name=_SEARCH_TOOL_NAME,
+        description=_SEARCH_TOOL_DESCRIPTION,
+        args_schema=search_args_model,
+        handle_validation_error=_invalid_arguments_result,
+    )
 
     @tool(parse_docstring=True)
     async def list_my_bookings(config: RunnableConfig) -> dict[str, Any]:
@@ -338,22 +350,56 @@ def build_booking_agent(
     return create_agent(
         model=llm,
         tools=[
-            run_sql,
+            search_rooms,
             list_my_bookings,
             propose_booking,
             propose_cancellation,
             propose_modification,
         ],
         system_prompt=system_prompt,
+        # Bounds a turn's search cost in code, not only in the prompt. Calls
+        # past the limit get an error result and the model must answer.
+        middleware=[
+            ToolCallLimitMiddleware(
+                tool_name=_SEARCH_TOOL_NAME,
+                run_limit=config.agent.max_search_calls_per_turn,
+                exit_behavior="continue",
+            ),
+        ],
     )
 
 
+def _invalid_arguments_result(exc: ValidationError) -> str:
+    """Turn rejected search arguments into a result the model can act on.
+
+    Args:
+        exc: The validation failure LangChain caught before the search ran.
+
+    Returns:
+        A JSON `search_rooms` error result with ``error_kind`` set to
+        ``"invalid_arguments"`` and one line per problem.
+
+    """
+    problems = "; ".join(
+        f"{'.'.join(str(part) for part in err['loc']) or 'arguments'}: {err['msg']}"
+        for err in exc.errors()
+    )
+    logger.info("search_rooms rejected arguments: %s", problems)
+    return json.dumps({
+        "status": "error",
+        "matching_count": 0,
+        "rooms": [],
+        "error": f"Invalid search arguments. {problems}",
+        "error_kind": "invalid_arguments",
+    })
+
+
 def database_unavailable_this_turn(messages: Sequence[BaseMessage]) -> bool:
-    """Report whether this turn's `run_sql` found the database unreachable.
+    """Report whether this turn's `search_rooms` found the database unreachable.
 
     Scans back from the end of the history to the most recent
     `HumanMessage`, so an outage in an earlier turn is not counted again. A
-    `run_sql` result reaches the history as a `ToolMessage` whose content is
+    `search_rooms` result reaches the history as a `ToolMessage` whose content is
     the tool's return dict encoded as JSON. Its `error_kind` is what is
     checked, never the model's prose.
 
@@ -361,7 +407,7 @@ def database_unavailable_this_turn(messages: Sequence[BaseMessage]) -> bool:
         messages: Message history returned by the booking agent.
 
     Returns:
-        bool: True if any `run_sql` result since the last guest message
+        bool: True if any `search_rooms` result since the last guest message
         carries ``error_kind == "unavailable"``.
 
     """
@@ -370,7 +416,7 @@ def database_unavailable_this_turn(messages: Sequence[BaseMessage]) -> bool:
             return False
         if (
             isinstance(message, ToolMessage)
-            and message.name == _RUN_SQL_TOOL_NAME
+            and message.name == _SEARCH_TOOL_NAME
             and _error_kind(message.content) == "unavailable"
         ):
             return True
@@ -378,7 +424,7 @@ def database_unavailable_this_turn(messages: Sequence[BaseMessage]) -> bool:
 
 
 def _error_kind(content: object) -> object:
-    """Read `error_kind` from a `run_sql` tool message's JSON content.
+    """Read `error_kind` from a `search_rooms` tool message's JSON content.
 
     Args:
         content: The tool message content.

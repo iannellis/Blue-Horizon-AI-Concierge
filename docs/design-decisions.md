@@ -554,6 +554,55 @@ each model response by hand, since LangGraph passes the config's callbacks to ev
 model call in the turn, including the router's, which is made without an explicit
 config. See [Architecture](architecture/index.md#logging).
 
+### Free-form SQL had no bound on what one search could cost
+
+**Status:** adopted, replacing the `run_sql` tool and the `sqlglot` guardrail.
+
+The booking model searched by writing its own `SELECT` against `rooms` and
+`room_availability`. The grant kept it read-only, but nothing kept it small. The
+guardrail's 50-row cap counted rows, not size, and was applied after `fetchall()`: a
+single `string_agg` row over `room_availability` came to about 7 million characters,
+all of which would have gone to the model as tool output. How many queries a turn ran
+was limited only by the prompt. That was tolerable for a demo used by its author, and
+not for one opened to strangers on the Internet, where one message can be written to
+maximise cost. Room search is also meant to be exposed over MCP, and an MCP client
+brings its own model and prompt, so every rule that lived only in `booking.txt` would
+stop applying.
+
+The flexibility was not buying much. No case in the eval datasets needs anything a
+fixed query cannot express, and the questions guests actually ask (a room type, a floor,
+an amenity, a view, a date range, a price cap, a count) are a short list of filters.
+
+**The model now fills in typed filters and never writes SQL.** `search_rooms` takes
+dates, room numbers, room and bed types, amenities (all of), view types (any of), a
+floor range, occupancy, size, accessibility, a nightly price cap, and an ordering. The
+categorical values, the floor range, and the availability window are read from the
+database at startup and become the tool's schema, so an unknown amenity or an
+out-of-window date is rejected with a message the model can act on before any SQL runs.
+`search.py` runs one of two fixed queries and returns at most `top_k` rooms with a fixed
+set of fields, plus `matching_count` for "how many" questions. A
+`ToolCallLimitMiddleware` caps searches per turn in code. "A presidential suite on the
+top floor" is `room_types` plus `min_floor` and `max_floor` set to the top floor, which
+the schema names.
+
+The first version of the dated query took about 630 ms for a three-night search. The
+planner inlined the per-stay aggregate into a nested loop and re-ran it for every
+candidate room. Marking the CTE `MATERIALIZED` brought it to about 22 ms, and a full
+year with no filters to about 56 ms, so no index on `room_availability(date)` was
+needed.
+
+What was given up: analytical questions such as an average price for March or the
+cheapest week to visit. The agent now says it cannot look those up and offers a search
+for specific dates. The `sqlglot` guardrail and its dependency went with `run_sql`,
+since there is no model-authored SQL left to parse.
+
+Alternatives considered: keeping `run_sql` with a character budget on its output, a
+statement timeout per query, and a per-turn call limit. That bounds the cost but keeps
+the parser, the prompt's SQL rules, and an attack surface that grows with every client,
+and a character cap truncates a legitimate answer as readily as an abusive one. The
+read-only grant is unchanged and remains the guarantee that search cannot write; see
+[Least privilege is a database grant, not a code path](#least-privilege-is-a-database-grant-not-a-code-path).
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

@@ -7,6 +7,7 @@ instantiated directly, and database metadata tests use async mocks.
 # ruff: noqa: S101
 
 import asyncio
+import datetime as dt
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -14,10 +15,10 @@ from psycopg_pool import PoolTimeout
 
 from blue_horizon.agents.booking.db_utils import (
     _tool_error_message_for_model,
-    _truncate_rows,
     fetch_rooms_metadata,
     is_transient_conn_error,
 )
+from blue_horizon.agents.exceptions import OperationalError
 
 # ---------------------------------------------------------------------------
 # fetch_rooms_metadata
@@ -27,8 +28,25 @@ from blue_horizon.agents.booking.db_utils import (
 class TestFetchRoomsMetadata:
     """fetch_rooms_metadata builds metadata from PostgreSQL result rows."""
 
-    def test_preserves_enum_labels_with_commas(self) -> None:
-        """Comma-containing enum labels are preserved without string splitting."""
+    @staticmethod
+    def _connect_returning(
+        *,
+        amenity_rows: list[tuple[str | None]],
+        floor_row: tuple[int | None, int | None],
+        date_row: tuple[dt.date | None, dt.date | None],
+    ) -> AsyncMock:
+        """Build a patched `AsyncConnection.connect` over canned results.
+
+        Args:
+            amenity_rows: Rows for the combined amenities query.
+            floor_row: Row for the floor-range query.
+            date_row: Row for the availability-window query.
+
+        Returns:
+            An async mock whose connection's cursor replays the results in
+            `fetch_rooms_metadata`'s query order.
+
+        """
         cursor = MagicMock()
         cursor.__aenter__ = AsyncMock(return_value=cursor)
         cursor.__aexit__ = AsyncMock(return_value=False)
@@ -39,34 +57,53 @@ class TestFetchRoomsMetadata:
                 [("King, Split",), ("Queen",)],
                 [("clean",), ("dirty",)],
                 [("suite",), ("standard",)],
-                [("wifi",), ("tv",)],
-                [("balcony",)],
-                [("ocean",)],
+                amenity_rows,
+                [("Ocean View",), ("City View",)],
             ],
         )
+        cursor.fetchone = AsyncMock(side_effect=[floor_row, date_row])
 
         conn = MagicMock()
         conn.__aenter__ = AsyncMock(return_value=conn)
         conn.__aexit__ = AsyncMock(return_value=False)
         conn.cursor.return_value = cursor
+        return AsyncMock(return_value=conn)
 
+    def test_builds_rooms_metadata(self) -> None:
+        """Enum labels keep commas, vocabularies are sorted, NULLs dropped."""
+        connect = self._connect_returning(
+            amenity_rows=[("wifi",), (None,), ("balcony",)],
+            floor_row=(1, 20),
+            date_row=(dt.date(2025, 1, 4), dt.date(2026, 1, 3)),
+        )
         with patch(
             "blue_horizon.agents.booking.db_utils.psycopg.AsyncConnection.connect",
-            new=AsyncMock(return_value=conn),
+            new=connect,
         ):
-            (
-                enum_values,
-                basic_amenities,
-                additional_amenities,
-                view_types,
-            ) = asyncio.run(
-                fetch_rooms_metadata("postgresql://example"),
-            )
+            meta = asyncio.run(fetch_rooms_metadata("postgresql://example"))
 
-        assert enum_values["room_bed_type"] == ["King, Split", "Queen"]
-        assert basic_amenities == ["wifi", "tv"]
-        assert additional_amenities == ["balcony"]
-        assert view_types == ["ocean"]
+        assert meta.enum_values["room_bed_type"] == ["King, Split", "Queen"]
+        assert meta.amenities == ("balcony", "wifi")
+        assert meta.view_types == ("City View", "Ocean View")
+        assert (meta.min_floor, meta.max_floor) == (1, 20)
+        assert meta.first_night == dt.date(2025, 1, 4)
+        assert meta.last_check_out == dt.date(2026, 1, 4)
+
+    def test_empty_availability_raises(self) -> None:
+        """An empty availability table cannot define a search window."""
+        connect = self._connect_returning(
+            amenity_rows=[("wifi",)],
+            floor_row=(1, 20),
+            date_row=(None, None),
+        )
+        with (
+            patch(
+                "blue_horizon.agents.booking.db_utils.psycopg.AsyncConnection.connect",
+                new=connect,
+            ),
+            pytest.raises(OperationalError),
+        ):
+            asyncio.run(fetch_rooms_metadata("postgresql://example"))
 
 
 # ---------------------------------------------------------------------------
@@ -126,59 +163,6 @@ class TestIsTransientConnError:
 
 
 # ---------------------------------------------------------------------------
-# _truncate_rows
-# ---------------------------------------------------------------------------
-
-
-class TestTruncateRows:
-    """_truncate_rows returns correct (rows, truncated) pairs."""
-
-    def _make_rows(self, n: int) -> list[dict[str, int]]:
-        """Build a list of n trivial row dicts."""
-        return [{"id": i} for i in range(n)]
-
-    def test_empty_rows_not_truncated(self) -> None:
-        """Empty input is returned unchanged and truncated=False."""
-        rows, truncated = _truncate_rows([], max_rows=10)
-        assert rows == []
-        assert truncated is False
-
-    def test_rows_under_limit_not_truncated(self) -> None:
-        """Fewer rows than max_rows passes through unchanged."""
-        rows = self._make_rows(3)
-        result, truncated = _truncate_rows(rows, max_rows=10)
-        assert result == rows
-        assert truncated is False
-
-    def test_rows_exactly_at_limit_not_truncated(self) -> None:
-        """Exactly max_rows rows are not considered truncated."""
-        rows = self._make_rows(5)
-        result, truncated = _truncate_rows(rows, max_rows=5)
-        assert result == rows
-        assert truncated is False
-
-    def test_rows_over_limit_truncated(self) -> None:
-        """More rows than max_rows are sliced and truncated=True."""
-        rows = self._make_rows(7)
-        result, truncated = _truncate_rows(rows, max_rows=4)
-        assert result == rows[:4]
-        assert truncated is True
-
-    def test_truncation_preserves_order(self) -> None:
-        """The first max_rows rows are kept (order is preserved)."""
-        rows = [{"id": i} for i in [10, 20, 30, 40, 50]]
-        result, _ = _truncate_rows(rows, max_rows=3)
-        assert [r["id"] for r in result] == [10, 20, 30]
-
-    def test_max_rows_one(self) -> None:
-        """max_rows=1 keeps only the first row."""
-        rows = self._make_rows(5)
-        result, truncated = _truncate_rows(rows, max_rows=1)
-        assert len(result) == 1
-        assert truncated is True
-
-
-# ---------------------------------------------------------------------------
 # _tool_error_message_for_model
 # ---------------------------------------------------------------------------
 
@@ -186,7 +170,7 @@ class TestTruncateRows:
 class TestToolErrorMessageForModel:
     """_tool_error_message_for_model returns a stable, marked instruction.
 
-    This string is a `run_sql` tool result the model consumes, not guest-
+    This string is a `search_rooms` tool result the model consumes, not guest-
     facing copy -- see `booking.txt`'s ``DATABASE_UNAVAILABLE`` retry rule,
     which keys off the exact marker asserted here.
     """
@@ -203,7 +187,7 @@ class TestToolErrorMessageForModel:
         assert msg.startswith("DATABASE_UNAVAILABLE:")
 
     def test_instructs_against_retrying(self) -> None:
-        """The text tells the model not to rewrite or retry, unlike a SQL error."""
+        """The text tells the model not to retry, unlike rejected arguments."""
         msg = _tool_error_message_for_model()
         assert "retry" in msg.lower()
 

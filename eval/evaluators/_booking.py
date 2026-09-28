@@ -48,7 +48,7 @@ _EVAL_POOL: AsyncConnectionPool[Any] | None = None
 # Tool names whose calls count toward booking-turn tool-error/call counters.
 _TRACKED_TOOLS: frozenset[str] = frozenset(
     {
-        "run_sql",
+        "search_rooms",
         "propose_booking",
         "propose_cancellation",
         "propose_modification",
@@ -162,7 +162,7 @@ def _score_booking_tool_outcomes(
 
     Returns:
         List of LangSmith metrics for tool errors, outcome match rate, and a
-        soft rowcount presence check. Metrics with nothing to measure are
+        soft search count presence check. Metrics with nothing to measure are
         omitted rather than defaulting to a passing score -- see
         ``_format_tool_error_metric`` / ``_format_outcome_match_metric``.
 
@@ -201,7 +201,7 @@ def _score_booking_tool_outcomes(
 
 
 def _format_booking_outcome_metrics(state: BookingOutcomeState) -> list[dict[str, Any]]:
-    """Build the score metrics (tool errors, outcome match, rowcount sanity).
+    """Build the score metrics (tool errors, outcome match, search counts).
 
     Args:
         state: Aggregated booking outcome state for one run.
@@ -230,12 +230,12 @@ def _format_booking_outcome_metrics(state: BookingOutcomeState) -> list[dict[str
             },
         )
 
-    rowcount_score, rowcount_comment = _format_rowcount_metric(state.counts)
+    count_score, count_comment = _format_search_count_metric(state.counts)
     metrics.append(
         {
-            "key": "booking_rowcount_sanity",
-            "score": rowcount_score,
-            "comment": rowcount_comment,
+            "key": "booking_search_count_sanity",
+            "score": count_score,
+            "comment": count_comment,
         },
     )
     return metrics
@@ -286,8 +286,8 @@ def _init_booking_outcome_counts() -> dict[str, int]:
     return {
         "tool_calls": 0,
         "tool_errors": 0,
-        "rowcount_present": 0,
-        "run_sql_calls": 0,
+        "matching_count_present": 0,
+        "search_calls": 0,
         "outcome_matches": 0,
         "unexpected_failures": 0,
     }
@@ -323,10 +323,10 @@ def _accumulate_booking_turn(
         # was not expected to fail, mirroring `_score_outcome_match` below.
         if _has_tool_error(entry) and expected_success is not False:
             state.counts["tool_errors"] += 1
-        if entry.tool == "run_sql":
-            state.counts["run_sql_calls"] += 1
-            if entry.rowcount is not None:
-                state.counts["rowcount_present"] += 1
+        if entry.tool == "search_rooms":
+            state.counts["search_calls"] += 1
+            if entry.matching_count is not None:
+                state.counts["matching_count_present"] += 1
 
     outcome_matched, failure_detail = _score_outcome_match(
         turn_idx=turn_idx,
@@ -351,7 +351,7 @@ def _has_tool_error(summary: ToolSummaryEntry) -> bool:
     """Detect whether a tool summary indicates an error.
 
     Args:
-        summary: Tool summary entry for a run_sql, propose_*, or
+        summary: Tool summary entry for a search_rooms, propose_*, or
             confirm_booking call.
 
     Returns:
@@ -471,7 +471,7 @@ def _format_tool_error_metric(counts: dict[str, int]) -> tuple[float, str] | Non
 
     Returns:
         Tuple of (score, comment) for booking_tool_errors, or ``None`` when
-        no run_sql/propose/confirm calls were observed -- omitted rather
+        no search_rooms/propose/confirm calls were observed -- omitted rather
         than defaulting to a passing score, since a broken capture path and
         a genuinely error-free run would otherwise be indistinguishable.
 
@@ -507,23 +507,25 @@ def _format_outcome_match_metric(counts: dict[str, int]) -> tuple[float, str] | 
     return matches / total, f"Outcomes matched {matches}/{total}."
 
 
-def _format_rowcount_metric(counts: dict[str, int]) -> tuple[float, str]:
-    """Format the rowcount presence metric from accumulated counts.
+def _format_search_count_metric(counts: dict[str, int]) -> tuple[float, str]:
+    """Format the search count presence metric from accumulated counts.
+
+    Every search_rooms result carries ``matching_count``, error results
+    included, so a missing one means the capture path lost the payload.
 
     Args:
         counts: Counter dict accumulated across booking turns.
 
     Returns:
-        Tuple of (score, comment) for booking_rowcount_sanity.
+        Tuple of (score, comment) for booking_search_count_sanity.
 
     """
-    run_sql_calls = counts["run_sql_calls"]
-    rowcount_present = counts["rowcount_present"]
-    if run_sql_calls == 0:
-        return 1.0, "No run_sql calls observed."
-    score = rowcount_present / run_sql_calls
-    comment = f"Rowcount present on {rowcount_present}/{run_sql_calls} run_sql calls."
-    return score, comment
+    search_calls = counts["search_calls"]
+    present = counts["matching_count_present"]
+    if search_calls == 0:
+        return 1.0, "No search_rooms calls observed."
+    comment = f"matching_count present on {present}/{search_calls} search_rooms calls."
+    return present / search_calls, comment
 
 
 async def _score_unbacked_success_claims(
@@ -850,7 +852,7 @@ async def _get_eval_db_url(cfg: EvalConfig) -> str:
 
     Invariant checks read `bookings`/`booking_rooms`, which are only
     reachable through the read-write role (`bh_agent_rw`) -- unlike
-    `run_sql`, they are deliberately off the read-only role's grants. So
+    `search_rooms`, they are deliberately off the read-only role's grants. So
     this always resolves the read-write URL, never `pgsql_ro_eval_db_url`.
 
     Args:

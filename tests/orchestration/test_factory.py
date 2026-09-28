@@ -179,8 +179,8 @@ def _contents(state: dict[str, Any]) -> list[object]:
     return [msg.content for msg in messages]
 
 
-def _run_sql_result(error_kind: str) -> ToolMessage:
-    """Build a failed `run_sql` tool result as the booking agent records it.
+def _search_result(error_kind: str) -> ToolMessage:
+    """Build a failed `search_rooms` tool result as the booking agent records it.
 
     Args:
         error_kind: The result's `error_kind`.
@@ -191,7 +191,7 @@ def _run_sql_result(error_kind: str) -> ToolMessage:
     """
     payload = {"status": "error", "error": "failed", "error_kind": error_kind}
     return ToolMessage(
-        content=json.dumps(payload), name="run_sql", tool_call_id="call-1",
+        content=json.dumps(payload), name="search_rooms", tool_call_id="call-1",
     )
 
 
@@ -348,7 +348,7 @@ class TestFailedTurn:
         router = _FakeRouter()
         router.step = "booking"
         sub_agent = _FakeSubAgent()
-        sub_agent.tool_results = [_run_sql_result("unavailable")]
+        sub_agent.tool_results = [_search_result("unavailable")]
         graph = _build_graph(router, sub_agent)
         state = _run_turn(graph, "Any suites free?")
         assert state["turn_error"] == "unavailable"
@@ -359,7 +359,7 @@ class TestFailedTurn:
         router = _FakeRouter()
         router.step = "booking"
         sub_agent = _FakeSubAgent()
-        sub_agent.tool_results = [_run_sql_result("sql")]
+        sub_agent.tool_results = [_search_result("unexpected")]
         graph = _build_graph(router, sub_agent)
         state = _run_turn(graph, "Any suites free?")
         assert state.get("turn_error") is None
@@ -379,7 +379,7 @@ class TestFailedTurn:
     def test_info_turn_is_not_checked_for_outages(self) -> None:
         """Only the booking dispatch node discards a reply on an outage."""
         sub_agent = _FakeSubAgent()
-        sub_agent.tool_results = [_run_sql_result("unavailable")]
+        sub_agent.tool_results = [_search_result("unavailable")]
         graph = _build_graph(_FakeRouter(), sub_agent)
         state = _run_turn(graph, "Any suites free?")
         assert state.get("turn_error") is None

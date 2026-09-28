@@ -100,7 +100,7 @@ all three runs.
 modification's success-or-failure outcome matched the case's expectation. A request for
 an already-taken night is *expected* to fail, and that is not counted against the agent.
 
-**Booking - tool call success rate** is stricter: it flags any `propose_*` or `run_sql`
+**Booking - tool call success rate** is stricter: it flags any `propose_*` or `search_rooms`
 call that errored on a turn expected to succeed. This ran at 96.2% before a fix in
 [`booking.txt`](https://github.com/iannellis/Blue-Horizon-AI-Concierge/blob/main/blue_horizon/system_prompts/booking.txt)
 requiring every column in a `rooms`/`room_availability` join to be table-qualified. Both
@@ -136,7 +136,7 @@ Mean of the same three runs, at a `max_concurrency` of 10.
 
 Refuse requests resolve fastest, since they are the router only. Info requests go
 through the full RAG pipeline: parse, parallel retrieval, merge, respond. Booking
-requests run NL-to-SQL search plus, on a propose call, an in-process pricing pass
+requests run a room search plus, on a propose call, an in-process pricing pass
 against `room_availability`. The write itself happens later, on confirm, and is not
 included in this per-turn latency.
 

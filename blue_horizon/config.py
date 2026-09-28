@@ -161,7 +161,7 @@ class InfoRagConfig(FrozenModel):
 
 
 class BookingLlmConfig(FrozenModel):
-    """LLM settings for the booking SQL agent.
+    """LLM settings for the booking agent.
 
     Attributes:
         model: Chat model identifier.
@@ -178,14 +178,19 @@ class BookingLlmConfig(FrozenModel):
 
 
 class BookingAgentConfig(FrozenModel):
-    """Agent prompt settings for SQL generation.
+    """Bounds on what one booking-agent turn can search.
 
     Attributes:
-        top_k: Prompt parameter used to describe search breadth.
+        top_k: Maximum number of rooms one `search_rooms` call returns.
+        max_search_calls_per_turn: Maximum `search_rooms` calls in one guest
+            turn; further calls are refused and the model must answer.
+        max_search_room_numbers: Maximum room numbers one search may name.
 
     """
 
-    top_k: int
+    top_k: int = Field(ge=1)
+    max_search_calls_per_turn: int = Field(ge=1)
+    max_search_room_numbers: int = Field(ge=1)
 
 
 class BookingPromptsConfig(FrozenModel):
@@ -230,19 +235,6 @@ class DbPoolConfig(FrozenModel):
     reconnect_timeout_s: float
 
 
-class DbGuardrailsConfig(FrozenModel):
-    """SQL guardrail settings for the booking agent.
-
-    Attributes:
-        max_rows: Maximum number of rows returned to the model.
-        allow_only_hotel_tables: Whether to enforce the hotel table allowlist.
-
-    """
-
-    max_rows: int
-    allow_only_hotel_tables: bool
-
-
 class DbRetryConfig(FrozenModel):
     """Transient retry configuration for DB operations.
 
@@ -282,22 +274,20 @@ class BookingDbConfig(FrozenModel):
 
     Attributes:
         pool: Client-side pool settings.
-        guardrails: SQL validation constraints.
         retry: Transient retry policy.
 
     """
 
     pool: DbPoolConfig
-    guardrails: DbGuardrailsConfig
     retry: DbRetryConfig
 
 
 class BookingSqlConfig(FrozenModel):
-    """Top-level configuration for the booking SQL agent.
+    """Top-level configuration for the booking agent.
 
     Attributes:
         llm: Chat model configuration.
-        agent: Prompt metadata.
+        agent: Search bounds.
         prompts: Prompt template paths.
         db: Database behavior configuration.
         proposals: Human-in-the-loop proposal store configuration.
@@ -495,7 +485,7 @@ class LoggingConfig(FrozenModel):
 
     Attributes:
         level: Root logger level. At ``INFO`` the log records each turn's
-            route and outcome, every `run_sql` statement, and every proposal
+            route and outcome, every `search_rooms` call, and every proposal
             created, confirmed, dismissed, or refused.
         quiet_loggers: Third-party loggers held at ``WARNING`` whatever
             `level` is, because at ``INFO`` they log every outbound HTTP
@@ -519,7 +509,7 @@ class AppConfig(BaseSettings):
     Attributes:
         orchestration: Router/orchestrator settings.
         info: Information agent settings.
-        booking: Booking SQL agent settings.
+        booking: Booking agent settings.
         load_data: Data ingestion settings for local loaders.
         logging: Log level and third-party loggers to quiet.
         redis_url: Redis connection URL from environment.
@@ -539,7 +529,7 @@ class AppConfig(BaseSettings):
             write_ops, list_bookings, and the customers/bookings endpoints.
         pgsql_ro_db_url: PostgreSQL connection URL from environment,
             authenticated as the read-only booking agent role (``bh_agent_ro``).
-            Used exclusively by the `run_sql` tool the model can reach.
+            Used exclusively by the `search_rooms` tool the model can reach.
         axiom_api_key: Axiom API token with ingest permission, from
             ``AXIOM_API_KEY``. Logs are shipped to Axiom only when this and
             `axiom_dataset` are both non-empty.

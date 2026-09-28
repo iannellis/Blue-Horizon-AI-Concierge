@@ -556,7 +556,7 @@ def _override_eval_db_url(cfg: EvalConfig) -> None:
     the default application database.
 
     Setting only the read-write override and leaving the read-only override
-    unset means ``run_sql`` keeps using ``PGSQL_RO_DB_URL`` as configured
+    unset means ``search_rooms`` keeps using ``PGSQL_RO_DB_URL`` as configured
     outside the eval run, which may point at a different database than the
     one being reset -- so the two are logged together to make a partial
     override obvious.

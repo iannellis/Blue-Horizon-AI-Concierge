@@ -86,7 +86,7 @@ eval/
 | `GEMINI_API_KEY` | Yes | Gemini API key (judge, Ragas) |
 | `OPENAI_API_KEY` | Yes | OpenAI API key (agents, embeddings) |
 | `PGSQL_RW_EVAL_DB_URL` | Yes | Read-write (`bh_agent_rw`) connection string for the eval DB |
-| `PGSQL_RO_EVAL_DB_URL` | Yes | Read-only (`bh_agent_ro`) connection string for the eval DB, used exclusively by `run_sql` |
+| `PGSQL_RO_EVAL_DB_URL` | Yes | Read-only (`bh_agent_ro`) connection string for the eval DB, used exclusively by `search_rooms` |
 | `NEON_API_KEY` | Yes | Neon management API key (branch reset) |
 | `REDIS_URL` | Yes | Redis connection URL (agent cache) |
 
@@ -230,8 +230,8 @@ For every turn in a case, `run_example`:
    | Field | Captured by | Source |
    |---|---|---|
    | `route_pred` | `on_chain_end` | Orchestrator node output containing a `"route"` key |
-   | `tool_summary` | `on_tool_start` / `on_tool_end` | One entry per tool call: `run_sql`, `parser`, `query_faq`, `query_amenities`, `query_services`, `merge` |
-   | `contexts_used` | `on_chain_end` (merge node) + `on_tool_end` (`run_sql`) | Merge node `top_results` text plus SQL row strings, used by RAG and judge evaluators |
+   | `tool_summary` | `on_tool_start` / `on_tool_end` | One entry per tool call: `search_rooms`, `parser`, `query_faq`, `query_amenities`, `query_services`, `merge` |
+   | `contexts_used` | `on_chain_end` (merge node) + `on_tool_end` (`search_rooms`) | Merge node `top_results` text plus the match count and one string per returned room, used by RAG and judge evaluators |
 
 4. **Measures wall-clock latency** with `asyncio.get_running_loop().time()` around the
    `ainvoke` call.

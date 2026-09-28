@@ -18,16 +18,21 @@ broken tool schema.
 
 from __future__ import annotations
 
+import asyncio
+import json
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from langgraph.prebuilt import ToolNode
 
 from blue_horizon.agents.booking.factory import build_booking_agent
+from blue_horizon.agents.booking.search import build_search_args_model
 from blue_horizon.config import BookingSqlConfig
+from tests.booking._search_fixtures import MAX_ROOM_NUMBERS, make_rooms_metadata
 
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
+    from pydantic import BaseModel
 
     from blue_horizon.agents.booking.resources import BookingSqlResources
 
@@ -35,7 +40,7 @@ if TYPE_CHECKING:
 # them carry a server-injected `config: RunnableConfig` parameter that must
 # never appear in the model-facing schema.
 _EXPECTED_TOOL_NAMES = frozenset({
-    "run_sql",
+    "search_rooms",
     "list_my_bookings",
     "propose_booking",
     "propose_cancellation",
@@ -59,7 +64,11 @@ _BOOKING_CONFIG_DICT: dict[str, Any] = {
         "folder": "system_prompts",
         "system_prompt_filename": "rooms_sql_prompt.txt",
     },
-    "agent": {"top_k": 4},
+    "agent": {
+        "top_k": 4,
+        "max_search_calls_per_turn": 4,
+        "max_search_room_numbers": 10,
+    },
     "db": {
         "pool": {
             "min_size": 0,
@@ -68,7 +77,6 @@ _BOOKING_CONFIG_DICT: dict[str, Any] = {
             "max_idle_s": 240.0,
             "reconnect_timeout_s": 30.0,
         },
-        "guardrails": {"max_rows": 50, "allow_only_hotel_tables": True},
         "retry": {"max_transient_retries": 1, "transient_retry_backoff_s": 0.15},
     },
     "proposals": {"ttl_s": 1800.0},
@@ -78,8 +86,9 @@ _BOOKING_CONFIG_DICT: dict[str, Any] = {
 class _StubBookingSqlResources:
     """Stand-in for `BookingSqlResources` that never opens a DB connection.
 
-    `build_booking_agent()` only calls `get_system_prompt()` directly; every
-    other resource (`execute_sql`, `write_pool`, `proposals`) is captured by
+    `build_booking_agent()` only calls `get_system_prompt()` and
+    `get_search_args_model()` directly; every other resource
+    (`search_rooms`, `write_pool`, `proposals`) is captured by
     closures that run inside a tool body, never during the build itself, so
     this stub does not need to implement them for these tests.
 
@@ -93,6 +102,17 @@ class _StubBookingSqlResources:
 
         """
         return "You are a test booking assistant."
+
+    def get_search_args_model(self) -> type[BaseModel]:
+        """Return a search argument model built from hand-made metadata.
+
+        Returns:
+            The `search_rooms` argument model.
+
+        """
+        return build_search_args_model(
+            make_rooms_metadata(), max_room_numbers=MAX_ROOM_NUMBERS,
+        )
 
 
 @pytest.fixture
@@ -193,16 +213,49 @@ def test_tool_schemas_exclude_server_injected_config(
         assert "config" not in schema_properties
 
 
-def test_run_sql_schema_has_only_query(booking_config: BookingSqlConfig) -> None:
-    """`run_sql`, the one tool without injected config, exposes only `query`.
+def test_search_rooms_schema_is_typed_filters(
+    booking_config: BookingSqlConfig,
+) -> None:
+    """`search_rooms` takes typed filters: no SQL, no injected config.
 
     Args:
         booking_config: Parsed booking configuration fixture.
 
     """
     tools = _tools_by_name(_build_graph(booking_config))
-    schema_properties = tools["run_sql"].args_schema.model_json_schema()["properties"]
-    assert set(schema_properties) == {"query"}
+    schema = tools["search_rooms"].args_schema.model_json_schema()
+    properties = schema["properties"]
+    assert "query" not in properties
+    assert "config" not in properties
+    assert {"check_in", "check_out", "amenities", "view_types", "max_floor"} <= set(
+        properties,
+    )
+
+
+def test_search_rooms_rejects_bad_arguments_as_a_result(
+    booking_config: BookingSqlConfig,
+) -> None:
+    """Invalid arguments come back as an `invalid_arguments` result, not a raise.
+
+    Args:
+        booking_config: Parsed booking configuration fixture.
+
+    """
+    tools = _tools_by_name(_build_graph(booking_config))
+    content = asyncio.run(
+        tools["search_rooms"].ainvoke(
+            {
+                "type": "tool_call",
+                "id": "call-1",
+                "name": "search_rooms",
+                "args": {"check_in": "2026-01-03", "check_out": "2026-01-06"},
+            },
+        ),
+    ).content
+    result = json.loads(content)
+    assert result["status"] == "error"
+    assert result["error_kind"] == "invalid_arguments"
+    assert "2026-01-04" in result["error"]
 
 
 def test_every_tool_has_a_non_empty_description(

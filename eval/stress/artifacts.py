@@ -173,7 +173,7 @@ def _write_artifacts(
                     "user_query": op.get("prompt"),
                     "agent_response": op.get("agent_response"),
                     "error": op.get("error"),
-                    "sql_calls": op.get("sql_calls"),
+                    "search_calls": op.get("search_calls"),
                 }
                 f.write(json.dumps(failure_record, ensure_ascii=True) + "\n")
 
@@ -182,7 +182,7 @@ def _is_failure_entry(op: dict[str, object]) -> bool:
     """Return True when an operation log entry represents a failure worth diagnosing.
 
     An entry is a failure if it has a Python-level error, an LLM-classified
-    "error" outcome, or any ``run_sql`` call that returned an error from the
+    "error" outcome, or any ``search_rooms`` call that returned an error from the
     database layer.
 
     Args:
@@ -194,10 +194,10 @@ def _is_failure_entry(op: dict[str, object]) -> bool:
     """
     if op.get("outcome") == "error" or op.get("error"):
         return True
-    sql_calls = op.get("sql_calls")
-    if isinstance(sql_calls, list):
+    search_calls = op.get("search_calls")
+    if isinstance(search_calls, list):
         return any(
-            isinstance(c, dict) and c.get("error") for c in sql_calls
+            isinstance(c, dict) and c.get("error") for c in search_calls
         )
     return False
 

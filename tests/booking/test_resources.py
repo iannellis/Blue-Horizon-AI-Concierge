@@ -1,11 +1,10 @@
-"""Tests for `BookingSqlResources.execute_sql`'s retry and error classification.
+"""Tests for `BookingSqlResources.search_rooms`'s retry and error classification.
 
 No real database connection is required for most of this file: the read pool
 is a fake whose `.connection()` replays a scripted sequence of outcomes, which
-exercises the retry loop, error-kind classification (`error_kind`, added
-alongside this file so evaluators can assert on failure *shape* rather than
-matching prose -- see `blue_horizon.agents.booking.resources.SqlErrorKind`),
-and the guardrail short-circuit in `execute_sql()` directly.
+exercises the retry loop and error-kind classification (`error_kind`, so
+evaluators can assert on failure *shape* rather than matching prose -- see
+`blue_horizon.agents.booking.resources.SqlErrorKind`) directly.
 
 `TestConnectFailureSurfacesAsPoolTimeout` is the one exception: it drives a
 real `psycopg_pool.AsyncConnectionPool` against a connection class that always
@@ -33,8 +32,10 @@ from blue_horizon.agents.booking.resources import (
     BookingSqlResources,
     _check_credentials,
 )
+from blue_horizon.agents.booking.search import build_search_args_model
 from blue_horizon.agents.exceptions import ConfigurationError
 from blue_horizon.config import BookingSqlConfig
+from tests.booking._search_fixtures import MAX_ROOM_NUMBERS, make_rooms_metadata
 
 _BOOKING_CONFIG_DICT: dict[str, Any] = {
     "llm": {
@@ -43,7 +44,11 @@ _BOOKING_CONFIG_DICT: dict[str, Any] = {
         "timeout_s": 20.0,
         "max_retries": 2,
     },
-    "agent": {"top_k": 4},
+    "agent": {
+        "top_k": 4,
+        "max_search_calls_per_turn": 4,
+        "max_search_room_numbers": 10,
+    },
     "prompts": {
         "folder": "system_prompts",
         "system_prompt_filename": "rooms_sql_prompt.txt",
@@ -56,14 +61,15 @@ _BOOKING_CONFIG_DICT: dict[str, Any] = {
             "max_idle_s": 240.0,
             "reconnect_timeout_s": 30.0,
         },
-        "guardrails": {"max_rows": 50, "allow_only_hotel_tables": True},
         "retry": {"max_transient_retries": 2, "transient_retry_backoff_s": 0.001},
     },
     "proposals": {"ttl_s": 1800.0},
 }
 
 _RESOURCES_LOGGER = "blue_horizon.agents.booking.resources"
-_SELECT_QUERY = "SELECT room_number FROM rooms"
+_SEARCH_ARGS = build_search_args_model(
+    make_rooms_metadata(), max_room_numbers=MAX_ROOM_NUMBERS,
+).model_validate({"view_types": ["Ocean View"]})
 
 
 def _make_resources() -> BookingSqlResources:
@@ -97,9 +103,6 @@ def _successful_connection_cm() -> MagicMock:
     cursor.__aexit__ = AsyncMock(return_value=False)
     cursor.execute = AsyncMock()
     cursor.fetchall = AsyncMock(return_value=[])
-    # A non-None description routes _execute_once() to the fetchall() branch,
-    # matching a real SELECT rather than a description-less statement.
-    cursor.description = ["room_number"]
 
     transaction_cm = MagicMock()
     transaction_cm.__aenter__ = AsyncMock(return_value=None)
@@ -141,7 +144,7 @@ def _fake_pool_with_outcomes(outcomes: list[BaseException | None]) -> MagicMock:
     """Build a fake read pool whose successive `.connection()` calls replay outcomes.
 
     Args:
-        outcomes: One entry per expected `execute_sql` attempt, consumed in
+        outcomes: One entry per expected `search_rooms` attempt, consumed in
             order. `None` means the attempt succeeds with zero rows; an
             exception instance means that attempt's checkout raises it.
 
@@ -164,31 +167,11 @@ def _fake_pool_with_outcomes(outcomes: list[BaseException | None]) -> MagicMock:
 
 
 # ---------------------------------------------------------------------------
-# Guardrail rejection: no DB call at all
-# ---------------------------------------------------------------------------
-
-
-class TestExecuteSqlGuardrailRejection:
-    """A guardrail-rejected statement never reaches the pool."""
-
-    def test_non_select_is_rejected_without_a_db_call(self) -> None:
-        """`DELETE` is rejected by the statement-type guardrail, not executed."""
-        resources = _make_resources()
-        resources.pool = _fake_pool_with_outcomes([])  # any call is a failure
-
-        result = asyncio.run(resources.execute_sql("DELETE FROM rooms"))
-
-        assert result["status"] == "error"
-        assert result["error_kind"] == "guardrail"
-        resources.pool.connection.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
 # Transient connection errors: retried, then classified "unavailable"
 # ---------------------------------------------------------------------------
 
 
-class TestExecuteSqlTransientRetry:
+class TestSearchRoomsTransientRetry:
     """Transient connection errors are retried up to `max_transient_retries`."""
 
     @pytest.mark.parametrize("failures_before_success", [0, 1, 2])
@@ -203,9 +186,9 @@ class TestExecuteSqlTransientRetry:
         resources = _make_resources()
         resources.pool = _fake_pool_with_outcomes(outcomes)
 
-        result = asyncio.run(resources.execute_sql(_SELECT_QUERY))
+        result = asyncio.run(resources.search_rooms(_SEARCH_ARGS))
 
-        assert result["status"] == "ok"
+        assert result == {"status": "ok", "matching_count": 0, "rooms": []}
         assert resources.pool.connection.call_count == failures_before_success + 1
 
     def test_retries_exhausted_reports_unavailable(self) -> None:
@@ -217,7 +200,7 @@ class TestExecuteSqlTransientRetry:
         resources = _make_resources()
         resources.pool = _fake_pool_with_outcomes(outcomes)
 
-        result = asyncio.run(resources.execute_sql(_SELECT_QUERY))
+        result = asyncio.run(resources.search_rooms(_SEARCH_ARGS))
 
         assert result["status"] == "error"
         assert result["error_kind"] == "unavailable"
@@ -236,7 +219,7 @@ class TestExecuteSqlTransientRetry:
         resources.pool = _fake_pool_with_outcomes(outcomes)
 
         with caplog.at_level(logging.WARNING, logger=_RESOURCES_LOGGER):
-            asyncio.run(resources.execute_sql(_SELECT_QUERY))
+            asyncio.run(resources.search_rooms(_SEARCH_ARGS))
 
         [record] = [
             r for r in caplog.records if "after retries" in r.getMessage()
@@ -248,8 +231,11 @@ class TestExecuteSqlTransientRetry:
     @pytest.mark.parametrize(
         ("outcome", "prefix"),
         [
-            (None, "run_sql ok"),
-            (psycopg.errors.SyntaxError("syntax error at or near ..."), "run_sql SQL"),
+            (None, "search_rooms ok"),
+            (
+                psycopg.errors.SyntaxError("syntax error at or near ..."),
+                "search_rooms unexpected",
+            ),
         ],
     )
     def test_statement_that_reached_the_pool_logs_its_duration(
@@ -258,90 +244,31 @@ class TestExecuteSqlTransientRetry:
         outcome: BaseException | None,
         prefix: str,
     ) -> None:
-        """A statement's line carries its duration, as text and as an attribute."""
+        """A search's line carries its duration, as text and as an attribute."""
         resources = _make_resources()
         resources.pool = _fake_pool_with_outcomes([outcome])
 
         with caplog.at_level(logging.INFO, logger=_RESOURCES_LOGGER):
-            asyncio.run(resources.execute_sql(_SELECT_QUERY))
+            asyncio.run(resources.search_rooms(_SEARCH_ARGS))
 
         [record] = [r for r in caplog.records if r.getMessage().startswith(prefix)]
         duration_ms = record.__dict__["duration_ms"]
         assert isinstance(duration_ms, int)
         assert f"duration_ms={duration_ms}" in record.getMessage()
 
-    def test_non_retryable_error_is_not_retried(self) -> None:
-        """A plain SQL error isn't transient, so only one attempt is made."""
-        resources = _make_resources()
-        resources.pool = _fake_pool_with_outcomes(
-            [psycopg.errors.SyntaxError("syntax error at or near ...")],
-        )
-
-        result = asyncio.run(resources.execute_sql(_SELECT_QUERY))
-
-        assert result["status"] == "error"
-        assert result["error_kind"] == "sql"
-        assert resources.pool.connection.call_count == 1
-
-
-# ---------------------------------------------------------------------------
-# Privilege errors: a blocked write, not a SQL error to diagnose and retry
-# ---------------------------------------------------------------------------
-
-
-class TestExecuteSqlPrivilegeError:
-    """A write blocked by the read-only role is classified `privilege`."""
-
-    @pytest.mark.parametrize(
-        "exc",
-        [
-            psycopg.errors.ReadOnlySqlTransaction(
-                "cannot execute UPDATE in a read-only transaction",
-            ),
-            psycopg.errors.InsufficientPrivilege(
-                "permission denied for table bookings",
-            ),
-        ],
-    )
-    def test_blocked_write_is_privilege_not_sql(self, exc: BaseException) -> None:
-        """The result is `error_kind="privilege"`, not the generic SQL-error text.
-
-        Distinguishing this from `error_kind="sql"` matters because the
-        prompt's retry rule ("if you get a query error, rewrite and retry")
-        applies to SQL errors, not to a blocked write -- see the comment at
-        this branch in `resources.py`.
-        """
-        resources = _make_resources()
-        resources.pool = _fake_pool_with_outcomes([exc])
-
-        result = asyncio.run(resources.execute_sql(_SELECT_QUERY))
-
-        assert result["status"] == "error"
-        assert result["error_kind"] == "privilege"
-        assert not result["error"].startswith("SQL error:")
-        assert resources.pool.connection.call_count == 1
-
-
-# ---------------------------------------------------------------------------
-# Plain SQL errors: text preserved for the model to diagnose
-# ---------------------------------------------------------------------------
-
-
-class TestExecuteSqlSqlError:
-    """A generic SQL-level error is classified `sql` with its text preserved."""
-
-    def test_sql_error_text_is_preserved(self) -> None:
-        """The original driver message survives into the tool result."""
+    def test_database_error_is_unexpected_and_not_retried(self) -> None:
+        """Fixed SQL failing is a bug: one attempt, `unexpected`, no SQL text."""
         resources = _make_resources()
         resources.pool = _fake_pool_with_outcomes(
             [psycopg.errors.UndefinedColumn('column "nope" does not exist')],
         )
 
-        result = asyncio.run(resources.execute_sql(_SELECT_QUERY))
+        result = asyncio.run(resources.search_rooms(_SEARCH_ARGS))
 
         assert result["status"] == "error"
-        assert result["error_kind"] == "sql"
-        assert "nope" in result["error"]
+        assert result["error_kind"] == "unexpected"
+        assert "nope" not in result["error"]
+        assert resources.pool.connection.call_count == 1
 
 
 # ---------------------------------------------------------------------------

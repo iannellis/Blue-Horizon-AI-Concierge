@@ -1,7 +1,7 @@
 site_name: Blue Horizon AI Concierge
 site_description: >-
   An AI hotel concierge built with LangGraph and FastAPI: RAG-based
-  information retrieval, natural-language-to-SQL room search, and a
+  information retrieval, typed natural-language room search, and a
   human-in-the-loop booking flow the model can propose but never commit.
 site_url: https://iannellis.github.io/Blue-Horizon-AI-Concierge/
 repo_url: https://github.com/iannellis/Blue-Horizon-AI-Concierge

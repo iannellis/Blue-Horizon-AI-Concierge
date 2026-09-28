@@ -9,7 +9,7 @@ The file is structured into sections that map to the Pydantic models in
 |---------|----------|
 | `[orchestration]` | Router LLM, timeouts, retry backoff, concurrency limit |
 | `[info]` | Information agent LLM, embeddings model, Redis tuning, retrieval `top_k` |
-| `[booking]` | Booking agent LLM, SQL guardrails, DB pool settings |
+| `[booking]` | Booking agent LLM, search bounds, DB pool settings |
 | `[booking.proposals]` | `ttl_s`, how long an unconfirmed proposal stays in the in-process store before it is purged |
 | `[load_data]` | Paths to the source data pickles, and `seeded_customer_count` |
 | `[logging]` | The API's root log level, the third-party loggers kept quiet, and the endpoint and batching for log shipping to Axiom |
@@ -23,6 +23,20 @@ Neon branch management (project ID, branch name, reset tuning) lives entirely in
 **`[orchestration.orchestration].llm_concurrency`** (default 15) caps concurrent LLM
 pipeline executions. It prevents tokens-per-minute exhaustion under high concurrency,
 which otherwise fails every in-flight request at once rather than making a few wait.
+
+**`[booking.agent].top_k`** (default 4) is the most rooms one `search_rooms` call
+returns to the model. The result also carries `matching_count`, the number of rooms that
+matched, so a small `top_k` does not stop the agent answering "how many" questions. It
+bounds the tokens a search adds to the turn, which matters more than a row count: the
+rooms come back with their full amenity lists.
+
+**`[booking.agent].max_search_calls_per_turn`** (default 4) caps `search_rooms` calls in
+one guest turn, enforced by LangChain's `ToolCallLimitMiddleware` rather than by the
+prompt. A call past the limit gets an error result and the model has to answer with what
+it already found. Together with `top_k`, it bounds what one guest message can cost.
+
+**`[booking.agent].max_search_room_numbers`** (default 10) caps how many room numbers
+one search may name, so a search by room number stays within the same bound.
 
 **`[booking.db.pool].max_size`** (default 10) is kept even though Neon's own pooler sits
 in front of the database, because the app-side pool is what applies backpressure: a
@@ -51,7 +65,7 @@ This does not change how long a single request waits for a connection; that is
 means the first query after an idle stretch pays a cold-start cost, which is why UI data
 fetches use a 20-second timeout rather than the health check's 3 seconds.
 
-**`[booking.db.retry].max_transient_retries`** (default 3) retries `run_sql` after a
+**`[booking.db.retry].max_transient_retries`** (default 3) retries `search_rooms` after a
 transient connection error such as a connection closed unexpectedly. Every retry is safe
 because that pool connects as the read-only `bh_agent_ro` role, so there is no write on
 it that a retry could duplicate.
@@ -141,7 +155,7 @@ would still load. `[logging].level` and `quiet_loggers` apply to the API only.
 **`statement_timeout` is not in this file.** It is set at the database role level, with
 `ALTER ROLE`, so that it applies under PgBouncer transaction pooling, where a
 per-connection `SET` would not reliably survive. It bounds every statement the booking
-agent issues, including the model-authored SQL that `run_sql` runs as `bh_agent_ro`. It is
+agent issues, including the room searches that `search_rooms` runs as `bh_agent_ro`. It is
 applied by `blue_horizon/load_data/regrant_booking_agent_role.sql`, which the data loader
 runs on Parent, and a branch reset carries it to every child branch along with the
 grants. See [Running Locally](running-locally.md#2-create-the-database-roles).
@@ -164,7 +178,7 @@ covers both processes when running locally.
 | `OPENAI_API_KEY` | OpenAI API key |
 | `REDIS_URL` | Redis connection URL |
 | `PGSQL_RW_DB_URL` | PostgreSQL URL authenticated as the read-write `bh_agent_rw` role. Backs `write_ops` (booking commits), `/v1/customers`, and `/v1/bookings`. Never reachable from the model. |
-| `PGSQL_RO_DB_URL` | PostgreSQL URL authenticated as the read-only `bh_agent_ro` role. The *only* database connection the model's `run_sql` tool can use; Postgres itself refuses any write attempted through it. |
+| `PGSQL_RO_DB_URL` | PostgreSQL URL authenticated as the read-only `bh_agent_ro` role. The *only* database connection the model's `search_rooms` tool can use; Postgres itself refuses any write attempted through it. |
 
 !!! warning "The roles are not created automatically"
     `bh_agent_rw` and `bh_agent_ro` must already exist in the database with passwords

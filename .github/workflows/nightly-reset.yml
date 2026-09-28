@@ -58,9 +58,9 @@ name: Nightly Production reset
 on:
   workflow_dispatch:
   schedule:
-    # 09:00 UTC daily - late night / early morning across US time zones,
-    # to land the restart during low demo traffic.
-    - cron: "0 9 * * *"
+    # 04:00 UTC daily - doesn't actually run at that time. Tends to be hours later,
+    # so testing different times. Goal is to run in the middle of the night US time.
+    - cron: "0 4 * * *"
 
 jobs:
   nightly-reset:

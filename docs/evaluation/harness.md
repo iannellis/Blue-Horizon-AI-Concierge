@@ -43,16 +43,16 @@ eval/
 │   └── models.py               # Stress run data models
 │
 ├── datasets/
-│   ├── hotel_agent_eval_23.jsonl    # 23-case smoke dataset
-│   ├── hotel_agent_eval_206.jsonl   # 206-case full dataset
-│   └── hotel_agent_eval_206_manifest.json
+│   ├── hotel_agent_eval_25.jsonl    # 25-case smoke dataset
+│   ├── hotel_agent_eval_221.jsonl   # 221-case full dataset
+│   └── hotel_agent_eval_221_manifest.json
 │
 ├── baselines/
-│   ├── hotel_agent_eval_23_baseline.json   # CI smoke eval thresholds
-│   └── hotel_agent_eval_206_baseline.json  # Full eval thresholds
+│   ├── hotel_agent_eval_25_baseline.json   # CI smoke eval thresholds
+│   └── hotel_agent_eval_221_baseline.json  # Full eval thresholds
 │
-├── eval_config_23.toml         # Config for the 23-case smoke eval
-├── eval_config_206.toml        # Config for the 206-case full eval
+├── eval_config_25.toml         # Config for the 25-case smoke eval
+├── eval_config_221.toml        # Config for the 221-case full eval
 ├── stress_config.toml          # Config for the stress test
 └── requirements.txt            # Pinned dependencies for CI
 ```
@@ -102,7 +102,7 @@ nothing to validate against and fails with a pydantic `ValidationError`.
 
 ## Configuration
 
-`eval_config_23.toml` and `eval_config_206.toml` differ only in the `[experiment]`
+`eval_config_25.toml` and `eval_config_221.toml` differ only in the `[experiment]`
 dataset and naming keys. Most keys are self-explanatory caps on what is stored or passed
 to the judge. The ones with non-obvious consequences:
 
@@ -138,20 +138,20 @@ for a real, very low score and lowered the run's mean without any sign in the su
 
 ## Running evaluations
 
-### Smoke eval (23 cases)
+### Smoke eval (25 cases)
 
 Used as a CI gate on every push to `main`:
 
 ```bash
-python -m eval.run_experiment --config eval/eval_config_23.toml
+python -m eval.run_experiment --config eval/eval_config_25.toml
 ```
 
-### Full eval (206 cases)
+### Full eval (221 cases)
 
 Run manually for comprehensive quality checks:
 
 ```bash
-python -m eval.run_experiment --config eval/eval_config_206.toml
+python -m eval.run_experiment --config eval/eval_config_221.toml
 ```
 
 Both commands write results to `eval/outputs/<experiment_name>/`:
@@ -174,7 +174,7 @@ Logs are written to `eval/logs/<experiment_name>.log` and mirrored to stdout.
 A quick, fully local routing check over the full dataset:
 
 ```bash
-python -m eval.run_experiment --config eval/eval_config_206.toml --router-only --no-upload
+python -m eval.run_experiment --config eval/eval_config_221.toml --router-only --no-upload
 ```
 
 !!! note "Why `--no-upload` bypasses `aevaluate` entirely"
@@ -293,12 +293,12 @@ override changes behavior without changing the commit.
 python -m eval.ci_check eval/outputs/<experiment_name>/results.jsonl
 ```
 
-Uses `eval/baselines/hotel_agent_eval_23_baseline.json` by default. For the 206-case
+Uses `eval/baselines/hotel_agent_eval_25_baseline.json` by default. For the 221-case
 baseline:
 
 ```bash
 python -m eval.ci_check eval/outputs/<experiment_name>/results.jsonl \
-  --baseline eval/baselines/hotel_agent_eval_206_baseline.json
+  --baseline eval/baselines/hotel_agent_eval_221_baseline.json
 ```
 
 Output is a table comparing each metric against its baseline and minimum threshold,

@@ -1,13 +1,14 @@
 # Evaluation results
 
-Metrics collected over the 206-case dataset at
-[`eval/datasets/hotel_agent_eval_206.jsonl`](https://github.com/iannellis/Blue-Horizon-AI-Concierge/blob/main/eval/datasets/hotel_agent_eval_206.jsonl).
+Metrics collected over the 206-case dataset that is now
+[`eval/datasets/hotel_agent_eval_221.jsonl`](https://github.com/iannellis/Blue-Horizon-AI-Concierge/blob/main/eval/datasets/hotel_agent_eval_221.jsonl),
+before its fifteen attribute-search cases were added.
 
 **Every figure below is the mean of three consecutive full runs** on 2026-08-18
 (commit `147aec6`, after the context-precision prompt generalization), with the observed
 range across those runs given alongside. Single-run variance on the judge-scored metrics
 is large enough that a one-run number is misleading, which is why the repository's
-206-case baseline is also set from a three-run average rather than a single run.
+full-eval baseline is also set from a three-run average rather than a single run.
 
 Raw outputs:
 [`eval/outputs/26-08-18-after_precision_prompt_update/`](https://github.com/iannellis/Blue-Horizon-AI-Concierge/tree/main/eval/outputs/26-08-18-after_precision_prompt_update).
@@ -22,7 +23,7 @@ Raw outputs:
 
 Every metric that requires a model judge or scorer - all three conversation-level scores
 plus the four RAG metrics - is graded by Gemini `gemini-3.5-flash-lite`, configured in
-[`eval/eval_config_206.toml`](https://github.com/iannellis/Blue-Horizon-AI-Concierge/blob/main/eval/eval_config_206.toml)
+[`eval/eval_config_221.toml`](https://github.com/iannellis/Blue-Horizon-AI-Concierge/blob/main/eval/eval_config_221.toml)
 as both `[judge].model` and `[ragas].llm_model`.
 
 **RAG answer relevancy** additionally embeds the question with the Gemini

@@ -42,14 +42,14 @@ The source for those pages is in [`docs/evaluation/`](../docs/evaluation/).
 ## Quick reference
 
 ```bash
-# Smoke eval (23 cases) -- the CI gate
-python -m eval.run_experiment --config eval/eval_config_23.toml
+# Smoke eval (25 cases) -- the CI gate
+python -m eval.run_experiment --config eval/eval_config_25.toml
 
-# Full eval (206 cases)
-python -m eval.run_experiment --config eval/eval_config_206.toml
+# Full eval (221 cases)
+python -m eval.run_experiment --config eval/eval_config_221.toml
 
 # Fast local routing check, no LangSmith traces
-python -m eval.run_experiment --config eval/eval_config_206.toml --router-only --no-upload
+python -m eval.run_experiment --config eval/eval_config_221.toml --router-only --no-upload
 
 # Compare a completed run against its baseline
 python -m eval.ci_check eval/outputs/<experiment_name>/results.jsonl

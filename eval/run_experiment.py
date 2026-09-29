@@ -163,7 +163,7 @@ def _resolve_run_notes(
 ) -> str | None:
     """Replace the configured run notes with a subset label when case-filtered.
 
-    The configured ``run_notes`` (e.g. "Full dataset with 206 cases") describes
+    The configured ``run_notes`` (e.g. "Full dataset with 221 cases") describes
     the full dataset and becomes misleading in the experiment name and output
     directory once ``--case-id`` restricts the run to a handful of examples.
     When a case-id filter is active, this builds a notes string derived from the

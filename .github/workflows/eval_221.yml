@@ -1,7 +1,7 @@
-# Full 206-case evaluation workflow for Blue Horizon AI Concierge.
+# Full 221-case evaluation workflow for Blue Horizon AI Concierge.
 #
 # Triggered manually via the GitHub Actions "Run workflow" button.
-# Results are uploaded to LangSmith and compared against the 206-case baseline.
+# Results are uploaded to LangSmith and compared against the 221-case baseline.
 #
 # Secrets this workflow reads, all scoped to the Testing environment:
 #   LANGSMITH_API_KEY    - LangSmith API key for dataset loading and tracing.
@@ -21,14 +21,14 @@
 # workflow, so they are set in the job's env: block below rather than stored as
 # environment variables. That keeps Testing purely about secret access.
 
-name: Eval (206 cases)
+name: Eval (221 cases)
 
 on:
   workflow_dispatch:
 
 jobs:
   eval:
-    name: Full eval (206 cases)
+    name: Full eval (221 cases)
     runs-on: ubuntu-latest
     environment: Testing
 
@@ -62,23 +62,23 @@ jobs:
           PGSQL_RW_EVAL_DB_URL: ${{ secrets.PGSQL_RW_EVAL_DB_URL }}
           PGSQL_RO_EVAL_DB_URL: ${{ secrets.PGSQL_RO_EVAL_DB_URL }}
           REDIS_URL: ${{ secrets.REDIS_URL }}
-        run: python -m eval.run_experiment --config eval/eval_config_206.toml
+        run: python -m eval.run_experiment --config eval/eval_config_221.toml
 
       - name: Check results against baseline
         run: |
-          RESULTS_DIR=$(ls -dt eval/outputs/hotel-agent-eval-206_*/ 2>/dev/null | head -1)
+          RESULTS_DIR=$(ls -dt eval/outputs/hotel-agent-eval-221_*/ 2>/dev/null | head -1)
           if [ -z "$RESULTS_DIR" ]; then
             echo "ERROR: No eval output directory found." >&2
             exit 1
           fi
           python -m eval.ci_check "${RESULTS_DIR}results.jsonl" \
-            --baseline eval/baselines/hotel_agent_eval_206_baseline.json
+            --baseline eval/baselines/hotel_agent_eval_221_baseline.json
 
       - name: Upload eval logs
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: eval-logs-206
+          name: eval-logs-221
           path: eval/logs/
           if-no-files-found: ignore
 
@@ -86,6 +86,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: eval-results-206
+          name: eval-results-221
           path: eval/outputs/
           if-no-files-found: ignore

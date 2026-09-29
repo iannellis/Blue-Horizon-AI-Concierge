@@ -33,7 +33,7 @@ Each line in a JSONL dataset file is a single JSON object:
 | Field | Required | Used by | Description |
 |---|---|---|---|
 | `case_id` | Yes | harness | Unique string identifier |
-| `tags` | No | harness | Labels used for filtering: `booking`, `info`, `refuse`, `mixed`, `injection`. `no_auto_confirm` additionally opts the whole case out of post-turn auto-confirmation |
+| `tags` | No | harness | Labels used for filtering: `booking`, `info`, `refuse`, `mixed`, `injection`, `attribute_search`. `no_auto_confirm` additionally opts the whole case out of post-turn auto-confirmation |
 | `turns[].user` | Yes | harness | User message text sent to the agent |
 | `turns[].expected_route` | Yes | `eval_routing_accuracy` | Expected route: `booking`, `info`, or `refuse` |
 | `turns[].expect_injection` | No | `eval_injection_tripwires` | `true` if this turn is a prompt-injection attempt |
@@ -53,6 +53,26 @@ a count, amenities, an empty result, and a stay that crosses New Year. Each was 
 against the Development branch when it was written; the empty-result case, for example,
 asks for a Standard room with a private pool, and no Standard room has one. They are
 tagged `attribute_search` and `no_auto_confirm`, since none asks for a booking.
+
+`case_0212` through `case_0221` cover the remaining filters and two kinds of follow-up:
+
+| Case | Request | Filters checked |
+|---|---|---|
+| `case_0212` | An accessible room with two queen beds | `accessible`, `bed_types` |
+| `case_0213` | A room that sleeps a family of five | `min_occupancy` |
+| `case_0214` | Rooms under $500 a night | `max_nightly_price` |
+| `case_0215` | At least 1,000 square feet | `min_square_feet` |
+| `case_0216` | The 15th floor or higher with an ocean view | `min_floor`, `view_types` |
+| `case_0217` | Suites on the highest floors | `room_types`, `sort_by` `"floor_desc"` |
+| `case_0218` | How many rooms are accessible | `accessible`, with no dates |
+| `case_0219` | The difference between two named rooms | `room_numbers`, with no dates |
+| `case_0220` | Ocean-view suites, then only those under $1,200 a night | the first turn's filters carried into the second, plus `max_nightly_price` |
+| `case_0221` | Pool-view rooms, then the same a night later | `view_types` carried into the second turn with the new dates |
+
+These were checked against the source data in `data/pandas/` that the loader reads, not
+against Development directly. Every dated one returns rooms there; availability on
+Development can differ, but the filters are what the label checks. `case_0220` is also
+in the smoke set, so CI sees a labeled turn that depends on the one before it.
 
 Each case's opening turn carries an `expected_search` label, which
 `eval_booking_expected_search` compares with the arguments the model actually passed to
@@ -98,8 +118,8 @@ is marked down there.
 
 ```bash
 python -m eval.create_langsmith_dataset \
-  --dataset-name "BlueHorizonEval_23" \
-  --cases-path eval/datasets/hotel_agent_eval_23.jsonl
+  --dataset-name "BlueHorizonEval_25" \
+  --cases-path eval/datasets/hotel_agent_eval_25.jsonl
 ```
 
 !!! warning "Local JSONL and the hosted dataset drift"
@@ -204,14 +224,21 @@ SKIP = {"route_confusions","judge_raw_json","info_reference_subset_failures",
         "booking_expected_search_failures",
         "rag_per_turn","latency_per_turn"}
 
+def feedback_pairs(evaluators):
+    """Yield (key, score) from either results.jsonl layout."""
+    if "results" in evaluators:  # uploaded run: a list of feedback items
+        for item in evaluators["results"].get("value") or []:
+            d = dict(item)
+            yield d.get("key"), d.get("score")
+    else:  # --no-upload run: a mapping from key to {"score": ...}
+        for key, entry in evaluators.items():
+            yield key, (entry or {}).get("score")
+
 scores = defaultdict(list)
 with open(RESULTS, encoding="utf-8") as f:
     for line in f:
         case = json.loads(line.strip())
-        items = case.get("evaluators", {}).get("results", {}).get("value") or []
-        for item in items:
-            d = dict(item)
-            key, score = d.get("key"), d.get("score")
+        for key, score in feedback_pairs(case.get("evaluators") or {}):
             if key and key not in SKIP and score is not None:
                 with suppress(TypeError, ValueError):
                     scores[key].append(float(score))
@@ -221,6 +248,8 @@ for k, v in sorted(scores.items()):
 EOF
 ```
 
-The 206-case baseline currently in the repository was set from the average of three runs
-rather than a single run, since single-run variance on the judge-scored metrics is large
-enough to make a one-run baseline unstable.
+A full-eval baseline is best set from the average of several runs, since single-run
+variance on the judge-scored metrics is large enough to make a one-run baseline unstable.
+The 206-case baseline was the average of three runs. The current 221-case baseline comes
+from a single run, so treat a small drop in a judge-scored metric with that in mind
+before reading it as a regression.

@@ -117,7 +117,7 @@ is dismantling a guarantee.
 | `blue_horizon/api/app.py` | FastAPI app, SSE streaming, the confirm and dismiss endpoints |
 | `blue_horizon/logging_setup.py` | `configure_logging()` and `log_context()`, which puts `thread_id` and `customer_id` on every log line in a turn; ships records to Axiom when `AXIOM_API_KEY` and `AXIOM_DATASET` are set |
 | `blue_horizon/load_data/` | Redis and PostgreSQL loaders, plus `schema.sql`, `maintenance_booking_guard.sql`, and `regrant_booking_agent_role.sql` |
-| `eval/` | LangSmith harness, evaluators, 206-case dataset, concurrency stress test |
+| `eval/` | LangSmith harness, evaluators, 221-case dataset, concurrency stress test |
 | `eval/neon.py` | Neon branch reset utility, used by `eval/booking_db_manager.py` and CI; not imported anywhere under `blue_horizon/` |
 | `eval/models.py` | Typed eval wire format (`TurnOutput`, `ToolSummaryEntry`, `ExampleTurn`), parsed once per evaluator |
 | `tests/` | Mirrors the package layout; `db_integration` marker for DB-backed tests |

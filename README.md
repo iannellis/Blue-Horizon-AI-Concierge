@@ -58,7 +58,7 @@ replacing the agent with a fixed LangGraph DAG removed the model's opportunity t
 misinterpret emptiness at all.
 [The full story](https://iannellis.github.io/Blue-Horizon-AI-Concierge/design-decisions/#the-information-agent-is-a-workflow-not-an-agent).
 
-**Measured, with CI that can fail on it.** A 206-case multi-turn evaluation suite scores
+**Measured, with CI that can fail on it.** A 221-case multi-turn evaluation suite scores
 routing, grounding, injection resistance, RAG quality, and booking outcomes, with pinned
 baselines a smoke eval checks on every push. A concurrency stress test drives 50
 simultaneous sessions deliberately fighting over the same 10 rooms.

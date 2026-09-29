@@ -1,17 +1,18 @@
 {
-  "dataset_file": "eval/datasets/hotel_agent_eval_206.jsonl",
-  "num_cases": 206,
+  "dataset_file": "eval/datasets/hotel_agent_eval_221.jsonl",
+  "num_cases": 221,
   "distribution": {
     "info_only": 70,
-    "rooms_only": 71,
+    "rooms_only": 86,
     "mixed": 65
   },
   "turn_counts": {
-    "total_turns": 533,
+    "total_turns": 553,
     "info_turns": 206,
-    "rooms_turns": 287,
+    "rooms_turns": 307,
     "refuse_turns": 40,
-    "labeled_filter_turns": 40
+    "labeled_filter_turns": 40,
+    "labeled_search_turns": 19
   },
   "refuse_coverage": {
     "cases_with_refuse_turns": 40,
@@ -214,6 +215,23 @@
       "abandonment": ["case_0201", "case_0202"],
       "supersession": ["case_0203", "case_0204"],
       "unbacked_success_claim_probe": ["case_0205", "case_0206"]
+    },
+    "case_ids_covering_attribute_search": {
+      "note": "Added with the typed search_rooms tool, which replaced free-form SQL. Each exercises a search filter the earlier cases never used. All carry the no_auto_confirm tag, since none asks for a booking.",
+      "type_floor_view": ["case_0207"],
+      "count": ["case_0208"],
+      "amenity": ["case_0209"],
+      "empty_result": ["case_0210"],
+      "new_year_crossing": ["case_0211"],
+      "accessible": ["case_0212", "case_0218"],
+      "bed_type": ["case_0212"],
+      "occupancy": ["case_0213"],
+      "price_cap": ["case_0214", "case_0220"],
+      "size": ["case_0215"],
+      "min_floor_view": ["case_0216"],
+      "sort_floor_desc": ["case_0217"],
+      "room_numbers": ["case_0219"],
+      "multi_turn_refinement": ["case_0220", "case_0221"]
     }
   }
 }

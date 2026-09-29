@@ -29,7 +29,7 @@ from eval._result_utils import (
 )
 
 _DEFAULT_BASELINE = (
-    Path(__file__).parent / "baselines" / "hotel_agent_eval_23_baseline.json"
+    Path(__file__).parent / "baselines" / "hotel_agent_eval_25_baseline.json"
 )
 
 # Keys whose scores are metadata / skip-markers rather than real metric values.
@@ -96,7 +96,7 @@ def _parse_args() -> argparse.Namespace:
         default=str(_DEFAULT_BASELINE),
         help=(
             "Path to baseline JSON file "
-            "(default: eval/baselines/hotel_agent_eval_23_baseline.json)"
+            "(default: eval/baselines/hotel_agent_eval_25_baseline.json)"
         ),
     )
     return parser.parse_args()

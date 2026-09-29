@@ -87,4 +87,10 @@ embedding_model = "gemini-embedding-2"
 custom_precision_prompt = true
 # Reference text marking a "nothing matched" turn; "" disables the skip.
 no_match_reference = "I could not find exactly what you requested"
+# Attempts per metric call, including the first, on a Gemini 429 or 5xx.
+retry_attempts = 5
+# Multiplier in seconds for the randomized exponential wait between attempts.
+retry_backoff_s = 2.0
+# Longest single wait in seconds between attempts.
+retry_backoff_max_s = 30.0
 

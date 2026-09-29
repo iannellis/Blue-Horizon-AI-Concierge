@@ -212,6 +212,11 @@ class RagasConfig(FrozenModel):
             answer is "nothing matched". Context precision is skipped for turns
             whose reference consists solely of this sentinel. Empty disables
             the skip.
+        retry_attempts: Total attempts per metric call, counting the first,
+            when Gemini returns a transient error (429 or 5xx).
+        retry_backoff_s: Multiplier for the randomized exponential wait
+            between attempts.
+        retry_backoff_max_s: Upper bound on any single wait between attempts.
 
     """
 
@@ -226,6 +231,9 @@ class RagasConfig(FrozenModel):
     embedding_model: str
     custom_precision_prompt: bool = False
     no_match_reference: str = ""
+    retry_attempts: PositiveInt = 5
+    retry_backoff_s: Annotated[float, Field(ge=0.0)] = 2.0
+    retry_backoff_max_s: Annotated[float, Field(ge=0.0)] = 30.0
 
 
 class StressWorkloadConfig(FrozenModel):

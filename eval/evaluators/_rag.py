@@ -27,6 +27,13 @@ from ragas.metrics.collections import (
     ContextRecall,
     Faithfulness,
 )
+from tenacity import (
+    AsyncRetrying,
+    before_sleep_log,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_random_exponential,
+)
 
 from eval._utils import coerce_float, json_detail_metric, truncate
 from eval.evaluators._common import _rag_extract_reference, _rag_extract_turn_inputs
@@ -40,15 +47,21 @@ if TYPE_CHECKING:
 
 try:  # Optional dependency for Gemini clients used by Ragas.
     from google import genai as _genai
+    from google.genai import errors as _genai_errors
 
     _GENAI_IMPORT_ERROR: Exception | None = None
 except Exception as _exc:  # noqa: BLE001
     _genai = None
+    _genai_errors = None
     _GENAI_IMPORT_ERROR = _exc
 
 InstructorTypeVar = TypeVar("InstructorTypeVar", bound=BaseModel)
 
 logger = logging.getLogger(__name__)
+
+# Gemini status codes worth another attempt: rate limiting and server-side
+# failures. Anything else (a bad request, a denied key) fails the same way twice.
+_TRANSIENT_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 
 
 @runtime_checkable
@@ -138,6 +151,11 @@ async def eval_rag_metrics_info_turns(
     Returns:
         List of LangSmith feedback dicts with per-turn Ragas scores and means.
 
+    Raises:
+        Exception: Whatever a metric call last raised, once it has failed
+            with a non-transient error or used up ``[ragas].retry_attempts``.
+            A score is never substituted for a failed call.
+
     """
     ragas_cfg = cfg.ragas
     limits = cfg.evaluator_limits
@@ -167,6 +185,7 @@ async def eval_rag_metrics_info_turns(
     # declares BaseModel.__hash__ as None, so it sees RagasConfig as
     # unhashable. False positive, not a real Hashable violation.
     metrics = _get_ragas_metrics(ragas_cfg)  # pyright: ignore[reportArgumentType]
+    retrying = _build_retrying(ragas_cfg)
 
     per_turn: list[dict[str, Any]] = []
     faithfulness_scores: list[float] = []
@@ -205,6 +224,7 @@ async def eval_rag_metrics_info_turns(
             reference=reference,
             metrics=metrics,
             no_match_reference=ragas_cfg.no_match_reference,
+            retrying=retrying,
         )
         per_turn.append(
             {
@@ -402,6 +422,62 @@ def _ensure_base_embedding(
     raise RuntimeError(msg)
 
 
+def _build_retrying(ragas_cfg: RagasConfig) -> AsyncRetrying:
+    """Build the retry policy applied to every Ragas metric call.
+
+    The wait is randomized so that the concurrent cases that were all refused
+    by the same Gemini overload do not retry in lockstep and trip it again.
+
+    Args:
+        ragas_cfg: Ragas configuration with the retry settings.
+
+    Returns:
+        A template policy. Callers use a copy per call, since one
+        ``AsyncRetrying`` holds the state of the call it is running.
+
+    """
+    return AsyncRetrying(
+        retry=retry_if_exception(_is_transient_gemini_error),
+        stop=stop_after_attempt(ragas_cfg.retry_attempts),
+        wait=wait_random_exponential(
+            multiplier=ragas_cfg.retry_backoff_s,
+            max=ragas_cfg.retry_backoff_max_s,
+        ),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,
+    )
+
+
+def _is_transient_gemini_error(exc: BaseException) -> bool:
+    """Report whether an exception chain contains a retryable Gemini error.
+
+    Instructor wraps the SDK's error in its own retry exception, so the chain
+    is walked through ``__cause__`` and ``__context__`` rather than checking
+    only the outermost exception.
+
+    Args:
+        exc: The exception raised by a metric call.
+
+    Returns:
+        True when some exception in the chain is a Gemini ``APIError`` whose
+        status code is in ``_TRANSIENT_STATUS_CODES``.
+
+    """
+    if _genai_errors is None:
+        return False
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if (
+            isinstance(current, _genai_errors.APIError)
+            and current.code in _TRANSIENT_STATUS_CODES
+        ):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
 def _rag_is_eligible_turn(turn_output: TurnOutput) -> bool:
     """Determine whether a turn should be scored by Ragas.
 
@@ -449,6 +525,7 @@ async def _rag_score_turn(  # noqa: PLR0913
     reference: str | None,
     metrics: tuple[Faithfulness, AnswerRelevancy, ContextPrecision, ContextRecall],
     no_match_reference: str = "",
+    retrying: AsyncRetrying | None = None,
 ) -> dict[str, float | None]:
     """Score a single turn using Ragas metrics.
 
@@ -470,44 +547,51 @@ async def _rag_score_turn(  # noqa: PLR0913
             (faithfulness, answer_relevancy, context_precision, context_recall).
         no_match_reference: Sentinel reference text marking a "nothing matched"
             expectation. Empty disables the context-precision skip.
+        retrying: Retry policy from ``_build_retrying``, copied for each
+            metric call. ``None`` makes a single attempt per call.
 
     Returns:
         Dict with metric scores for the turn.
 
+    Raises:
+        Exception: Whatever a metric call last raised. A failed call is never
+            scored as 0.0, since that would pass for a real, very low score
+            and drag down the run's mean.
+
     """
     faithfulness, answer_relevancy, context_precision, context_recall = metrics
 
-    faithfulness_score = await faithfulness.ascore(
+    faithfulness_score = await _ascore_with_retry(
+        faithfulness,
+        retrying,
         user_input=question,
         response=answer,
         retrieved_contexts=contexts,
     )
-
-    try:
-        answer_relevancy_score = await answer_relevancy.ascore(
-            user_input=question,
-            response=answer,
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "AnswerRelevancy metric failed: %s. Defaulting to 0.0",
-            exc,
-        )
-        answer_relevancy_score = 0.0
+    answer_relevancy_score = await _ascore_with_retry(
+        answer_relevancy,
+        retrying,
+        user_input=question,
+        response=answer,
+    )
 
     context_precision_score: float | None = None
     context_recall_score: float | None = None
     if reference:
         if not _rag_reference_is_no_match(reference, no_match_reference):
             context_precision_score = _metric_result_to_float(
-                await context_precision.ascore(
+                await _ascore_with_retry(
+                    context_precision,
+                    retrying,
                     user_input=question,
                     reference=reference,
                     retrieved_contexts=contexts,
                 ),
             )
         context_recall_score = _metric_result_to_float(
-            await context_recall.ascore(
+            await _ascore_with_retry(
+                context_recall,
+                retrying,
                 user_input=question,
                 reference=reference,
                 retrieved_contexts=contexts,
@@ -519,6 +603,31 @@ async def _rag_score_turn(  # noqa: PLR0913
         "context_precision": context_precision_score,
         "context_recall": context_recall_score,
     }
+
+
+async def _ascore_with_retry(
+    metric: Faithfulness | AnswerRelevancy | ContextPrecision | ContextRecall,
+    retrying: AsyncRetrying | None,
+    **kwargs: Any,  # noqa: ANN401
+) -> object:
+    """Score one Ragas metric, retrying transient Gemini failures.
+
+    Args:
+        metric: The Ragas metric to score.
+        retrying: Template retry policy, or ``None`` for a single attempt.
+        **kwargs: Scoring arguments forwarded to the metric's ``ascore``.
+
+    Returns:
+        The metric's raw result, for ``_metric_result_to_float`` to coerce.
+
+    Raises:
+        Exception: The last error, once it is non-transient or the attempts
+            are used up.
+
+    """
+    if retrying is None:
+        return await metric.ascore(**kwargs)
+    return await retrying.copy()(metric.ascore, **kwargs)
 
 
 def _rag_reference_is_no_match(reference: str, no_match_reference: str) -> bool:

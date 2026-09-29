@@ -127,6 +127,15 @@ turns anyway. See
 [the known issue](datasets.md#known-issue-sentinel-bundled-compound-references) for
 references that mix the sentinel with a real answer.
 
+**`[ragas].retry_attempts`**, **`retry_backoff_s`** and **`retry_backoff_max_s`**
+(defaults 5, 2 and 30) set how each Ragas metric call is retried when Gemini returns a
+429 or a 5xx. Gemini answers some calls with a 503 under the load of ten cases scored
+at once, and before these retries a single one ended the whole run. The wait between
+attempts is randomized so that calls refused together do not retry together. Any other
+error, and a transient one that outlasts the attempts, still ends the run. No metric
+records 0.0 for a failed call: answer relevancy used to, and a failed call then passed
+for a real, very low score and lowered the run's mean without any sign in the summary.
+
 ## Running evaluations
 
 ### Smoke eval (23 cases)

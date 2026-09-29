@@ -2,7 +2,8 @@
 
 Covers the no-match reference sentinel check that gates context-precision
 scoring, the custom context-precision prompt's structural compatibility with
-Ragas, and _rag_score_turn's skip behaviour via stub metric objects.
+Ragas, _rag_score_turn's skip behaviour via stub metric objects, and the retry
+policy applied to transient Gemini failures.
 """
 
 # ruff: noqa: S101
@@ -10,16 +11,25 @@ Ragas, and _rag_score_turn's skip behaviour via stub metric objects.
 import asyncio
 
 import pytest
+from google.genai import errors as genai_errors
 from ragas.metrics.collections.context_precision.util import (
     ContextPrecisionInput,
     ContextPrecisionOutput,
 )
+from tenacity import AsyncRetrying
 
-from eval.evaluators._rag import _rag_reference_is_no_match, _rag_score_turn
+from eval.config import RagasConfig
+from eval.evaluators._rag import (
+    _build_retrying,
+    _is_transient_gemini_error,
+    _rag_reference_is_no_match,
+    _rag_score_turn,
+)
 from eval.evaluators._rag_prompts import PartialCoverageContextPrecisionPrompt
 
 SENTINEL = "I could not find exactly what you requested"
 EXPECTED_EXAMPLE_COUNT = 4
+RETRY_ATTEMPTS = 3
 
 
 # ---------------------------------------------------------------------------
@@ -194,3 +204,181 @@ def test_ordinary_reference_scores_all_metrics() -> None:
     assert scores["answer_relevancy"] == pytest.approx(0.9)
     assert scores["context_precision"] == pytest.approx(0.8)
     assert scores["context_recall"] == pytest.approx(0.7)
+
+
+# ---------------------------------------------------------------------------
+# Transient-error retry
+# ---------------------------------------------------------------------------
+
+
+def _gemini_error(code: int) -> genai_errors.APIError:
+    """Build the SDK error Gemini raises for an HTTP status code.
+
+    Args:
+        code: HTTP status code.
+
+    Returns:
+        A ``ServerError`` for 5xx codes, otherwise a ``ClientError``.
+
+    """
+    body = {"error": {"code": code, "message": "x", "status": "UNAVAILABLE"}}
+    if code >= 500:  # noqa: PLR2004
+        return genai_errors.ServerError(code, body)
+    return genai_errors.ClientError(code, body)
+
+
+def _wrapped(inner: BaseException) -> RuntimeError:
+    """Wrap an error the way Instructor does, with ``raise ... from``.
+
+    Args:
+        inner: The error to chain as ``__cause__``.
+
+    Returns:
+        The outer error, carrying ``inner`` as its cause.
+
+    """
+    outer = RuntimeError(str(inner))
+    outer.__cause__ = inner
+    return outer
+
+
+def _no_wait_retrying() -> AsyncRetrying:
+    """Build the production retry policy with the waits set to zero.
+
+    Returns:
+        A policy allowing ``RETRY_ATTEMPTS`` attempts and no sleeping.
+
+    """
+    return _build_retrying(
+        RagasConfig(
+            turns_max=10,
+            contexts_max=20,
+            context_chars=1200,
+            query_chars=1200,
+            response_chars=2000,
+            reference_chars=2000,
+            llm_model="gemini-test",
+            llm_max_tokens=2048,
+            embedding_model="gemini-embedding-test",
+            retry_attempts=RETRY_ATTEMPTS,
+            retry_backoff_s=0.0,
+            retry_backoff_max_s=0.0,
+        ),
+    )
+
+
+class _FailingMetric(_StubMetric):
+    """Metric stub that raises a set number of times before succeeding."""
+
+    def __init__(self, value: float, error: BaseException, failures: int) -> None:
+        """Initialize the stub.
+
+        Args:
+            value: Score returned once the failures are used up.
+            error: Exception raised on each failing call.
+            failures: Number of calls that raise before one succeeds.
+
+        """
+        super().__init__(value)
+        self.error = error
+        self.failures = failures
+
+    async def ascore(self, **_kwargs: object) -> float:
+        """Raise the configured error until the failures are used up.
+
+        Args:
+            **_kwargs: Ignored scoring arguments.
+
+        Returns:
+            The configured score.
+
+        Raises:
+            BaseException: The configured error, on each failing call.
+
+        """
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise self.error
+        return self.value
+
+
+def _score_with(
+    answer_relevancy: _StubMetric,
+    retrying: AsyncRetrying | None,
+) -> dict[str, float | None]:
+    """Score an ordinary turn with a chosen answer-relevancy stub.
+
+    Args:
+        answer_relevancy: Stub standing in for the answer-relevancy metric.
+        retrying: Retry policy passed to ``_rag_score_turn``.
+
+    Returns:
+        The turn's scores.
+
+    """
+    faithfulness, _, precision, recall = _make_metrics()
+    return asyncio.run(
+        _rag_score_turn(
+            question="What time is check-in?",
+            answer="Check-in is at 3:00 PM.",
+            contexts=["Check-in time is 3:00 PM."],
+            reference="Check-in time is 3:00 PM.",
+            metrics=(faithfulness, answer_relevancy, precision, recall),  # type: ignore[arg-type]
+            no_match_reference=SENTINEL,
+            retrying=retrying,
+        ),
+    )
+
+
+@pytest.mark.parametrize("code", [429, 500, 502, 503, 504])
+def test_transient_status_codes_are_retryable(code: int) -> None:
+    """Rate limiting and server errors are worth another attempt."""
+    assert _is_transient_gemini_error(_gemini_error(code)) is True
+
+
+@pytest.mark.parametrize("code", [400, 401, 403, 404])
+def test_client_errors_are_not_retryable(code: int) -> None:
+    """A bad request or a denied key would fail the same way again."""
+    assert _is_transient_gemini_error(_gemini_error(code)) is False
+
+
+def test_transient_error_is_found_through_a_wrapping_exception() -> None:
+    """Instructor's wrapper exception still counts when its cause is a 503."""
+    assert _is_transient_gemini_error(_wrapped(_gemini_error(503))) is True
+
+
+def test_unrelated_exception_is_not_retryable() -> None:
+    """An error with no Gemini error in its chain is not retried."""
+    assert _is_transient_gemini_error(ValueError("bad value")) is False
+
+
+def test_transient_failure_is_retried_until_it_succeeds() -> None:
+    """A metric that 503s once is scored on the second attempt."""
+    metric = _FailingMetric(0.9, _wrapped(_gemini_error(503)), failures=1)
+    scores = _score_with(metric, _no_wait_retrying())
+    assert scores["answer_relevancy"] == pytest.approx(0.9)
+    assert metric.calls == 2  # noqa: PLR2004
+
+
+def test_exhausted_retries_raise_the_last_error() -> None:
+    """A metric that keeps failing raises after the configured attempts."""
+    error = _gemini_error(503)
+    metric = _FailingMetric(0.9, error, failures=RETRY_ATTEMPTS)
+    with pytest.raises(genai_errors.ServerError):
+        _score_with(metric, _no_wait_retrying())
+    assert metric.calls == RETRY_ATTEMPTS
+
+
+def test_non_transient_failure_is_not_retried() -> None:
+    """A client error is raised on the first attempt."""
+    metric = _FailingMetric(0.9, _gemini_error(400), failures=1)
+    with pytest.raises(genai_errors.ClientError):
+        _score_with(metric, _no_wait_retrying())
+    assert metric.calls == 1
+
+
+def test_answer_relevancy_failure_is_not_scored_as_zero() -> None:
+    """A failed answer-relevancy call raises instead of recording 0.0."""
+    metric = _FailingMetric(0.9, _gemini_error(503), failures=1)
+    with pytest.raises(genai_errors.ServerError):
+        _score_with(metric, None)

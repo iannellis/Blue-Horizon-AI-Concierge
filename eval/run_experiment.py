@@ -835,6 +835,10 @@ async def _score_example_locally(
 ) -> list[dict[str, object]]:
     """Apply every evaluator to one run/example pair and flatten their results.
 
+    An evaluator that raises is logged and contributes no feedback for this
+    example, as under ``aevaluate``. One failed judge call then leaves a gap
+    in that metric's mean instead of ending the whole run.
+
     Args:
         run: Local ``Run`` stand-in for the completed target execution.
         example: Dataset example being scored.
@@ -846,9 +850,17 @@ async def _score_example_locally(
     """
     feedback: list[dict[str, object]] = []
     for evaluator in evaluators:
-        response = evaluator(run, example)
-        if inspect.isawaitable(response):
-            response = await response
+        try:
+            response = evaluator(run, example)
+            if inspect.isawaitable(response):
+                response = await response
+        except Exception:  # an evaluator failure skips its metrics only
+            logger.exception(
+                "Evaluator %r failed on example %r; its metrics are omitted.",
+                getattr(evaluator, "func", evaluator),
+                example.id,
+            )
+            continue
         if isinstance(response, list):
             feedback.extend(response)
     return feedback

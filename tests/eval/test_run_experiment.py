@@ -4,13 +4,14 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
-from eval.run_experiment import _has_booking_cases
+from eval.run_experiment import _has_booking_cases, _score_example_locally
 
 if TYPE_CHECKING:
-    from langsmith.schemas import Example
+    from langsmith.schemas import Example, Run
 
 
 class TestHasBookingCases:
@@ -58,3 +59,26 @@ class TestHasBookingCases:
         result = _has_booking_cases(examples)
 
         assert result is False
+
+
+class TestScoreExampleLocally:
+    """_score_example_locally() keeps scoring when one evaluator raises."""
+
+    def test_failed_evaluator_is_skipped_and_others_still_score(self) -> None:
+        """A raising evaluator adds no feedback; the rest are still collected."""
+
+        def _failing(_run: object, _example: object) -> list[dict[str, object]]:
+            msg = "judge returned text instead of a function call"
+            raise RuntimeError(msg)
+
+        async def _passing(_run: object, _example: object) -> list[dict[str, object]]:
+            return [{"key": "route_accuracy", "score": 1.0}]
+
+        run = cast("Run", SimpleNamespace(outputs={}))
+        example = cast("Example", SimpleNamespace(id="example-1", inputs={}))
+
+        feedback = asyncio.run(
+            _score_example_locally(run, example, [_failing, _passing]),
+        )
+
+        assert feedback == [{"key": "route_accuracy", "score": 1.0}]

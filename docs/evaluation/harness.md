@@ -132,9 +132,14 @@ references that mix the sentinel with a real answer.
 429 or a 5xx. Gemini answers some calls with a 503 under the load of ten cases scored
 at once, and before these retries a single one ended the whole run. The wait between
 attempts is randomized so that calls refused together do not retry together. Any other
-error, and a transient one that outlasts the attempts, still ends the run. No metric
-records 0.0 for a failed call: answer relevancy used to, and a failed call then passed
-for a real, very low score and lowered the run's mean without any sign in the summary.
+error, such as Gemini answering in text when a function call was required, and a
+transient one that outlasts the attempts, fails the Ragas evaluator for that case only:
+its traceback is logged, the case gets no Ragas scores, and the rest of the run is
+scored as normal. `aevaluate` already handled a failed evaluator this way; `--no-upload`
+used to let it end all 221 cases. No metric records 0.0 for a failed call: answer
+relevancy used to, and a failed call then passed for a real, very low score and lowered
+the run's mean without any sign in the summary. A skipped case instead lowers the
+metric's `n`.
 
 ## Running evaluations
 

@@ -1,7 +1,8 @@
 """LangSmith evaluators for Blue Horizon LangGraph hotel agent runs.
 
 This package provides deterministic evaluators for routing accuracy, injection
-tripwire detection, expected filters validation, reference subset matching,
+tripwire detection, expected filters validation, expected room-search
+arguments, reference subset matching,
 required tool calls presence, rooms tool outcomes with database invariant checks,
 LLM-as-judge rubric evaluation, and RAG metrics scoring.
 
@@ -12,6 +13,7 @@ the compact run outputs produced by the evaluation target in eval/langsmith_targ
 from __future__ import annotations
 
 from eval.evaluators._booking import eval_booking_outcome_and_invariants
+from eval.evaluators._booking_search import eval_booking_expected_search
 from eval.evaluators._info_filters import eval_info_expected_filters
 from eval.evaluators._info_references import eval_info_reference_subset
 from eval.evaluators._injection import eval_injection_tripwires
@@ -21,6 +23,7 @@ from eval.evaluators._rag import eval_rag_metrics_info_turns
 from eval.evaluators._routing import eval_routing_accuracy
 
 __all__ = [
+    "eval_booking_expected_search",
     "eval_booking_outcome_and_invariants",
     "eval_info_expected_filters",
     "eval_info_reference_subset",

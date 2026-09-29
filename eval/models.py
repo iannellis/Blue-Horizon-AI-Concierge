@@ -52,9 +52,9 @@ class ToolSummaryEntry(BaseModel):
     """One compact tool-call summary captured by ``EvalCaptureCallback``.
 
     Only the fields evaluators actually read are declared here. Every other
-    key the callback captures (``input_keys``, ``k``, ``search_args``,
-    ``count``, ``filters``, ``rows``, ``proposal_id``, ``action``,
-    ``result``, ...) survives parsing via ``extra="allow"`` and remains
+    key the callback captures (``input_keys``, ``k``, ``count``,
+    ``filters``, ``rows``, ``proposal_id``, ``action``, ``result``, ...)
+    survives parsing via ``extra="allow"`` and remains
     reachable with ``getattr(entry, key, None)``, but has no typed
     attribute here.
 
@@ -79,6 +79,10 @@ class ToolSummaryEntry(BaseModel):
         error_preview: Truncated preview of an on_tool_error failure.
         parsed_query: The parser node's structured query output, when this
             entry is a "parser" tool-summary entry.
+        search_args: The arguments the model passed to search_rooms, exactly
+            as sent (before defaults are filled in), on search_rooms entries.
+        limit_note: search_rooms' note that the requested ``limit`` was
+            clamped, when it was.
 
     """
 
@@ -96,6 +100,8 @@ class ToolSummaryEntry(BaseModel):
     output_preview: str | None = None
     error_preview: str | None = None
     parsed_query: dict[str, Any] | None = None
+    search_args: dict[str, Any] | None = None
+    limit_note: str | None = None
 
 
 class TurnOutput(BaseModel):
@@ -173,6 +179,9 @@ class ExampleTurn(BaseModel):
         expected_filters: Expected amenity/service filters for this turn,
             when the case labels one. ``None`` means the case does not
             label filter expectations for this turn.
+        expected_search: Expected search_rooms arguments for this turn: a
+            partial spec, or a list of alternative specs of which any one
+            may match. ``None`` means the turn is not labeled.
         expected_success: Whether a booking write attempted in this turn is
             expected to succeed.
         expect_injection: Whether this turn is labeled as an injection
@@ -189,5 +198,6 @@ class ExampleTurn(BaseModel):
     )
     expected_route: str | None = None
     expected_filters: dict[str, Any] | None = None
+    expected_search: dict[str, Any] | list[dict[str, Any]] | None = None
     expected_success: bool | None = None
     expect_injection: bool | str | None = None

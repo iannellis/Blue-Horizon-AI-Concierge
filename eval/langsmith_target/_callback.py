@@ -130,6 +130,8 @@ class SearchRoomsOutput(BaseModel):
             `resources.SqlErrorKind`), present only on failure. Lets a
             consumer like the stress harness's outcome classifier key off
             structure instead of matching this tool's error text.
+        limit_note: Note that the requested ``limit`` was clamped to the
+            configured maximum, present only when it was.
 
     """
 
@@ -138,6 +140,7 @@ class SearchRoomsOutput(BaseModel):
     error: str | None = None
     error_kind: str | None = None
     rooms: list[dict[str, Any]] | None = None
+    limit_note: str | None = None
 
 
 def _parse_search_rooms_payload(
@@ -532,6 +535,8 @@ class EvalCaptureCallback(AsyncCallbackHandler):
             summary["error"] = payload.error
         if payload.error_kind:
             summary["error_kind"] = payload.error_kind
+        if payload.limit_note:
+            summary["limit_note"] = payload.limit_note
         summary["output_preview"] = _preview(
             {
                 "status": payload.status,

@@ -36,6 +36,7 @@ _CASE_SUMMARY_SCORE_KEY_MAP: dict[str, str] = {
     "rag_context_recall_mean": "rag_context_recall_mean",
     "info_reference_subset_pass_rate": "info_reference_subset_pass_rate",
     "info_expected_filters_pass_rate": "info_expected_filters_pass_rate",
+    "booking_expected_search_pass_rate": "booking_expected_search_pass_rate",
 }
 
 _TURN_WEIGHTED_SCORE_KEY_MAP: dict[str, tuple[str, str]] = {
@@ -50,6 +51,10 @@ _PER_TURN_SCORE_VALUE_KEY_MAP: dict[str, tuple[str, str]] = {
     "booking_outcome_per_turn": ("booking_no_unexpected_failure_rate", "pass_rate"),
     "info_expected_filters_per_turn": (
         "info_expected_filters_pass_rate",
+        "pass_rate",
+    ),
+    "booking_expected_search_per_turn": (
+        "booking_expected_search_pass_rate",
         "pass_rate",
     ),
 }
@@ -556,6 +561,7 @@ def _init_case_metric_values() -> dict[str, list[float]]:
         "rag_context_recall_mean": [],
         "info_reference_subset_pass_rate": [],
         "info_expected_filters_pass_rate": [],
+        "booking_expected_search_pass_rate": [],
     }
 
 
@@ -594,6 +600,7 @@ def _init_turn_metric_values() -> TurnMetricAggregation:
     per_turn_scores = {
         "booking_no_unexpected_failure_rate": [],
         "info_expected_filters_pass_rate": [],
+        "booking_expected_search_pass_rate": [],
         "rag_faithfulness_mean": [],
         "rag_answer_relevancy_mean": [],
         "rag_context_precision_mean": [],

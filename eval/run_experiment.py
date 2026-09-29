@@ -35,6 +35,7 @@ from eval._utils import configure_logging, json_safe
 from eval.booking_db_manager import reset_neon_branch
 from eval.config import eval_config_source_text, load_eval_config
 from eval.evaluators import (
+    eval_booking_expected_search,
     eval_booking_outcome_and_invariants,
     eval_info_expected_filters,
     eval_info_reference_subset,
@@ -944,6 +945,7 @@ def _build_evaluators(cfg: EvalConfig, *, router_only: bool) -> list[Any]:
         eval_routing_accuracy,
         partial(eval_injection_tripwires, cfg=cfg),
         partial(eval_booking_outcome_and_invariants, cfg=cfg),
+        partial(eval_booking_expected_search, cfg=cfg),
         partial(eval_llm_rubrics, cfg=cfg),
         partial(eval_rag_metrics_info_turns, cfg=cfg),
         partial(eval_info_reference_subset, cfg=cfg),

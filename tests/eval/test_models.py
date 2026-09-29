@@ -38,9 +38,24 @@ class TestToolSummaryEntry:
     def test_unknown_key_survives_as_extra(self) -> None:
         """A key the callback captures but this model doesn't declare survives."""
         entry = ToolSummaryEntry.model_validate(
-            {"tool": "search_rooms", "search_args": {"min_floor": 20}},
+            {"tool": "search_rooms", "input_keys": ["min_floor"]},
         )
-        assert entry.search_args == {"min_floor": 20}  # type: ignore[attr-defined]
+        assert entry.input_keys == ["min_floor"]  # type: ignore[attr-defined]
+
+    def test_search_fields_parse(self) -> None:
+        """search_args and limit_note are typed, and default to None."""
+        entry = ToolSummaryEntry.model_validate(
+            {
+                "tool": "search_rooms",
+                "search_args": {"min_floor": 20},
+                "limit_note": "clamped",
+            },
+        )
+        assert entry.search_args == {"min_floor": 20}
+        assert entry.limit_note == "clamped"
+        bare = ToolSummaryEntry.model_validate({"tool": "search_rooms"})
+        assert bare.search_args is None
+        assert bare.limit_note is None
 
     def test_undeclared_speculative_field_is_absent(self) -> None:
         """A field this entry never had at all is absent, not None-by-default."""
@@ -148,6 +163,23 @@ class TestExampleTurn:
             {"user": "hi", "expected_filters": {"max_price": 150}},
         )
         assert turn.expected_filters == {"max_price": 150}
+
+    def test_expected_search_absent_is_none(self) -> None:
+        """A turn without expected_search parses to None."""
+        turn = ExampleTurn.model_validate({"user": "hi"})
+        assert turn.expected_search is None
+
+    def test_expected_search_single_spec(self) -> None:
+        """A single spec dict is kept as a dict."""
+        spec = {"room_types": ["Deluxe"], "check_in": None}
+        turn = ExampleTurn.model_validate({"user": "hi", "expected_search": spec})
+        assert turn.expected_search == spec
+
+    def test_expected_search_alternatives(self) -> None:
+        """A list of alternative specs is kept as a list."""
+        specs = [{"view_types": ["Ocean View"]}, {"view_types": ["Sea View"]}]
+        turn = ExampleTurn.model_validate({"user": "hi", "expected_search": specs})
+        assert turn.expected_search == specs
 
     def test_unknown_key_survives_as_extra(self) -> None:
         """A key not declared on ExampleTurn round-trips via extra='allow'."""

@@ -27,6 +27,8 @@ assistant_max_chars = 2000
 user_max_chars = 1200
 # Max stored failures included in evaluator outputs for info expected filters.
 info_filter_failures_max = 25
+# Max stored failures included in evaluator outputs for search_rooms arguments.
+search_filter_failures_max = 25
 # Max stored failures included in evaluator outputs for required tool usage.
 required_tool_failures_max = 25
 # Maximum characters to keep when JSON-encoding evaluator detail values.

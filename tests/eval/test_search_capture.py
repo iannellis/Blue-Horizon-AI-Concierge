@@ -25,10 +25,13 @@ class _Args(BaseModel):
 
     Attributes:
         min_floor: Any filter, so the tool takes one argument.
+        limit: A defaulted argument, as on the real tool, to show that
+            defaults the model did not send are not captured.
 
     """
 
     min_floor: int | None = None
+    limit: int = 4
 
 
 def _run_search_tool(result: dict[str, Any]) -> EvalCaptureCallback:
@@ -113,3 +116,19 @@ class TestSearchRoomsCapture:
         assert entry["rows"] == [{"room_number": 2001, "floor": 20}]
         assert "Room search: 12 matching rooms" in callback.contexts_used
         assert any("2002" in context for context in callback.contexts_used)
+
+    def test_search_args_hold_only_model_supplied_keys(self) -> None:
+        """A defaulted argument the model did not send is not captured."""
+        callback = _run_search_tool({"status": "ok", "matching_count": 0})
+        [entry] = callback.tool_summary
+        assert entry["search_args"] == {"min_floor": 20}
+        assert "limit_note" not in entry
+
+    def test_limit_note_is_captured(self) -> None:
+        """A clamp note from the tool is copied into the summary."""
+        note = "Asked for 50 rooms; returned the first 15."
+        callback = _run_search_tool(
+            {"status": "ok", "matching_count": 40, "rooms": [], "limit_note": note},
+        )
+        [entry] = callback.tool_summary
+        assert entry["limit_note"] == note

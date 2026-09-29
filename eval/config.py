@@ -143,6 +143,8 @@ class EvaluatorLimitsConfig(FrozenModel):
         user_max_chars: Maximum characters from user text passed to the judge
             LLM.
         info_filter_failures_max: Max stored failures for info filter checks.
+        search_filter_failures_max: Max stored failures for search_rooms
+            argument checks.
         required_tool_failures_max: Max stored failures for required tool checks.
         json_value_max: Maximum characters for JSON-encoded evaluator values.
         rag_per_turn_json_max: Maximum characters for per-turn RAG JSON values.
@@ -155,6 +157,7 @@ class EvaluatorLimitsConfig(FrozenModel):
     assistant_max_chars: PositiveInt
     user_max_chars: PositiveInt
     info_filter_failures_max: PositiveInt
+    search_filter_failures_max: PositiveInt
     required_tool_failures_max: PositiveInt
     json_value_max: PositiveInt
     rag_per_turn_json_max: PositiveInt

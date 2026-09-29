@@ -249,6 +249,58 @@ class TestSummarizeResults:
         assert "consumer_quality" not in turn_summary
         assert summary["metadata"] == {"git_commit": "abc123"}
 
+    def test_expected_search_pass_rate_is_aggregated(self) -> None:
+        """The search-argument pass rate appears in both summaries."""
+        expected_case_rate = (0.5 + 1.0) / 2.0
+        expected_turn_rate = (1.0 + 0.0 + 1.0) / 3.0
+        rows = [
+            {
+                "evaluators": _persisted_evaluators(
+                    _feedback_item("booking_expected_search_pass_rate", score=0.5),
+                    _feedback_item(
+                        "booking_expected_search_per_turn",
+                        value=json.dumps(
+                            [
+                                {"turn_index": 0, "pass_rate": 1.0},
+                                {"turn_index": 1, "pass_rate": 0.0},
+                            ],
+                        ),
+                    ),
+                ),
+                "error": None,
+            },
+            {
+                "evaluators": _persisted_evaluators(
+                    _feedback_item("booking_expected_search_pass_rate", score=1.0),
+                    _feedback_item(
+                        "booking_expected_search_per_turn",
+                        value=json.dumps([{"turn_index": 0, "pass_rate": 1.0}]),
+                    ),
+                ),
+                "error": None,
+            },
+        ]
+        context = SimpleNamespace(
+            experiment_name="demo",
+            dataset_name="dataset",
+            max_concurrency=4,
+            started_at=datetime(2026, 3, 1, tzinfo=UTC),
+            finished_at=datetime(2026, 3, 1, 0, 5, tzinfo=UTC),
+            upload_results=False,
+            metadata={},
+        )
+
+        summary = _summarize_results(rows, context)
+        case_summary = _as_dict(summary["case_based_summary"])
+        turn_summary = _as_dict(summary["turn_based_summary"])
+
+        assert case_summary["booking_expected_search_pass_rate"] == (
+            expected_case_rate
+        )
+        assert turn_summary["booking_expected_search_pass_rate"] == (
+            expected_turn_rate
+        )
+
 
 class TestComputeLatencySummary:
     """compute_latency_summary() reads normalized persisted feedback."""

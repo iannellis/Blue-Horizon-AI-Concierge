@@ -40,9 +40,59 @@ Each line in a JSONL dataset file is a single JSON object:
 | `turns[].injection_grade_rubric` | No | `eval_llm_rubrics` | Rubric text for the LLM judge on injection turns |
 | `turns[].reference` | No | `eval_llm_rubrics`, `eval_info_reference_subset`, `eval_rag_metrics_info_turns` | Ground-truth or reference answer |
 | `turns[].expected_filters` | No | `eval_info_expected_filters` | Filters the info-agent parser should extract |
+| `turns[].expected_search` | No | `eval_booking_expected_search` | Arguments a `search_rooms` call in this turn should use: a partial spec, or a list of alternative specs |
 
 The `no_auto_confirm` tag leaves every `propose_*` call pending, so a case can model
 abandonment or supersession instead of a completed write.
+
+### Attribute-search cases
+
+`case_0207` through `case_0211` exercise `search_rooms` filters that the earlier booking
+cases, which name a room number and dates, never reach: room type plus floor and view,
+a count, amenities, an empty result, and a stay that crosses New Year. Each was checked
+against the Development branch when it was written; the empty-result case, for example,
+asks for a Standard room with a private pool, and no Standard room has one. They are
+tagged `attribute_search` and `no_auto_confirm`, since none asks for a booking.
+
+Each case's opening turn carries an `expected_search` label, which
+`eval_booking_expected_search` compares with the arguments the model actually passed to
+`search_rooms`. The harness captures those arguments before Pydantic fills in defaults,
+so an argument counts as set only when the model set it. A spec is partial, and its
+entries match as follows:
+
+| Spec entry | Passes when |
+|---|---|
+| key absent | anything; the model may add filters the spec does not mention, such as `sort_by` |
+| `null` | the model did not set the argument, for example `check_in` on a count that must not be limited to dates |
+| list | the same set of values, in any order |
+| date | the same ISO string, so a search in the wrong year fails |
+| number | numerically equal |
+| `limit` | the model's value is at least the expected one, since anything above the maximum is clamped to the same result |
+
+A labeled turn passes when any one of its `search_rooms` calls matches any one of its
+specs, whatever the call returned; tool errors are scored separately. A labeled turn
+with no search fails. A list of specs exists because some requests have more than one
+reasonable reading. "An ocean view" may be `["Ocean View"]` or `["Ocean View",
+"Panoramic Ocean View"]`, and since lists compare as sets, each accepted reading needs
+its own spec. A reading is accepted only if it returns rooms that answer the request on
+Development: "a deluxe room with a balcony" does not accept `["Balcony", "Wraparound
+Balcony"]`, because `amenities` requires every listed value and no Deluxe room has both.
+
+`case_0208` has a second turn, "Can you list all of them?", labeled with `limit: 15`
+to check that the model raises `limit` when a guest asks for everything. The follow-up
+in `case_0209` ("which one is the biggest") is labeled with the first turn's filters plus
+`sort_by` `"square_feet_desc"`. A search returns only 4 of the 21 matching rooms, so the
+right answer needs a new, sorted search. The grounding judge cannot catch this: it sees
+only the rooms that came back, so the biggest of those passes as grounded even when a
+bigger room matched. The follow-up in `case_0207` ("which is the cheapest") is not
+labeled. A dated search is sorted cheapest first by default, so the first turn's results
+already answer it, and a new search that relies on that default passes no `sort_by`
+for a label to match.
+
+The cases are also scored by the existing booking metrics (tool errors,
+`booking_search_count_sanity`) and by the grounding judge, which sees each returned room
+as a context string, so a reply that invents a room or a count the search did not return
+is marked down there.
 
 ### Uploading a dataset to LangSmith
 
@@ -69,6 +119,7 @@ python -m eval.create_langsmith_dataset \
 | `eval_rag_metrics_info_turns` | `rag_faithfulness_mean`, `rag_answer_relevancy_mean`, `rag_context_precision_mean`, `rag_context_recall_mean` | Ragas RAG quality metrics for info turns |
 | `eval_info_reference_subset` | `info_reference_subset_pass_rate` | Agent response covers expected reference items |
 | `eval_info_expected_filters` | `info_expected_filters_pass_rate` | Parser extracts expected filters from queries |
+| `eval_booking_expected_search` | `booking_expected_search_pass_rate` | Labeled turns' `search_rooms` calls use the expected filters |
 | `eval_turn_latency` | `latency_per_turn` | Per-turn wall-clock latency stored as a JSON value |
 
 ### The custom context-precision prompt
@@ -149,6 +200,8 @@ SKIP = {"route_confusions","judge_raw_json","info_reference_subset_failures",
         "info_expected_filters_failures","info_expected_filters_turns",
         "info_expected_filters_per_turn","injection_turns_labeled",
         "injection_turns_scanned","booking_outcome_per_turn",
+        "booking_expected_search_turns","booking_expected_search_per_turn",
+        "booking_expected_search_failures",
         "rag_per_turn","latency_per_turn"}
 
 scores = defaultdict(list)

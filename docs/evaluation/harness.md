@@ -23,6 +23,7 @@ eval/
 │   ├── _routing.py             # Route accuracy
 │   ├── _injection.py           # Injection tripwire detection
 │   ├── _booking.py             # Rooms tool outcomes + DB invariants
+│   ├── _booking_search.py      # search_rooms arguments against expected filters
 │   ├── _judge.py               # LLM-as-judge rubric scoring (Gemini)
 │   ├── _rag.py                 # Ragas faithfulness / relevancy / precision / recall
 │   ├── _rag_prompts.py         # Custom context-precision prompt
@@ -230,7 +231,7 @@ For every turn in a case, `run_example`:
    | Field | Captured by | Source |
    |---|---|---|
    | `route_pred` | `on_chain_end` | Orchestrator node output containing a `"route"` key |
-   | `tool_summary` | `on_tool_start` / `on_tool_end` | One entry per tool call: `search_rooms`, `parser`, `query_faq`, `query_amenities`, `query_services`, `merge` |
+   | `tool_summary` | `on_tool_start` / `on_tool_end` | One entry per tool call: `search_rooms`, `parser`, `query_faq`, `query_amenities`, `query_services`, `merge`. A `search_rooms` entry keeps the arguments the model sent (`search_args`, without defaults) and any `limit_note` |
    | `contexts_used` | `on_chain_end` (merge node) + `on_tool_end` (`search_rooms`) | Merge node `top_results` text plus the match count and one string per returned room, used by RAG and judge evaluators |
 
 4. **Measures wall-clock latency** with `asyncio.get_running_loop().time()` around the

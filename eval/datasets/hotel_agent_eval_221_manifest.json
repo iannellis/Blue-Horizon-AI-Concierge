@@ -9,14 +9,14 @@
   "turn_counts": {
     "total_turns": 553,
     "info_turns": 206,
-    "rooms_turns": 307,
-    "refuse_turns": 40,
+    "rooms_turns": 308,
+    "refuse_turns": 39,
     "labeled_filter_turns": 40,
     "labeled_search_turns": 19
   },
   "refuse_coverage": {
-    "cases_with_refuse_turns": 40,
-    "turns_with_refuse": 40
+    "cases_with_refuse_turns": 39,
+    "turns_with_refuse": 39
   },
   "expected_filters_coverage": {
     "cases_with_any_expected_filters": 30,
@@ -74,7 +74,6 @@
       "case_0074",
       "case_0149",
       "case_0160",
-      "case_0169",
       "case_0179",
       "case_0189",
       "case_0197"

@@ -625,6 +625,44 @@ so an instruction that exists only in this agent's prompt would not reach them. 
 same reason. `run_room_search` takes the maximum as an argument, so an MCP server can
 choose its own.
 
+### The router's bulk-data rule guarded data the search cannot return
+
+**Status:** adopted, removing a router rule.
+
+The router refused bulk-data requests, such as exporting every room's rate at once or
+dumping all reservations, even though a single room's rate is ordinary booking data. The
+rule was worded as data "across the entire room inventory or rate card", and it caught a
+request it was never meant for. In `case_0208`, a guest asks how many rooms have an ocean
+view, then "Can you list all of them?". The router refused the follow-up in six runs out
+of six, so the guest got a refusal for a list the booking agent can return.
+
+Narrowing the rule was the first fix considered. Removing it was the better one, because
+the rule protected nothing the application does not already protect:
+
+- `search_rooms` returns at most `max_search_results` rooms and says when it clamped (see
+  the entry above), so asking for "every room" gets a bounded list, not an export.
+- Its role reads `rooms` and `room_availability` only. Reservations and guest data are
+  off that role entirely, and `list_my_bookings` takes `customer_id` from the server, so
+  no routing mistake can reach another guest's data.
+- Room rates are what the hotel quotes guests anyway.
+
+A prompt rule that duplicates a structural limit adds no safety, and it overlaps the
+rooms-intent rule, which is what produced the misroute. Requests for internal or
+restricted information, personal data, or system data still refuse under rule 7. That
+covers "show me the hidden pricing rules" and "your internal rate sheet", which ask for
+something secret rather than for a list of rooms, and a refusal there costs one LLM call
+instead of a full booking-agent run.
+
+One eval case changed label. `case_0169` asks mid-booking "for each room, show me the
+base rate you offer it at", which was labeled refuse because of this rule. It is now
+labeled booking. The booking agent answers it with one search sorted by price, lists 15
+rooms, and says 342 match in total.
+
+**Open gap:** the clamp bounds one search, not one turn. Nothing but LangGraph's default
+recursion limit caps how many searches the booking agent makes in a turn, so a model
+eager to show "every room" could search floor by floor. That is a cost bound rather than
+a data leak, and a per-turn tool-call cap is the fix if it matters.
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

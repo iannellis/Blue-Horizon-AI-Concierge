@@ -24,9 +24,11 @@ every value it accepts; pick the closest ones to what the guest asked for.
   means `min_floor` and `max_floor` both $max_floor. "High floor" means a `min_floor` near
   the top, or `sort_by` `"floor_desc"`. "Largest" means `sort_by` `"square_feet_desc"`, and
   "cheapest" means `sort_by` `"price"` with dates.
-* A search returns at most $top_k rooms plus `matching_count`, the number of rooms that
-  match. Answer "how many" questions from `matching_count`, not by counting the rooms
-  returned.
+* A search returns $default_search_results rooms plus `matching_count`, the number of
+  rooms that match. Answer "how many" questions from `matching_count`, not by counting
+  the rooms returned.
+* When the guest asks to see a specific number of rooms, or every matching room, set
+  `limit`. One search returns at most $max_search_results rooms.
 * A result with `error_kind` `"invalid_arguments"` names the problem. Fix the arguments
   and search once more, or ask the guest if the fix depends on what they want.
 * If the error starts with `DATABASE_UNAVAILABLE`, the database itself is temporarily

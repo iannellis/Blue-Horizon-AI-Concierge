@@ -33,7 +33,8 @@ def load_booking_config(config_path: Path | str | None = None) -> BookingSqlConf
 def render_system_prompt(
     *,
     template: Template,
-    top_k: int,
+    default_results: int,
+    max_results: int,
     meta: RoomsMetadata,
 ) -> str:
     """Render the system prompt template with runtime substitutions.
@@ -44,7 +45,9 @@ def render_system_prompt(
 
     Args:
         template: String Template loaded from the booking prompt resource.
-        top_k: Maximum number of rooms a search returns.
+        default_results: Rooms a search returns when the model does not set
+            `limit`.
+        max_results: Most rooms one search returns.
         meta: Rooms metadata supplying the date window and top floor.
 
     Returns:
@@ -52,7 +55,8 @@ def render_system_prompt(
 
     """
     return template.safe_substitute(
-        top_k=top_k,
+        default_search_results=default_results,
+        max_search_results=max_results,
         first_night=meta.first_night.isoformat(),
         last_night=meta.last_night.isoformat(),
         last_check_out=meta.last_check_out.isoformat(),

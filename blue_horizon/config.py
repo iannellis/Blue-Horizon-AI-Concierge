@@ -7,9 +7,9 @@ import tomllib
 from functools import lru_cache
 from importlib import resources as importlib_resources
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, BeforeValidator, Field
+from pydantic import BaseModel, BeforeValidator, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_PACKAGE = "blue_horizon"
@@ -181,16 +181,37 @@ class BookingAgentConfig(FrozenModel):
     """Bounds on what one booking-agent turn can search.
 
     Attributes:
-        top_k: Maximum number of rooms one `search_rooms` call returns.
+        default_search_results: Rooms one `search_rooms` call returns when the
+            model does not set `limit`.
+        max_search_results: Most rooms one `search_rooms` call returns; a
+            larger `limit` is clamped to this, and the result says so.
         max_search_calls_per_turn: Maximum `search_rooms` calls in one guest
             turn; further calls are refused and the model must answer.
         max_search_room_numbers: Maximum room numbers one search may name.
 
     """
 
-    top_k: int = Field(ge=1)
+    default_search_results: int = Field(ge=1)
+    max_search_results: int = Field(ge=1)
     max_search_calls_per_turn: int = Field(ge=1)
     max_search_room_numbers: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def _default_within_max(self) -> Self:
+        """Reject a default result count above the maximum.
+
+        Returns:
+            BookingAgentConfig: This config, unchanged.
+
+        Raises:
+            ValueError: If `default_search_results` exceeds
+                `max_search_results`.
+
+        """
+        if self.default_search_results > self.max_search_results:
+            msg = "default_search_results cannot exceed max_search_results."
+            raise ValueError(msg)
+        return self
 
 
 class BookingPromptsConfig(FrozenModel):

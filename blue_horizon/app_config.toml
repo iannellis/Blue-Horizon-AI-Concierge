@@ -112,8 +112,10 @@ folder = "system_prompts"
 system_prompt_filename = "booking.txt"
 
 [booking.agent]
-# Most rooms one search returns to the model
-top_k = 4
+# Rooms one search returns when the model does not ask for a number
+default_search_results = 4
+# Most rooms one search returns, whatever the model asks for
+max_search_results = 15
 # Most searches the model may run in one guest turn
 max_search_calls_per_turn = 4
 # Most room numbers one search may name

@@ -24,16 +24,22 @@ Neon branch management (project ID, branch name, reset tuning) lives entirely in
 pipeline executions. It prevents tokens-per-minute exhaustion under high concurrency,
 which otherwise fails every in-flight request at once rather than making a few wait.
 
-**`[booking.agent].top_k`** (default 4) is the most rooms one `search_rooms` call
-returns to the model. The result also carries `matching_count`, the number of rooms that
-matched, so a small `top_k` does not stop the agent answering "how many" questions. It
-bounds the tokens a search adds to the turn, which matters more than a row count: the
-rooms come back with their full amenity lists.
+**`[booking.agent].default_search_results`** (default 4) is how many rooms one
+`search_rooms` call returns when the model does not set `limit`. The result also carries
+`matching_count`, the number of rooms that matched, so a small default does not stop the
+agent answering "how many" questions.
+
+**`[booking.agent].max_search_results`** (default 15) is the most rooms one search
+returns, whatever `limit` the model asks for. A larger `limit` is clamped to it, and the
+result gets a `limit_note` saying the list was cut, so a guest who asks for every room
+is told they are seeing part of the list. It bounds the tokens a search adds to the
+turn, which matters more than a row count: the rooms come back with their full amenity
+lists. `default_search_results` may not exceed it.
 
 **`[booking.agent].max_search_calls_per_turn`** (default 4) caps `search_rooms` calls in
 one guest turn, enforced by LangChain's `ToolCallLimitMiddleware` rather than by the
 prompt. A call past the limit gets an error result and the model has to answer with what
-it already found. Together with `top_k`, it bounds what one guest message can cost.
+it already found. Together with `max_search_results`, it bounds what one guest message can cost.
 
 **`[booking.agent].max_search_room_numbers`** (default 10) caps how many room numbers
 one search may name, so a search by room number stays within the same bound.

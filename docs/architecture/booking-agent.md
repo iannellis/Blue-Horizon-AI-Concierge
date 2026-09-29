@@ -50,9 +50,13 @@ rendered into the system prompt. Nothing about the data's dates is hardcoded.
 
 `blue_horizon/agents/booking/search.py` then runs one of two fixed queries, one for a
 dated stay and one without dates, with the filter values bound as parameters. Each
-query returns at most `[booking.agent].top_k` rooms, each with a fixed set of
-guest-facing fields, plus `matching_count`, the number of rooms that matched, so a "how
-many" question needs no second query. Internal identifiers, the room-level status, the
+query returns `[booking.agent].default_search_results` rooms, or as many as the model
+asks for with `limit` up to `[booking.agent].max_search_results`, each with a fixed set
+of guest-facing fields, plus `matching_count`, the number of rooms that matched, so a
+"how many" question needs no second query. A `limit` above the maximum is clamped rather
+than rejected, and the result then carries a `limit_note` telling the model to say so.
+The note is in the result rather than the prompt so that it reaches a client with its
+own prompt too. Internal identifiers, the room-level status, the
 rate columns, and renovation dates are never selected.
 
 This bounds what one search can cost. The free-form `run_sql` tool it replaced capped
@@ -143,7 +147,7 @@ defenses hold.
 
 | Tool | Access | Returns |
 |---|---|---|
-| `search_rooms` | `bh_agent_ro`, fixed parameterized query | Up to `top_k` rooms plus `matching_count` |
+| `search_rooms` | `bh_agent_ro`, fixed parameterized query | Up to `limit` rooms (clamped to `max_search_results`) plus `matching_count` |
 | `list_my_bookings` | Server-injected `customer_id` via `RunnableConfig` | This guest's reservations |
 | `propose_booking` | None (in-process) | A proposal id |
 | `propose_cancellation` | None (in-process) | A proposal id |

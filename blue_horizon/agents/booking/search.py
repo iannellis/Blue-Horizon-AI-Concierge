@@ -2,9 +2,10 @@
 
 The model never writes SQL. It fills in a typed argument model whose allowed
 values come from the database at startup, and this module runs one of two
-fixed, parameterized queries with those values. Every result is bounded: at
-most `top_k` rooms, each with a fixed set of fields, plus a `matching_count`
-so "how many" questions need no second query.
+fixed, parameterized queries with those values. Every result is bounded: the
+model may ask for a number of rooms, but no more than a fixed maximum come
+back, each with a fixed set of fields, plus a `matching_count` so "how many"
+questions need no second query.
 
 Nothing here imports LangChain, so a transport other than the booking agent's
 tool-calling loop (an MCP server, for example) can wrap the same functions.
@@ -127,14 +128,14 @@ WHERE {filters}
     AND (%(max_nightly_price)s::numeric IS NULL
         OR s.max_price <= %(max_nightly_price)s::numeric)
 ORDER BY {order_by}
-LIMIT %(top_k)s""")
+LIMIT %(limit)s""")
 
 _UNDATED_SEARCH_SQL: Final = sql.SQL("""
 SELECT {columns}
 FROM rooms AS r
 WHERE {filters}
 ORDER BY {order_by}
-LIMIT %(top_k)s""")
+LIMIT %(limit)s""")
 
 # Price ordering needs a stay; without dates it falls back to room number.
 _ORDER_BY: Final[dict[tuple[SortBy, bool], sql.SQL]] = {
@@ -157,6 +158,8 @@ def build_search_args_model(
     meta: RoomsMetadata,
     *,
     max_room_numbers: int,
+    default_results: int,
+    max_results: int,
 ) -> type[BaseModel]:
     """Build the `search_rooms` argument model from database metadata.
 
@@ -164,9 +167,16 @@ def build_search_args_model(
     actually holds, so the JSON schema the model sees lists every legal value
     and an unknown one is rejected before any SQL runs.
 
+    `limit` has no upper bound here. A request above `max_results` is clamped
+    by `run_room_search`, which says so in its result, rather than rejected,
+    so a guest asking for "every room" still gets rooms back.
+
     Args:
         meta: Search vocabulary and bounds loaded at startup.
         max_room_numbers: Maximum length of the `room_numbers` list.
+        default_results: Rooms returned when the model does not set `limit`.
+        max_results: Most rooms one search returns, quoted in `limit`'s
+            description.
 
     Returns:
         A Pydantic model class whose instances are valid search arguments.
@@ -273,6 +283,18 @@ def build_search_args_model(
                 description="Every night must cost at most this. Requires dates.",
             ),
         ),
+        limit=(
+            int,
+            Field(
+                default=default_results,
+                ge=1,
+                description=(
+                    f"How many rooms to return, {default_results} by default. At "
+                    f"most {max_results} come back; a larger value is reduced to "
+                    f"{max_results}. matching_count always counts every match."
+                ),
+            ),
+        ),
         sort_by=(
             SortBy,
             Field(
@@ -365,7 +387,7 @@ async def run_room_search(
     conn: AsyncConnection[Any],
     args: BaseModel,
     *,
-    top_k: int,
+    max_results: int,
 ) -> dict[str, Any]:
     """Run a room search on an open connection.
 
@@ -373,15 +395,18 @@ async def run_room_search(
         conn: Connection to run the query on. The caller owns its lifetime,
             transaction, and retry policy.
         args: An instance of the model from `build_search_args_model`.
-        top_k: Maximum number of rooms to return.
+        max_results: Most rooms to return, whatever `args.limit` asks for.
 
     Returns:
         `{"status": "ok", "matching_count": n, "rooms": [...]}`, where `n`
-        counts every matching room and `rooms` holds at most `top_k` of them.
-        Dated searches add `nights` and `total_price` to each room.
+        counts every matching room and `rooms` holds at most
+        `min(args.limit, max_results)` of them. Dated searches add `nights`
+        and `total_price` to each room. When `args.limit` exceeds
+        `max_results`, a `limit_note` says the result was cut to
+        `max_results`.
 
     """
-    params = _query_params(args, top_k=top_k)
+    params = _query_params(args, max_results=max_results)
     dated = params["check_in"] is not None
     query = select_search_query(sort_by=params["sort_by"], dated=dated)
     async with conn.cursor(row_factory=dict_row) as cur:
@@ -389,21 +414,25 @@ async def run_room_search(
         rows = await cur.fetchall()
 
     matching_count = int(rows[0]["matching_count"]) if rows else 0
-    return {
+    result: dict[str, Any] = {
         "status": "ok",
         "matching_count": matching_count,
         "rooms": [_room_result(row) for row in rows],
     }
+    requested: int = args.limit  # pyright: ignore[reportAttributeAccessIssue]
+    if requested > max_results:
+        result["limit_note"] = _limit_note(requested, max_results)
+    return result
 
 
-def _query_params(args: BaseModel, *, top_k: int) -> dict[str, Any]:
+def _query_params(args: BaseModel, *, max_results: int) -> dict[str, Any]:
     """Turn search arguments into query parameters.
 
     An empty list means "no restriction", the same as an omitted filter.
 
     Args:
         args: Validated search arguments.
-        top_k: Row limit for the query.
+        max_results: Ceiling applied to the requested `limit`.
 
     Returns:
         Mapping of every named placeholder in the search SQL to its value.
@@ -413,7 +442,7 @@ def _query_params(args: BaseModel, *, top_k: int) -> dict[str, Any]:
     for key, value in params.items():
         if isinstance(value, list) and not value:
             params[key] = None
-    params["top_k"] = top_k
+    params["limit"] = min(params["limit"], max_results)
     return params
 
 
@@ -450,3 +479,24 @@ def _room_result(row: dict[str, Any]) -> dict[str, Any]:
     if "total_price" in row:
         room["total_price"] = fmt_money(row["total_price"])
     return room
+
+
+def _limit_note(requested: int, max_results: int) -> str:
+    """Explain that a search returned fewer rooms than were asked for.
+
+    The instruction to pass this on lives here, in the result, rather than in
+    a system prompt, because an MCP client brings its own prompt.
+
+    Args:
+        requested: The `limit` the caller asked for.
+        max_results: The most rooms one search returns.
+
+    Returns:
+        A note the calling model should relay to the user.
+
+    """
+    return (
+        f"{requested} rooms were requested, but one search returns at most "
+        f"{max_results}, so no more than {max_results} are listed. Tell the user "
+        "that the list was cut to this maximum."
+    )

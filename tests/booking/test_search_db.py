@@ -40,7 +40,8 @@ if platform.system() == "Windows":
     # `tests/booking/test_write_ops.py`.
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-_TOP_K = 4
+_DEFAULT_RESULTS = 4
+_MAX_RESULTS = 15
 _ROOM_FIELDS = frozenset({
     "room_number",
     "floor",
@@ -90,12 +91,17 @@ def _search(meta: RoomsMetadata, **kwargs: Any) -> dict[str, Any]:  # noqa: ANN4
         The search result.
 
     """
-    model: type[BaseModel] = build_search_args_model(meta, max_room_numbers=10)
+    model: type[BaseModel] = build_search_args_model(
+        meta,
+        max_room_numbers=10,
+        default_results=_DEFAULT_RESULTS,
+        max_results=_MAX_RESULTS,
+    )
     args = model.model_validate(kwargs)
 
     async def _run() -> dict[str, Any]:
         async with await psycopg.AsyncConnection.connect(_ro_url()) as conn:
-            return await run_room_search(conn, args, top_k=_TOP_K)
+            return await run_room_search(conn, args, max_results=_MAX_RESULTS)
 
     return asyncio.run(_run())
 
@@ -160,7 +166,7 @@ class TestSearch:
             "SELECT COUNT(*) FROM rooms WHERE view_type && ARRAY['Ocean View']",
         )
         assert result["matching_count"] == expected
-        assert len(result["rooms"]) == min(expected, _TOP_K)
+        assert len(result["rooms"]) == min(expected, _DEFAULT_RESULTS)
 
     def test_new_year_stay(self, meta: RoomsMetadata) -> None:
         """A stay ending on the last check-out date runs and counts five nights."""
@@ -169,10 +175,29 @@ class TestSearch:
         assert all(room["nights"] == 5 for room in result["rooms"])  # noqa: PLR2004
 
     def test_unfiltered_search_is_bounded(self, meta: RoomsMetadata) -> None:
-        """'Show me every room' still returns at most top_k rooms."""
+        """Without a limit, a search returns the default number of rooms."""
         result = _search(meta, check_in="2025-06-01", check_out="2025-06-08")
-        assert len(result["rooms"]) <= _TOP_K
+        assert len(result["rooms"]) == _DEFAULT_RESULTS
         assert result["matching_count"] >= len(result["rooms"])
+        assert "limit_note" not in result
+
+    def test_limit_within_maximum(self, meta: RoomsMetadata) -> None:
+        """A limit up to the maximum returns that many rooms, with no note."""
+        result = _search(
+            meta, check_in="2025-06-01", check_out="2025-06-08", limit=_MAX_RESULTS,
+        )
+        assert len(result["rooms"]) == _MAX_RESULTS
+        assert "limit_note" not in result
+
+    def test_limit_above_maximum_is_clamped_and_noted(
+        self, meta: RoomsMetadata,
+    ) -> None:
+        """'Show me every room' returns the maximum and says it was cut."""
+        result = _search(
+            meta, check_in="2025-06-01", check_out="2025-06-08", limit=500,
+        )
+        assert len(result["rooms"]) == _MAX_RESULTS
+        assert "500" in result["limit_note"]
 
     def test_amenities_must_all_be_present(self, meta: RoomsMetadata) -> None:
         """Every returned room has every requested amenity."""

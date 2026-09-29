@@ -358,7 +358,8 @@ class BookingSqlResources:
 
         Returns:
             On success, `run_room_search`'s result: ``status="ok"``,
-            ``matching_count``, and at most ``top_k`` ``rooms``. On failure,
+            ``matching_count``, ``rooms``, and ``limit_note`` when the
+            requested ``limit`` was clamped. On failure,
             ``status="error"`` with ``error`` and ``error_kind``.
 
         Raises:
@@ -466,7 +467,9 @@ class BookingSqlResources:
             # engage, but it costs nothing and covers the window between a
             # misconfiguration and the next restart's startup assertion.
             await conn.execute("SET TRANSACTION READ ONLY")
-            return await run_room_search(conn, args, top_k=self.config.agent.top_k)
+            return await run_room_search(
+                conn, args, max_results=self.config.agent.max_search_results,
+            )
 
     async def _open_pools(self) -> None:
         """Open the read-only and read-write async connection pools.
@@ -589,14 +592,21 @@ class BookingSqlResources:
         """
         try:
             meta = await fetch_rooms_metadata(self.pgsql_ro_db_url)
+            agent_cfg = self.config.agent
             self._search_args_model = build_search_args_model(
-                meta, max_room_numbers=self.config.agent.max_search_room_numbers,
+                meta,
+                max_room_numbers=agent_cfg.max_search_room_numbers,
+                default_results=agent_cfg.default_search_results,
+                max_results=agent_cfg.max_search_results,
             )
             self.rooms_metadata = meta
 
             template = load_prompt_template(self._system_prompt_resource)
             self.system_prompt = render_system_prompt(
-                template=template, top_k=self.config.agent.top_k, meta=meta,
+                template=template,
+                default_results=agent_cfg.default_search_results,
+                max_results=agent_cfg.max_search_results,
+                meta=meta,
             )
 
         except ConfigurationError:

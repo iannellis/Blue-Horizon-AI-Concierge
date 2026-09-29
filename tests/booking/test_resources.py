@@ -35,7 +35,12 @@ from blue_horizon.agents.booking.resources import (
 from blue_horizon.agents.booking.search import build_search_args_model
 from blue_horizon.agents.exceptions import ConfigurationError
 from blue_horizon.config import BookingSqlConfig
-from tests.booking._search_fixtures import MAX_ROOM_NUMBERS, make_rooms_metadata
+from tests.booking._search_fixtures import (
+    DEFAULT_RESULTS,
+    MAX_RESULTS,
+    MAX_ROOM_NUMBERS,
+    make_rooms_metadata,
+)
 
 _BOOKING_CONFIG_DICT: dict[str, Any] = {
     "llm": {
@@ -45,7 +50,8 @@ _BOOKING_CONFIG_DICT: dict[str, Any] = {
         "max_retries": 2,
     },
     "agent": {
-        "top_k": 4,
+        "default_search_results": 4,
+        "max_search_results": 15,
         "max_search_calls_per_turn": 4,
         "max_search_room_numbers": 10,
     },
@@ -68,7 +74,10 @@ _BOOKING_CONFIG_DICT: dict[str, Any] = {
 
 _RESOURCES_LOGGER = "blue_horizon.agents.booking.resources"
 _SEARCH_ARGS = build_search_args_model(
-    make_rooms_metadata(), max_room_numbers=MAX_ROOM_NUMBERS,
+    make_rooms_metadata(),
+    max_room_numbers=MAX_ROOM_NUMBERS,
+    default_results=DEFAULT_RESULTS,
+    max_results=MAX_RESULTS,
 ).model_validate({"view_types": ["Ocean View"]})
 
 

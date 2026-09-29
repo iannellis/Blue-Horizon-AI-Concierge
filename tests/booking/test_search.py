@@ -19,13 +19,16 @@ from pydantic import BaseModel, ValidationError
 
 from blue_horizon.agents.booking.search import (
     SortBy,
+    _limit_note,
     _query_params,
     build_search_args_model,
     select_search_query,
 )
 from tests.booking._search_fixtures import (
+    DEFAULT_RESULTS,
     FIRST_NIGHT,
     LAST_NIGHT,
+    MAX_RESULTS,
     MAX_ROOM_NUMBERS,
     make_rooms_metadata,
 )
@@ -42,7 +45,10 @@ def args_model() -> type[BaseModel]:
 
     """
     return build_search_args_model(
-        make_rooms_metadata(), max_room_numbers=MAX_ROOM_NUMBERS,
+        make_rooms_metadata(),
+        max_room_numbers=MAX_ROOM_NUMBERS,
+        default_results=DEFAULT_RESULTS,
+        max_results=MAX_RESULTS,
     )
 
 
@@ -208,7 +214,7 @@ class TestQuerySelection:
     def test_every_ordering_is_bounded(self, *, sort_by: SortBy, dated: bool) -> None:
         """Every sort_by has a limited query, priced only when dated."""
         query = select_search_query(sort_by=sort_by, dated=dated).as_string()
-        assert query.rstrip().endswith("LIMIT %(top_k)s")
+        assert query.rstrip().endswith("LIMIT %(limit)s")
         assert ("s.total_price" in query) is dated
 
     @pytest.mark.parametrize(
@@ -239,6 +245,54 @@ class TestQuerySelection:
 
     def test_empty_list_means_unrestricted(self, args_model: type[BaseModel]) -> None:
         """An empty filter list is passed as NULL, the same as omitting it."""
-        params = _query_params(_validate(args_model, amenities=[]), top_k=4)
+        params = _query_params(
+            _validate(args_model, amenities=[]), max_results=MAX_RESULTS,
+        )
         assert params["amenities"] is None
-        assert params["top_k"] == 4  # noqa: PLR2004
+
+
+class TestLimit:
+    """The model may ask for a number of rooms, clamped to the maximum."""
+
+    def test_default_limit(self, args_model: type[BaseModel]) -> None:
+        """Without a limit, a search asks for the default number of rooms."""
+        params = _query_params(_validate(args_model), max_results=MAX_RESULTS)
+        assert params["limit"] == DEFAULT_RESULTS
+
+    def test_limit_within_maximum_is_kept(self, args_model: type[BaseModel]) -> None:
+        """A limit up to the maximum is used as given."""
+        params = _query_params(
+            _validate(args_model, limit=MAX_RESULTS), max_results=MAX_RESULTS,
+        )
+        assert params["limit"] == MAX_RESULTS
+
+    def test_limit_above_maximum_is_clamped(
+        self, args_model: type[BaseModel],
+    ) -> None:
+        """A larger limit is accepted, then clamped rather than rejected."""
+        params = _query_params(
+            _validate(args_model, limit=MAX_RESULTS + 10), max_results=MAX_RESULTS,
+        )
+        assert params["limit"] == MAX_RESULTS
+
+    def test_limit_below_one_is_rejected(self, args_model: type[BaseModel]) -> None:
+        """A limit of zero is a mistake the model can fix."""
+        with pytest.raises(ValidationError):
+            _validate(args_model, limit=0)
+
+    def test_description_states_default_and_maximum(
+        self, args_model: type[BaseModel],
+    ) -> None:
+        """Any client's model learns the default and maximum from the schema."""
+        description = args_model.model_json_schema()["properties"]["limit"][
+            "description"
+        ]
+        assert f"{DEFAULT_RESULTS} by default" in description
+        assert f"At most {MAX_RESULTS}" in description
+
+    def test_limit_note_tells_the_user(self) -> None:
+        """The clamp note carries its own instruction, since MCP skips our prompt."""
+        note = _limit_note(MAX_RESULTS + 5, MAX_RESULTS)
+        assert str(MAX_RESULTS + 5) in note
+        assert str(MAX_RESULTS) in note
+        assert "Tell the user" in note

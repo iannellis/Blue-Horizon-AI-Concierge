@@ -603,6 +603,28 @@ and a character cap truncates a legitimate answer as readily as an abusive one. 
 read-only grant is unchanged and remains the guarantee that search cannot write; see
 [Least privilege is a database grant, not a code path](#least-privilege-is-a-database-grant-not-a-code-path).
 
+### A fixed room count hid most of a requested list
+
+**Status:** adopted, extending `search_rooms`.
+
+`search_rooms` first returned a fixed four rooms per search, set in config. A guest who
+asked to see eight presidential suites, or every room free on a date, got four and a
+count, and the model had no way to ask for more.
+
+**The model now sets `limit`, clamped to a maximum.** A search returns
+`default_search_results` rooms (4) unless `limit` asks for more, up to
+`max_search_results` (15). A larger `limit` is clamped, not rejected: a validation error
+would leave a guest who asked for "every room" with nothing, where a clamped list is
+still an answer. When a search is clamped, the result carries a `limit_note` saying so
+and telling the model to tell the user.
+
+The instruction to pass the note on lives in the tool result, not in `booking.txt`. The
+search is meant to be wrapped in an MCP server, whose clients bring their own prompts,
+so an instruction that exists only in this agent's prompt would not reach them. The
+`limit` field's description in the schema states the default and the maximum for the
+same reason. `run_room_search` takes the maximum as an argument, so an MCP server can
+choose its own.
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

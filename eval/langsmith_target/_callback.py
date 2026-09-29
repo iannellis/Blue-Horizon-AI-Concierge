@@ -123,7 +123,7 @@ class SearchRoomsOutput(BaseModel):
     Attributes:
         status: Tool status string ("ok" or "error").
         matching_count: Number of rooms matching the search, of which at
-            most ``top_k`` are returned.
+            most ``[booking.agent].max_search_results`` are returned.
         rooms: The rooms returned, when present.
         error: Error message when the tool fails.
         error_kind: Message-independent failure classification (see

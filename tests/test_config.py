@@ -1,9 +1,11 @@
 """Tests for the shared configuration parsing."""
 # ruff: noqa: S101
 
+import copy
 import importlib.resources as importlib_resources
 import tomllib
 from pathlib import Path
+from typing import cast
 
 import pytest
 from pydantic import ValidationError
@@ -14,7 +16,8 @@ from blue_horizon.config import FrozenModel as _FrozenModel
 EXPECTED_BATCH_SIZE = 64
 EXPECTED_MAX_SEARCH_CALLS = 4
 EXPECTED_HEALTH_CHECK_INTERVAL_S = 30
-EXPECTED_ROOMS_TOP_K = 4
+EXPECTED_DEFAULT_SEARCH_RESULTS = 4
+EXPECTED_MAX_SEARCH_RESULTS = 15
 EXPECTED_DATA_PATH = Path("data/pandas")
 EXPECTED_PROPOSAL_TTL_S = 1800.0
 EXPECTED_SEEDED_CUSTOMER_COUNT = 15
@@ -106,7 +109,8 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
             "system_prompt_filename": "rooms_sql_prompt.txt",
         },
         "agent": {
-            "top_k": EXPECTED_ROOMS_TOP_K,
+            "default_search_results": EXPECTED_DEFAULT_SEARCH_RESULTS,
+            "max_search_results": EXPECTED_MAX_SEARCH_RESULTS,
             "max_search_calls_per_turn": EXPECTED_MAX_SEARCH_CALLS,
             "max_search_room_numbers": 10,
         },
@@ -152,7 +156,10 @@ def test_parse_app_config_from_dict() -> None:
     assert cfg.orchestration.llm.model == "gpt-5-nano"
     assert cfg.info.embeddings.batch_size == EXPECTED_BATCH_SIZE
     assert cfg.booking.agent.max_search_calls_per_turn == EXPECTED_MAX_SEARCH_CALLS
-    assert cfg.booking.agent.top_k == EXPECTED_ROOMS_TOP_K
+    assert (
+        cfg.booking.agent.default_search_results == EXPECTED_DEFAULT_SEARCH_RESULTS
+    )
+    assert cfg.booking.agent.max_search_results == EXPECTED_MAX_SEARCH_RESULTS
     assert cfg.booking.proposals.ttl_s == EXPECTED_PROPOSAL_TTL_S
     assert cfg.load_data.information_redis.data_path == EXPECTED_DATA_PATH
     assert (
@@ -160,6 +167,15 @@ def test_parse_app_config_from_dict() -> None:
         == EXPECTED_SEEDED_CUSTOMER_COUNT
     )
     assert cfg.logging.quiet_loggers == ("httpx",)
+
+
+def test_default_search_results_cannot_exceed_maximum() -> None:
+    """A default above the maximum would make every search a clamped one."""
+    config = copy.deepcopy(SAMPLE_APP_CONFIG)
+    booking = cast("dict[str, dict[str, object]]", config["booking"])
+    booking["agent"]["default_search_results"] = EXPECTED_MAX_SEARCH_RESULTS + 1
+    with pytest.raises(ValidationError, match="cannot exceed max_search_results"):
+        AppConfig.model_validate(config)
 
 
 def test_load_packaged_app_config() -> None:
@@ -183,7 +199,11 @@ def test_load_packaged_app_config() -> None:
     assert cfg.orchestration.messages.failed
     assert cfg.orchestration.orchestration.unavailable_retry_after_s > 0
     assert cfg.info.redis.health_check_interval_s > 0
-    assert cfg.booking.agent.top_k > 0
+    assert (
+        0
+        < cfg.booking.agent.default_search_results
+        <= cfg.booking.agent.max_search_results
+    )
     assert cfg.booking.proposals.ttl_s > 0
     assert isinstance(cfg.load_data.booking_pgsql.data_path, Path)
     assert cfg.load_data.booking_pgsql.seeded_customer_count > 0

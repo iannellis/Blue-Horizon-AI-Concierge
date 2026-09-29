@@ -15,6 +15,8 @@ from blue_horizon.agents.booking.search import RoomsMetadata
 FIRST_NIGHT = dt.date(2025, 1, 4)
 LAST_NIGHT = dt.date(2026, 1, 3)
 MAX_ROOM_NUMBERS = 10
+DEFAULT_RESULTS = 4
+MAX_RESULTS = 15
 
 
 def make_rooms_metadata() -> RoomsMetadata:

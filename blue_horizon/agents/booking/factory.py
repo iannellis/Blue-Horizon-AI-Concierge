@@ -53,8 +53,8 @@ _SEARCH_TOOL_DESCRIPTION = (
     "Search the hotel's rooms. With check_in and check_out, returns only rooms "
     "free and priced for every night of the stay, with the stay's total price. "
     "Without dates, searches room attributes in general. Returns matching_count "
-    "(every matching room) and at most a few example rooms, so use "
-    "matching_count to answer 'how many' questions."
+    "(every matching room) and a few example rooms, or up to `limit` rooms, so "
+    "use matching_count to answer 'how many' questions."
 )
 
 

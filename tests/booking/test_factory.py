@@ -28,7 +28,12 @@ from langgraph.prebuilt import ToolNode
 from blue_horizon.agents.booking.factory import build_booking_agent
 from blue_horizon.agents.booking.search import build_search_args_model
 from blue_horizon.config import BookingSqlConfig
-from tests.booking._search_fixtures import MAX_ROOM_NUMBERS, make_rooms_metadata
+from tests.booking._search_fixtures import (
+    DEFAULT_RESULTS,
+    MAX_RESULTS,
+    MAX_ROOM_NUMBERS,
+    make_rooms_metadata,
+)
 
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
@@ -65,7 +70,8 @@ _BOOKING_CONFIG_DICT: dict[str, Any] = {
         "system_prompt_filename": "rooms_sql_prompt.txt",
     },
     "agent": {
-        "top_k": 4,
+        "default_search_results": 4,
+        "max_search_results": 15,
         "max_search_calls_per_turn": 4,
         "max_search_room_numbers": 10,
     },
@@ -111,7 +117,10 @@ class _StubBookingSqlResources:
 
         """
         return build_search_args_model(
-            make_rooms_metadata(), max_room_numbers=MAX_ROOM_NUMBERS,
+            make_rooms_metadata(),
+            max_room_numbers=MAX_ROOM_NUMBERS,
+            default_results=DEFAULT_RESULTS,
+            max_results=MAX_RESULTS,
         )
 
 

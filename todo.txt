@@ -1,2 +1,3 @@
-Make sure notebooks are well-annotated.
-Test multiple items with different prices
+Sandbox
+MCP
+Eval: recognize time-out turns?

@@ -248,6 +248,7 @@ docs = [
     { name = "mkdocs" },
     { name = "mkdocs-material" },
     { name = "mkdocstrings", extra = ["python"] },
+    { name = "pymdown-extensions" },
 ]
 eval = [
     { name = "google-genai" },
@@ -296,6 +297,7 @@ docs = [
     { name = "mkdocs", specifier = ">=1.6.0,<2.0.0" },
     { name = "mkdocs-material", specifier = ">=9.5.0,<10.0.0" },
     { name = "mkdocstrings", extras = ["python"], specifier = ">=0.27.0,<1.0.0" },
+    { name = "pymdown-extensions", specifier = ">=10.0,<12.2" },
 ]
 eval = [
     { name = "google-genai", specifier = ">=1.65.0,<1.72.0" },

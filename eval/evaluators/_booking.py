@@ -76,6 +76,9 @@ _UNBACKED_SUCCESS_PHRASES: tuple[str, ...] = (
     "successfully booked",
     "booking is confirmed",
     "booking confirmed",
+    "is confirmed",
+    "already confirmed",
+    "already done",
     "you're all set",
     "you are all set",
     "has been cancelled",
@@ -100,12 +103,16 @@ class BookingOutcomeState:
         counts: Aggregate counters across all evaluated booking turns.
         per_turn_outcomes: Per-turn pass-rate records used for turn-based
             summary reporting.
+        per_turn_tool_errors: Per-turn records of whether a booking turn's
+            tracked tool calls were free of unexpected errors, used for the
+            turn-based ``booking_tool_errors`` summary.
         unexpected_fail_details: Failure detail records captured for logging.
 
     """
 
     counts: dict[str, int]
     per_turn_outcomes: list[dict[str, Any]]
+    per_turn_tool_errors: list[dict[str, Any]]
     unexpected_fail_details: list[dict[str, Any]]
 
 
@@ -174,6 +181,7 @@ def _score_booking_tool_outcomes(
     state = BookingOutcomeState(
         counts=_init_booking_outcome_counts(),
         per_turn_outcomes=[],
+        per_turn_tool_errors=[],
         unexpected_fail_details=[],
     )
 
@@ -183,16 +191,19 @@ def _score_booking_tool_outcomes(
         tool_summary = turn.tool_summary
 
         expected_success: bool | None = None
+        expect_no_write = False
         if global_idx < len(example_turns):
             es = example_turns[global_idx].expected_success
             if isinstance(es, bool):
                 expected_success = es
+            expect_no_write = example_turns[global_idx].expect_no_write
 
         _accumulate_booking_turn(
             turn_idx=global_idx,
             tool_summary=tool_summary,
             state=state,
             expected_success=expected_success,
+            expect_no_write=expect_no_write,
         )
 
     metrics = _format_booking_outcome_metrics(state)
@@ -265,6 +276,14 @@ def _format_booking_outcome_detail_metrics(
                 max_len=limits.json_value_max,
             ),
         )
+    if state.per_turn_tool_errors:
+        metrics.append(
+            json_detail_metric(
+                key="booking_tool_errors_per_turn",
+                data=state.per_turn_tool_errors,
+                max_len=limits.json_value_max,
+            ),
+        )
     if state.unexpected_fail_details:
         metrics.append(
             json_detail_metric(
@@ -299,6 +318,7 @@ def _accumulate_booking_turn(
     tool_summary: list[ToolSummaryEntry],
     state: BookingOutcomeState,
     expected_success: bool | None,
+    expect_no_write: bool,
 ) -> None:
     """Accumulate outcome counts for a single booking turn.
 
@@ -307,13 +327,18 @@ def _accumulate_booking_turn(
         tool_summary: Tool summary entries for the turn.
         state: Mutable booking scoring state updated in place.
         expected_success: Whether the example expects this turn to complete
-            a write. ``False`` means no write is expected and a failed
-            propose/confirm should not be penalised.
+            a write. ``False`` means the write is expected to fail, so a
+            failed propose/confirm is not penalised and a successful one is.
+        expect_no_write: Whether the example expects this turn to make no
+            ``propose_*`` call at all.
 
     """
+    turn_tool_calls = 0
+    turn_tool_errors = 0
     for entry in tool_summary:
         if entry.tool not in _TRACKED_TOOLS:
             continue
+        turn_tool_calls += 1
         state.counts["tool_calls"] += 1
         # A propose_*/confirm_booking call correctly rejecting an invalid
         # request (unavailable dates, an already-committed booking, ...) sets
@@ -322,16 +347,22 @@ def _accumulate_booking_turn(
         # defect -- only count it toward `booking_tool_errors` when the turn
         # was not expected to fail, mirroring `_score_outcome_match` below.
         if _has_tool_error(entry) and expected_success is not False:
+            turn_tool_errors += 1
             state.counts["tool_errors"] += 1
         if entry.tool == "search_rooms":
             state.counts["search_calls"] += 1
             if entry.matching_count is not None:
                 state.counts["matching_count_present"] += 1
+    if turn_tool_calls:
+        state.per_turn_tool_errors.append(
+            {"turn_index": turn_idx, "pass_rate": 0.0 if turn_tool_errors else 1.0},
+        )
 
     outcome_matched, failure_detail = _score_outcome_match(
         turn_idx=turn_idx,
         tool_summary=tool_summary,
         expected_success=expected_success,
+        expect_no_write=expect_no_write,
     )
     if outcome_matched is None:
         return
@@ -369,31 +400,56 @@ def _score_outcome_match(
     turn_idx: int,
     tool_summary: list[ToolSummaryEntry],
     expected_success: bool | None,
+    expect_no_write: bool = False,
 ) -> tuple[bool | None, dict[str, Any] | None]:
     """Score the propose+confirm outcome for a single booking turn.
+
+    The check is two-sided. A failed write matches only on a turn labeled
+    ``expected_success=False``, and a successful write on such a turn is a
+    mismatch: a write the dataset says should be refused is as much a defect
+    as a refused write it says should succeed.
+
+    A turn labeled ``expect_no_write`` is scored on whether a proposal was
+    made at all: none is a match, and any ``propose_*`` call is a mismatch
+    whether or not it went on to succeed.
 
     Args:
         turn_idx: Global turn index within the run.
         tool_summary: Tool summary entries for the turn.
         expected_success: Whether the example expects this turn to complete
-            a write. When ``False``, a failed propose/confirm is not penalised.
+            a write. ``False`` expects the write to fail; ``True`` or
+            ``None`` expects it to succeed. Ignored when ``expect_no_write``
+            is set.
+        expect_no_write: Whether the example expects this turn to make no
+            ``propose_*`` call at all.
 
     Returns:
         Tuple of ``(outcome_matched, failure_detail)``. Returns ``(None,
-        None)`` when the turn made no ``propose_*`` call -- a pure search
-        turn has nothing here to score.
+        None)`` when the turn made no ``propose_*`` call and is not labeled
+        ``expect_no_write`` -- a pure search turn has nothing here to score.
 
     """
     action, propose_entry, confirm_entry = _detect_propose_confirm(tool_summary)
     if action is None or propose_entry is None:
-        return None, None
+        return (True, None) if expect_no_write else (None, None)
+    if expect_no_write:
+        return False, {
+            "turn": turn_idx,
+            "action": action,
+            "stage": "propose",
+            "note": "proposal on a turn that asked for no write",
+        }
     success, detail = _score_atomic_outcome(
         action=action, propose_entry=propose_entry, confirm_entry=confirm_entry,
     )
+    if success == (expected_success is not False):
+        return True, None
     if success:
-        return True, None
-    if expected_success is False:
-        return True, None
+        detail = {
+            "stage": "confirm",
+            "note": "write succeeded on a turn expected to fail",
+            **detail,
+        }
     return False, {"turn": turn_idx, "action": action, **detail}
 
 
@@ -545,6 +601,11 @@ async def _score_unbacked_success_claims(
     call); every match is adjudicated by ``_judge_claims_success`` before it
     counts against the score.
 
+    A successful confirm backs claims on its own turn and every later one.
+    After a receipt, the prompt tells the agent to say the request is already
+    done when the guest asks again, and that later turn has no confirm of its
+    own.
+
     Args:
         run: LangSmith run object containing tool summaries and per-turn
             assistant text.
@@ -559,8 +620,10 @@ async def _score_unbacked_success_claims(
     turn_outputs = _iter_turn_outputs(run)
     candidates: list[tuple[int, str]] = []
     scanned = 0
+    confirmed_so_far = False
 
     for idx, turn in enumerate(turn_outputs):
+        confirmed_so_far = confirmed_so_far or _has_backing_confirm(turn.tool_summary)
         if turn.route_pred != "booking":
             continue
         text = turn.assistant_text
@@ -569,7 +632,7 @@ async def _score_unbacked_success_claims(
         scanned += 1
         if not _mentions_success_phrase(text.lower()):
             continue
-        if _has_backing_confirm(turn.tool_summary):
+        if confirmed_so_far:
             continue
         candidates.append((idx, text))
 

@@ -28,7 +28,11 @@ from pydantic import BaseModel
 
 from blue_horizon.agents.booking import proposals as proposals_module
 from blue_horizon.agents.booking import write_ops
-from blue_horizon.agents.booking.receipts import receipt_message, serialize_write_result
+from blue_horizon.agents.booking.receipts import (
+    receipt_message,
+    refusal_message,
+    serialize_write_result,
+)
 from blue_horizon.agents.exceptions import ThreadCustomerMismatchError
 from blue_horizon.agents.orchestration import (
     OrchestrationManager,
@@ -540,7 +544,8 @@ async def confirm_booking(payload: ProposalActionPayload) -> dict[str, Any]:
     Raises:
         HTTPException: 404 if the proposal is unknown or expired; 403 if it
             belongs to a different guest; 409 if the underlying write fails
-            (e.g. the nights were taken in the meantime); 503 with a
+            (e.g. the nights were taken in the meantime), after recording
+            the refusal in the thread's history; 503 with a
             `Retry-After` header if the database could not be reached at
             all, in which case the proposal was left pending and confirming
             again is safe.
@@ -564,6 +569,7 @@ async def confirm_booking(payload: ProposalActionPayload) -> dict[str, Any]:
             headers={"Retry-After": str(_CONFIRM_RETRY_AFTER_S)},
         ) from exc
     except write_ops.BookingWriteError as exc:
+        await _record_refusal(resources.proposals, payload.proposal_id, exc)
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     message = receipt_message(outcome)
@@ -576,6 +582,31 @@ async def confirm_booking(payload: ProposalActionPayload) -> dict[str, Any]:
         "message": message,
         **serialize_write_result(outcome.result),
     }
+
+
+async def _record_refusal(
+    proposals: proposals_module.ProposalStore,
+    proposal_id: str,
+    exc: write_ops.BookingWriteError,
+) -> None:
+    """Append an app-authored refusal note to the refused proposal's thread.
+
+    `ProposalStore.confirm` has already checked ownership and retired the
+    proposal by the time it raises `BookingWriteError`, and the retired
+    record is still in the store, so its thread can be found.
+
+    Args:
+        proposals: Store that refused the confirm.
+        proposal_id: Proposal whose confirm was refused.
+        exc: The refusal itself.
+
+    """
+    proposal = proposals.get(proposal_id)
+    if proposal is None:
+        return
+    await orchestrator.append_assistant_message(
+        thread_id=proposal.thread_id, text=refusal_message(exc),
+    )
 
 
 @router.post("/booking/dismiss")

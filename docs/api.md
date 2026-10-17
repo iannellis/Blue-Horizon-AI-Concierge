@@ -134,7 +134,9 @@ The flow:
    `proposal_id`.
 4. The response carries the confirmation number and the receipt text. The application
    also writes that receipt into the LangGraph thread, so the agent's next turn knows
-   what happened.
+   what happened. A `409` refusal is written into the thread the same way, as a note
+   beginning "Not confirmed:", so the agent does not go on pointing the guest at a
+   proposal that no longer exists.
 
 Or the guest declines, and the client calls `POST /v1/booking/dismiss`.
 

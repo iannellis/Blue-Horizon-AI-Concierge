@@ -13,8 +13,11 @@ this file.
 from __future__ import annotations
 
 import asyncio
+import json
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
+
+import pytest
 
 from eval.evaluators import _booking
 from eval.evaluators._booking import (
@@ -22,6 +25,7 @@ from eval.evaluators._booking import (
     _detect_propose_confirm,
     _has_backing_confirm,
     _has_tool_error,
+    _mentions_success_phrase,
     _score_atomic_outcome,
     _score_booking_tool_outcomes,
     _score_outcome_match,
@@ -30,7 +34,6 @@ from eval.evaluators._booking import (
 from eval.models import ToolSummaryEntry
 
 if TYPE_CHECKING:
-    import pytest
     from langsmith.schemas import Example, Run
 
     from eval.config import EvalConfig
@@ -219,8 +222,8 @@ class TestScoreOutcomeMatch:
         assert matched is None
         assert detail is None
 
-    def test_success_matches_regardless_of_expectation(self) -> None:
-        """A successful write always counts as matched."""
+    def test_expected_success_matches(self) -> None:
+        """A successful write on a turn expected to succeed counts as matched."""
         tool_summary = [
             ToolSummaryEntry(tool="propose_booking", status="proposed"),
             ToolSummaryEntry(tool="confirm_booking", status="ok"),
@@ -230,6 +233,20 @@ class TestScoreOutcomeMatch:
         )
         assert matched is True
         assert detail is None
+
+    def test_success_on_expected_failure_is_flagged(self) -> None:
+        """A write that succeeds on a turn labeled to fail is a mismatch."""
+        tool_summary = [
+            ToolSummaryEntry(tool="propose_booking", status="proposed"),
+            ToolSummaryEntry(tool="confirm_booking", status="ok"),
+        ]
+        matched, detail = _score_outcome_match(
+            turn_idx=2, tool_summary=tool_summary, expected_success=False,
+        )
+        assert matched is False
+        assert detail is not None
+        assert detail["turn"] == 2  # noqa: PLR2004
+        assert detail["note"] == "write succeeded on a turn expected to fail"
 
     def test_expected_failure_waives_the_failure(self) -> None:
         """expected_success=False means a failed propose is not penalised."""
@@ -255,6 +272,43 @@ class TestScoreOutcomeMatch:
         assert detail["turn"] == 3  # noqa: PLR2004
         assert detail["action"] == "book"
 
+    def test_no_write_turn_without_proposal_matches(self) -> None:
+        """A search-only turn labeled expect_no_write is scored as a match."""
+        matched, detail = _score_outcome_match(
+            turn_idx=0, tool_summary=[ToolSummaryEntry(tool="search_rooms")],
+            expected_success=None, expect_no_write=True,
+        )
+        assert matched is True
+        assert detail is None
+
+    @pytest.mark.parametrize(
+        "tool_summary",
+        [
+            [
+                ToolSummaryEntry(tool="propose_booking", status="proposed"),
+                ToolSummaryEntry(tool="confirm_booking", status="ok"),
+            ],
+            [ToolSummaryEntry(tool="propose_booking", status="proposed")],
+            [ToolSummaryEntry(tool="propose_booking", status="error", error="x")],
+        ],
+    )
+    def test_any_proposal_on_a_no_write_turn_is_flagged(
+        self, tool_summary: list[ToolSummaryEntry],
+    ) -> None:
+        """A proposal on an expect_no_write turn is a mismatch whatever its outcome.
+
+        Args:
+            tool_summary: The turn's tool calls, each including a proposal.
+
+        """
+        matched, detail = _score_outcome_match(
+            turn_idx=2, tool_summary=tool_summary,
+            expected_success=None, expect_no_write=True,
+        )
+        assert matched is False
+        assert detail is not None
+        assert detail["note"] == "proposal on a turn that asked for no write"
+
 
 # ---------------------------------------------------------------------------
 # _has_backing_confirm
@@ -277,6 +331,39 @@ class TestHasBackingConfirm:
         """A confirm_booking entry with status ok counts as backing."""
         entry = ToolSummaryEntry(tool="confirm_booking", status="ok")
         assert _has_backing_confirm([entry]) is True
+
+
+# ---------------------------------------------------------------------------
+# _mentions_success_phrase
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "It's already done: room 504 is booked for March 5-7, 2025 (2 nights).",
+        "It's already confirmed for room 504 from March 5-7, 2025 (2 nights).",
+        (
+            "Your booking for room 504 from March 5-7, 2025 (2 nights) is already "
+            "confirmed."
+        ),
+        "That reservation is already confirmed for room 504.",
+        "Your stay in room 504 for March 5-7, 2025 (2 nights) is confirmed.",
+    ],
+)
+def test_completed_request_wording_reaches_the_judge(text: str) -> None:
+    """Each way the agent has said a request is already done is pre-filtered in."""
+    assert _mentions_success_phrase(text.lower()) is True
+
+
+def test_pending_proposal_wording_does_not_reach_the_judge() -> None:
+    """The agent's usual pending-proposal reply matches no success phrase."""
+    text = (
+        "I've put together a booking request for room 504 from March 5-7, "
+        "2025 (2 nights) for you to review. Please use the Confirm button in the "
+        "dialog to complete it."
+    )
+    assert _mentions_success_phrase(text.lower()) is False
 
 
 # ---------------------------------------------------------------------------
@@ -352,6 +439,60 @@ class TestScoreBookingToolOutcomes:
         assert by_key["booking_no_unexpected_failure_rate"]["score"] == 1.0
         assert by_key["booking_tool_errors"]["score"] == 1.0
 
+    def test_unexpected_success_lowers_the_match_rate(self) -> None:
+        """A write that succeeds on an expected_success=False turn is a mismatch."""
+        run = _make_run(
+            [
+                {
+                    "route_pred": "booking",
+                    "tool_summary": [
+                        {"tool": "propose_booking", "status": "proposed"},
+                        {"tool": "confirm_booking", "status": "ok"},
+                    ],
+                },
+            ],
+        )
+        example = _make_example(
+            [{"user": "book a taken room", "expected_success": False}],
+        )
+        results = _score_booking_tool_outcomes(run, example, _make_cfg())
+        by_key = {r["key"]: r for r in results}
+        assert by_key["booking_no_unexpected_failure_rate"]["score"] == 0.0
+        failures = json.loads(by_key["booking_unexpected_failures"]["value"])
+        assert failures[0]["note"] == "write succeeded on a turn expected to fail"
+
+    def test_unrequested_booking_on_a_no_write_turn_is_flagged(self) -> None:
+        """A confirmed booking on an expect_no_write turn lowers the match rate."""
+        run = _make_run(
+            [
+                {
+                    "route_pred": "booking",
+                    "tool_summary": [
+                        {"tool": "propose_booking", "status": "proposed"},
+                        {"tool": "confirm_booking", "status": "ok"},
+                    ],
+                },
+                {
+                    "route_pred": "booking",
+                    "tool_summary": [
+                        {"tool": "propose_booking", "status": "proposed"},
+                        {"tool": "confirm_booking", "status": "ok"},
+                    ],
+                },
+            ],
+        )
+        example = _make_example(
+            [
+                {"user": "book a room", "expected_success": True},
+                {"user": "show me the rates", "expect_no_write": True},
+            ],
+        )
+        results = _score_booking_tool_outcomes(run, example, _make_cfg())
+        by_key = {r["key"]: r for r in results}
+        assert by_key["booking_no_unexpected_failure_rate"]["score"] == 0.5  # noqa: PLR2004
+        failures = json.loads(by_key["booking_unexpected_failures"]["value"])
+        assert [f["turn"] for f in failures] == [1]
+
     def test_non_booking_turns_are_ignored(self) -> None:
         """Info-routed turns contribute nothing to the outcome metrics."""
         run = _make_run([{"route_pred": "info", "tool_summary": []}])
@@ -360,6 +501,47 @@ class TestScoreBookingToolOutcomes:
         by_key = {r["key"]: r for r in results}
         assert "booking_tool_errors" not in by_key
         assert "booking_no_unexpected_failure_rate" not in by_key
+        assert "booking_tool_errors_per_turn" not in by_key
+
+    def test_tool_errors_are_recorded_per_turn(self) -> None:
+        """Each booking turn with a tracked call gets its own tool-error record."""
+        run = _make_run(
+            [
+                {
+                    "route_pred": "booking",
+                    "tool_summary": [{"tool": "search_rooms", "matching_count": 2}],
+                },
+                {"route_pred": "info", "tool_summary": []},
+                {
+                    "route_pred": "booking",
+                    "tool_summary": [
+                        {"tool": "search_rooms", "status": "error", "error": "boom"},
+                    ],
+                },
+                {
+                    "route_pred": "booking",
+                    "tool_summary": [
+                        {"tool": "propose_booking", "status": "error", "error": "x"},
+                    ],
+                },
+            ],
+        )
+        example = _make_example(
+            [
+                {"user": "any rooms?"},
+                {"user": "checkout time?"},
+                {"user": "any suites?"},
+                {"user": "book a taken room", "expected_success": False},
+            ],
+        )
+        results = _score_booking_tool_outcomes(run, example, _make_cfg())
+        by_key = {r["key"]: r for r in results}
+        assert by_key["booking_tool_errors"]["score"] == 0.0
+        assert json.loads(by_key["booking_tool_errors_per_turn"]["value"]) == [
+            {"turn_index": 0, "pass_rate": 1.0},
+            {"turn_index": 2, "pass_rate": 0.0},
+            {"turn_index": 3, "pass_rate": 1.0},
+        ]
 
     def test_search_count_sanity(self) -> None:
         """search_rooms calls with matching_count present score full sanity."""
@@ -450,6 +632,63 @@ class TestScoreUnbackedSuccessClaims:
         results = asyncio.run(_score_unbacked_success_claims(run, _make_cfg()))
         by_key = {r["key"]: r for r in results}
         assert by_key["booking_no_unbacked_success_claims"]["score"] == 1.0
+
+    def test_claim_backed_by_an_earlier_turns_confirm_is_not_flagged(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Saying an earlier confirmed request is already done is backed."""
+
+        async def _fail_if_called(text: str, model: str) -> tuple[bool, str]:
+            _ = text, model
+            msg = "judge should not have been called"
+            raise AssertionError(msg)
+
+        monkeypatch.setattr(_booking, "_judge_claims_success", _fail_if_called)
+        run = _make_run(
+            [
+                {
+                    "route_pred": "booking",
+                    "assistant_text": "I've put together a booking for you to review.",
+                    "tool_summary": [{"tool": "confirm_booking", "status": "ok"}],
+                },
+                {
+                    "route_pred": "booking",
+                    "assistant_text": "It's already done: your room is booked.",
+                    "tool_summary": [],
+                },
+            ],
+        )
+        results = asyncio.run(_score_unbacked_success_claims(run, _make_cfg()))
+        by_key = {r["key"]: r for r in results}
+        assert by_key["booking_no_unbacked_success_claims"]["score"] == 1.0
+
+    def test_claim_before_any_confirm_is_still_judged(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A confirm on a later turn does not back a claim made before it."""
+
+        async def _fake_judge(text: str, model: str) -> tuple[bool, str]:
+            _ = text, model
+            return True, "claims a completed booking"
+
+        monkeypatch.setattr(_booking, "_judge_claims_success", _fake_judge)
+        run = _make_run(
+            [
+                {
+                    "route_pred": "booking",
+                    "assistant_text": "Your room is booked!",
+                    "tool_summary": [],
+                },
+                {
+                    "route_pred": "booking",
+                    "assistant_text": "Done.",
+                    "tool_summary": [{"tool": "confirm_booking", "status": "ok"}],
+                },
+            ],
+        )
+        results = asyncio.run(_score_unbacked_success_claims(run, _make_cfg()))
+        by_key = {r["key"]: r for r in results}
+        assert by_key["booking_no_unbacked_success_claims"]["score"] == 0.0
 
     def test_unbacked_claim_flagged_by_judge(
         self, monkeypatch: pytest.MonkeyPatch,

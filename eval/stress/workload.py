@@ -471,7 +471,7 @@ def _classify_outcome(
     fired -- the last ``search_rooms`` call's structured ``error_kind``. Assistant
     text is the last resort, used only when none of the above produced an
     answer (for example, the agent refused or asked a clarifying question
-    with no tool call behind it).
+    with no tool call behind it), and it never yields ``"success"``.
 
     Args:
         op_type: Effective operation type (``BOOK``, ``MODIFY``, or ``CANCEL``).
@@ -594,34 +594,24 @@ def _classify_text_outcome(text: str) -> str:
 
     Last-resort fallback: this reads assistant *prose*, not a structured
     signal, so a guest-facing copy change (``booking.txt``, the propose/
-    confirm refusal strings) can silently move this metric. Error markers
-    are checked ahead of conflict markers so an assistant sentence that
-    happens to combine both reads as the more serious outcome.
+    confirm refusal strings) can silently move this metric. It never
+    returns ``"success"``: only a successful confirm writes anything, and a
+    turn that reaches this fallback had none. An earlier version defaulted
+    to ``"success"`` on any reply without a refusal phrase, so a reply that
+    wrongly pointed the guest at an already-refused proposal was counted as
+    a booking, and reconciliation then reported it missing.
 
     Args:
         text: The assistant's response text.
 
     Returns:
-        One of ``"success"``, ``"conflict"``, or ``"error"``.
+        ``"error"`` if the reply reads as a failure, else ``"conflict"``.
 
     """
-    lower = text.lower().replace("\u2019", "'").replace("\u2018", "'")
+    lower = text.lower()
     if any(m in lower for m in ["error", "failed", "exception", "try again"]):
         return "error"
-    conflict_markers = [
-        "unavailable",
-        "no availability",
-        "already booked",
-        "you already have",  # "You already have room N booked for those dates."
-        "couldn't",
-        "cannot",
-        "not available",
-        "isn't available",
-        "i can't",
-    ]
-    if any(m in lower for m in conflict_markers):
-        return "conflict"
-    return "success"
+    return "conflict"
 
 
 def _update_booking_state(

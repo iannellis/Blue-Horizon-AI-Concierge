@@ -1,0 +1,169 @@
+{
+  "users": 50,
+  "ops_per_user": 5,
+  "max_concurrency": 50,
+  "total_ops": 250,
+  "elapsed_s": 102.733,
+  "ops_per_s": 2.433,
+  "latency_ms": {
+    "mean": 16306.48,
+    "median": 17288.25,
+    "p95": 19928.24
+  },
+  "outcomes": {
+    "success": {
+      "count": 91,
+      "rate": 0.364
+    },
+    "conflict": {
+      "count": 159,
+      "rate": 0.636
+    },
+    "error": {
+      "count": 0,
+      "rate": 0.0
+    }
+  },
+  "invariants": {
+    "double_booking_violations": 0,
+    "null_status_count": 0,
+    "passed": true
+  },
+  "reconciliation": {
+    "expected_bookings": 29,
+    "confirmed_in_db": 29,
+    "missing_from_db": 0,
+    "missing_from_db_detail": [],
+    "suspicious_conflicts": 31,
+    "suspicious_conflicts_detail": [
+      {
+        "thread_id": "3d28f45cfe9a42ea8e950fc465232f2b",
+        "room_number": 113,
+        "check_in": "2025-02-20",
+        "check_out": "2025-02-22",
+        "op_type": "BOOK"
+      },
+      {
+        "thread_id": "ef9eef4531464ccaa6fd20f5bbe2370b",
+        "room_number": 113,
+        "check_in": "2025-02-20",
+        "check_out": "2025-02-22",
+        "op_type": "BOOK"
+      },
+      {
+        "thread_id": "958e1b6386754b37bc487cc06593a487",
+        "room_number": 113,
+        "check_in": "2025-02-20",
+        "check_out": "2025-02-22",
+        "op_type": "BOOK"
+      },
+      {
+        "thread_id": "2ff4c24357724672bda89ca47486375d",
+        "room_number": 113,
+        "check_in": "2025-02-20",
+        "check_out": "2025-02-22",
+        "op_type": "BOOK"
+      },
+      {
+        "thread_id": "29d75be0993e4546bd47e73137fc7f25",
+        "room_number": 113,
+        "check_in": "2025-02-20",
+        "check_out": "2025-02-22",
+        "op_type": "BOOK"
+      },
+      {
+        "thread_id": "ff97ad39a8994863a23f0483bc5f54f4",
+        "room_number": 113,
+        "check_in": "2025-02-20",
+        "check_out": "2025-02-22",
+        "op_type": "BOOK"
+      },
+      {
+        "thread_id": "bd5da780e4394bc7a3ce502289e20797",
+        "room_number": 113,
+        "check_in": "2025-02-20",
+        "check_out": "2025-02-22",
+        "op_type": "MODIFY"
+      },
+      {
+        "thread_id": "03bf5a23c6fb4a5987852f7b708fde35",
+        "room_number": 1309,
+        "check_in": "2025-04-04",
+        "check_out": "2025-04-06",
+        "op_type": "MODIFY"
+      },
+      {
+        "thread_id": "db9305007866424cad8bd871787ac941",
+        "room_number": 1309,
+        "check_in": "2025-04-04",
+        "check_out": "2025-04-06",
+        "op_type": "MODIFY"
+      },
+      {
+        "thread_id": "166e8f15bde245d99ac87c7bdf88de6b",
+        "room_number": 113,
+        "check_in": "2025-02-20",
+        "check_out": "2025-02-22",
+        "op_type": "MODIFY"
+      }
+    ],
+    "passed": true
+  },
+  "targets": {
+    "total": 500,
+    "hot_count": 10,
+    "hot_targets": [
+      {
+        "room_number": 1309,
+        "check_in": "2025-04-04",
+        "check_out": "2025-04-06"
+      },
+      {
+        "room_number": 201,
+        "check_in": "2025-02-11",
+        "check_out": "2025-02-13"
+      },
+      {
+        "room_number": 413,
+        "check_in": "2025-02-13",
+        "check_out": "2025-02-15"
+      },
+      {
+        "room_number": 908,
+        "check_in": "2025-02-21",
+        "check_out": "2025-02-23"
+      },
+      {
+        "room_number": 1420,
+        "check_in": "2025-04-02",
+        "check_out": "2025-04-04"
+      },
+      {
+        "room_number": 2023,
+        "check_in": "2025-02-12",
+        "check_out": "2025-02-14"
+      },
+      {
+        "room_number": 113,
+        "check_in": "2025-02-20",
+        "check_out": "2025-02-22"
+      },
+      {
+        "room_number": 1704,
+        "check_in": "2025-04-07",
+        "check_out": "2025-04-09"
+      },
+      {
+        "room_number": 1710,
+        "check_in": "2025-02-23",
+        "check_out": "2025-02-25"
+      },
+      {
+        "room_number": 613,
+        "check_in": "2025-02-01",
+        "check_out": "2025-02-03"
+      }
+    ]
+  },
+  "status": "PASS"
+}

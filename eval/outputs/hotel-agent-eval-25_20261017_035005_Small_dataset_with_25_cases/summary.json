@@ -1,12 +1,12 @@
 {
-  "experiment_name": "hotel-agent-eval-25_20260929_200519_Small_dataset_with_25_cases",
+  "experiment_name": "hotel-agent-eval-25_20261017_035005_Small_dataset_with_25_cases",
   "dataset_name": "BlueHorizonEval_25",
   "max_concurrency": 10,
-  "started_at": "2026-09-29T20:05:19.690464+00:00",
-  "finished_at": "2026-09-29T20:07:26.849041+00:00",
+  "started_at": "2026-10-17T03:50:05.177360+00:00",
+  "finished_at": "2026-10-17T03:52:27.961335+00:00",
   "upload_results": false,
   "metadata": {
-    "git_sha": "ebf248ef7c9356766f49d369b2c7cddfb32fffdd",
+    "git_sha": "305b158f17b5eef6eceb4db2f758a0f1ed66cf80",
     "git_dirty": true,
     "dataset_name": "BlueHorizonEval_25",
     "max_concurrency": 10,
@@ -22,11 +22,11 @@
     "ragas_llm_model": "gemini-3.5-flash-lite",
     "ragas_embedding_model": "gemini-embedding-2",
     "app_config_sha256": "201f7b6c1105",
-    "eval_config_sha256": "ac80fc08e464",
+    "eval_config_sha256": "d7d7f678e681",
     "router_prompt_sha256": "a000552c7a28",
     "info_system_prompt_sha256": "15001e4dbeb1",
-    "info_parser_prompt_sha256": "6c8a41643f96",
-    "booking_prompt_sha256": "b9c44810653e"
+    "info_parser_prompt_sha256": "662fd562b851",
+    "booking_prompt_sha256": "0f94d0c7f784"
   },
   "num_examples": 25,
   "num_failed_runs": 0,
@@ -36,13 +36,18 @@
     "consumer_quality": 5.0,
     "grounding": 5.0,
     "injection_resistance": 5.0,
-    "rag_faithfulness_mean": 0.9585648148148148,
-    "rag_answer_relevancy_mean": 0.8376359838629718,
-    "rag_context_precision_mean": 0.8638290875189413,
-    "rag_context_recall_mean": 1.0,
+    "rag_faithfulness_mean": 0.924944885361552,
+    "rag_answer_relevancy_mean": 0.8023939389769984,
+    "rag_context_precision_mean": 0.8424526792116078,
+    "rag_context_recall_mean": 0.9861111111111112,
     "info_reference_subset_pass_rate": 1.0,
     "info_expected_filters_pass_rate": 1.0,
-    "booking_expected_search_pass_rate": 1.0
+    "booking_expected_search_pass_rate": 1.0,
+    "booking_tool_errors": 1.0,
+    "booking_no_unbacked_success_claims": 1.0,
+    "injection_tripwire_pass": 1.0,
+    "db_invariants_pass": 1.0,
+    "db_no_double_booking": 1.0
   },
   "turn_based_summary": {
     "route_accuracy": 1.0,
@@ -50,31 +55,32 @@
     "booking_no_unexpected_failure_rate": 1.0,
     "info_expected_filters_pass_rate": 1.0,
     "booking_expected_search_pass_rate": 1.0,
-    "rag_faithfulness_mean": 0.9518817204301075,
-    "rag_answer_relevancy_mean": 0.8259297848207725,
-    "rag_context_precision_mean": 0.8790236416489629,
-    "rag_context_recall_mean": 1.0
+    "booking_tool_errors": 1.0,
+    "rag_faithfulness_mean": 0.9128392217101895,
+    "rag_answer_relevancy_mean": 0.7871730854319923,
+    "rag_context_precision_mean": 0.8508310713311317,
+    "rag_context_recall_mean": 0.9838709677419355
   },
   "latency_quantiles_ms": {
     "booking": {
-      "p50_ms": 5943.6,
-      "p95_ms": 8390.5,
-      "p99_ms": 8637.6
+      "p50_ms": 5477.5,
+      "p95_ms": 7758.4,
+      "p99_ms": 8744.0
     },
     "info": {
-      "p50_ms": 6201.1,
-      "p95_ms": 8738.7,
-      "p99_ms": 10754.4
+      "p50_ms": 4666.4,
+      "p95_ms": 7264.3,
+      "p99_ms": 9122.8
     },
     "refuse": {
-      "p50_ms": 1174.8,
-      "p95_ms": 1695.1,
-      "p99_ms": 1733.8
+      "p50_ms": 1174.6,
+      "p95_ms": 1426.7,
+      "p99_ms": 1476.9
     },
     "all": {
-      "p50_ms": 5927.5,
-      "p95_ms": 8400.2,
-      "p99_ms": 9795.7
+      "p50_ms": 4886.0,
+      "p95_ms": 7759.9,
+      "p99_ms": 9359.5
     }
   }
 }

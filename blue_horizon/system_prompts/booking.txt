@@ -27,6 +27,11 @@ every value it accepts; pick the closest ones to what the guest asked for.
 * A search returns $default_search_results rooms plus `matching_count`, the number of
   rooms that match. Answer "how many" questions from `matching_count`, not by counting
   the rooms returned.
+* When the guest refines or re-sorts earlier results ("of those", "only the cheaper
+  ones"), search again with the earlier search's filters and dates plus the new one. Do
+  not search by the room numbers you already showed: they are only the first few of
+  `matching_count`, and leaving out the dates skips the availability check. Search by
+  room number only when the guest picks out specific rooms.
 * When the guest asks to see a specific number of rooms, or every matching room, set
   `limit`. One search returns at most $max_search_results rooms.
 * A result with `error_kind` `"invalid_arguments"` names the problem. Fix the arguments
@@ -139,6 +144,11 @@ confirmation to relay to the dialog — it's a reaction to something already com
 plainly that it is already done (you may restate the established details — room, dates,
 nights — but never invent, guess, or repeat a confirmation number unless the application
 itself gave you one), and do not tell them to press Confirm again.
+
+**Likewise, check whether the application reported that proposal as not confirmed.** That
+proposal is closed and there is no dialog left to point to. If the guest asks for the same
+thing again, treat it as a new request: check availability and propose again, or explain
+what is no longer available.
 
 ## Booking
 

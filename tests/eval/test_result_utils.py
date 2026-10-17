@@ -301,6 +301,65 @@ class TestSummarizeResults:
             expected_turn_rate
         )
 
+    def test_pass_fail_checks_are_summarized(self) -> None:
+        """Case-level pass/fail checks are reported, tool errors also per turn."""
+        expected_case_tool_errors = 0.5
+        expected_turn_tool_errors = (1.0 + 0.0 + 1.0) / 3.0
+        rows = [
+            {
+                "evaluators": _persisted_evaluators(
+                    _feedback_item("booking_tool_errors", score=0.0),
+                    _feedback_item(
+                        "booking_tool_errors_per_turn",
+                        value=json.dumps(
+                            [
+                                {"turn_index": 0, "pass_rate": 1.0},
+                                {"turn_index": 1, "pass_rate": 0.0},
+                            ],
+                        ),
+                    ),
+                    _feedback_item("booking_no_unbacked_success_claims", score=1.0),
+                    _feedback_item("injection_tripwire_pass", score=1.0),
+                    _feedback_item("db_invariants_pass", score=1.0),
+                    _feedback_item("db_no_double_booking", score=1.0),
+                ),
+                "error": None,
+            },
+            {
+                "evaluators": _persisted_evaluators(
+                    _feedback_item("booking_tool_errors", score=1.0),
+                    _feedback_item(
+                        "booking_tool_errors_per_turn",
+                        value=json.dumps([{"turn_index": 0, "pass_rate": 1.0}]),
+                    ),
+                    _feedback_item("injection_tripwire_pass", score=0.0),
+                ),
+                "error": None,
+            },
+        ]
+        context = SimpleNamespace(
+            experiment_name="demo",
+            dataset_name="dataset",
+            max_concurrency=4,
+            started_at=datetime(2026, 3, 1, tzinfo=UTC),
+            finished_at=datetime(2026, 3, 1, 0, 5, tzinfo=UTC),
+            upload_results=False,
+            metadata={},
+        )
+
+        summary = _summarize_results(rows, context)
+        case_summary = _as_dict(summary["case_based_summary"])
+        turn_summary = _as_dict(summary["turn_based_summary"])
+
+        assert case_summary["booking_tool_errors"] == expected_case_tool_errors
+        assert case_summary["injection_tripwire_pass"] == 0.5  # noqa: PLR2004
+        assert case_summary["booking_no_unbacked_success_claims"] == 1.0
+        assert case_summary["db_invariants_pass"] == 1.0
+        assert case_summary["db_no_double_booking"] == 1.0
+        assert turn_summary["booking_tool_errors"] == expected_turn_tool_errors
+        assert "injection_tripwire_pass" not in turn_summary
+        assert "db_invariants_pass" not in turn_summary
+
 
 class TestComputeLatencySummary:
     """compute_latency_summary() reads normalized persisted feedback."""

@@ -144,6 +144,36 @@ class TestClassifyOutcome:
 
         assert outcome == "conflict"
 
+    def test_text_fallback_never_reports_success(self) -> None:
+        """A reply with no confirm behind it is not a write, however it reads.
+
+        Regression: the fallback once defaulted to "success", so a reply
+        pointing the guest at an already-refused proposal counted as a
+        booking and reconciliation reported it missing.
+        """
+        outcome = _classify_outcome(
+            op_type="BOOK",
+            assistant_text=(
+                "Your booking request is still waiting for your review. "
+                "Please use the Confirm button."
+            ),
+            err_text=None,
+            tool_summary=[],
+        )
+
+        assert outcome == "conflict"
+
+    def test_proposal_without_confirm_is_not_a_success(self) -> None:
+        """A successful propose_* with no confirm entry wrote nothing."""
+        outcome = _classify_outcome(
+            op_type="BOOK",
+            assistant_text="I've put together a booking for you to review.",
+            err_text=None,
+            tool_summary=[_propose_entry("propose_booking")],
+        )
+
+        assert outcome == "conflict"
+
     def test_search_unavailable_error_kind_beats_conflict_sounding_text(self) -> None:
         """A DB-unavailable search_rooms call classifies as error, not text-matched.
 

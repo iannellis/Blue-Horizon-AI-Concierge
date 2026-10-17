@@ -1,4 +1,4 @@
-"""App-authored receipt text and JSON serialization for confirmed proposals.
+"""App-authored receipt and refusal text, and JSON serialization of confirms.
 
 Both `blue_horizon.api.app` (the real `/v1/booking/confirm` endpoint) and the
 eval/stress harnesses' auto-confirm helper -- their stand-in for a human
@@ -73,4 +73,28 @@ def receipt_message(outcome: proposals_module.ConfirmOutcome) -> str:
     return (
         "Modification confirmed. "
         f"New total: ${write_ops.fmt_money(result.total_amount)}."
+    )
+
+
+def refusal_message(exc: write_ops.BookingWriteError) -> str:
+    """Build the app-authored note for a confirm the write refused.
+
+    A refused confirm retires its proposal, so without this note the thread's
+    last word is the model's own "please review and confirm", and on the
+    guest's next turn the model tells them to press a Confirm button that no
+    longer exists. Deliberately silent on whether anything changed: after a
+    lost acknowledgement, an earlier attempt on the same proposal may have
+    landed.
+
+    Args:
+        exc: The refusal `ProposalStore.confirm()` raised.
+
+    Returns:
+        str: App-authored text stating that the request was not confirmed
+        and is closed.
+
+    """
+    return (
+        f"Not confirmed: {exc} This request is closed and can no longer be "
+        "confirmed."
     )

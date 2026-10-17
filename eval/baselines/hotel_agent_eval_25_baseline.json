@@ -1,6 +1,6 @@
 {
-  "generated_from": "hotel-agent-eval-25_20260929_200519_Small_dataset_with_25_cases",
-  "description": "Baseline metric thresholds for the 25-case smoke eval (propose/confirm booking architecture; typed search_rooms tool, returning 4 rooms by default and up to 15 on request via its limit argument). Two cases are attribute searches: case_0207 (room type, floor, and view, then the cheapest of the matches) and case_0220 (ocean-view suites, then a price cap on the same search). strict=true metrics require every individual case score to equal 1.0; strict=false metrics require the mean across cases to be >= min_allowed. Judge and Ragas LLM is gemini-3.5-flash-lite (gemini-2.5-flash was deprecated for this account); booking.llm.reasoning_effort is medium. Ragas context precision uses the hotel-tuned prompt in eval/evaluators/_rag_prompts.py, which scores a chunk as useful when it answers any one clause of a multi-part question, and skips turns whose reference is only the 'nothing matched' sentinel ([ragas].no_match_reference). Ragas calls retry transient Gemini errors, and a failed call is never scored as 0.0, so a 0.0 in the per-turn detail is a real score. booking_expected_search_pass_rate is averaged over the two labeled cases, whose three labeled turns all passed; min_allowed 0.75 tolerates one missed turn in case_0220 but fails if case_0207's only labeled turn misses. min_allowed for rag_context_precision_mean and rag_faithfulness_mean matches the full-eval baseline (0.80 / 0.85); at n=18 scored turns this leaves less headroom than the full set, so watch this one first if a run trips it.",
+  "generated_from": "hotel-agent-eval-25_20261017_035005_Small_dataset_with_25_cases",
+  "description": "Baseline metric thresholds for the 25-case smoke eval (propose/confirm booking architecture; typed search_rooms tool, returning 4 rooms by default and up to 15 on request via its limit argument). Two cases are attribute searches: case_0207 (room type, floor, and view, then the cheapest of the matches) and case_0220 (ocean-view suites, then a price cap on the same search); both carry expect_no_write on every turn, and case_0220 accepts either reading of 'suites', matching the full set. strict=true metrics require every individual case score to equal 1.0; strict=false metrics require the mean across cases to be >= min_allowed. Judge and Ragas LLM is gemini-3.5-flash-lite (gemini-2.5-flash was deprecated for this account); booking.llm.reasoning_effort is medium. Ragas context precision uses the hotel-tuned prompt in eval/evaluators/_rag_prompts.py, which scores a chunk as useful when it answers any one clause of a multi-part question, and skips turns whose reference is only the 'nothing matched' sentinel ([ragas].no_match_reference). Ragas calls retry transient Gemini errors, and a failed call is never scored as 0.0, so a 0.0 in the per-turn detail is a real score. This is the first run scored with the two-sided booking outcome check and the relabeled turns; booking_no_unexpected_failure_rate was 1.0 over 29 scored turns. booking_expected_search_pass_rate is averaged over the two labeled cases, whose three labeled turns all passed; min_allowed 0.75 tolerates one missed turn in case_0220 but fails if case_0207's only labeled turn misses. info_expected_filters_pass_rate was 1.0; case_0005's 'I only have 20-minute' turn, which misses intermittently in the full runs, passed here. rag_faithfulness_mean, rag_answer_relevancy_mean, and rag_context_precision_mean are single-run figures on few turns and sit below the full-eval means of 0.96, 0.84, and 0.89; min_allowed for faithfulness and precision matches the full-eval baseline (0.85 / 0.80), which at this sample size leaves less headroom than the full set, so watch precision first if a run trips it.",
   "metrics": {
     "route_accuracy": {
       "baseline": 1.0,
@@ -68,22 +68,22 @@
       "strict": false
     },
     "rag_faithfulness_mean": {
-      "baseline": 0.9586,
+      "baseline": 0.9249,
       "min_allowed": 0.85,
       "strict": false
     },
     "rag_answer_relevancy_mean": {
-      "baseline": 0.8376,
+      "baseline": 0.8024,
       "min_allowed": 0.70,
       "strict": false
     },
     "rag_context_precision_mean": {
-      "baseline": 0.8638,
+      "baseline": 0.8425,
       "min_allowed": 0.80,
       "strict": false
     },
     "rag_context_recall_mean": {
-      "baseline": 1.0,
+      "baseline": 0.9861,
       "min_allowed": 0.85,
       "strict": false
     }

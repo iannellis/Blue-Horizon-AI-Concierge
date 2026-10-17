@@ -33,7 +33,7 @@ Each line in a JSONL dataset file is a single JSON object:
 | Field | Required | Used by | Description |
 |---|---|---|---|
 | `case_id` | Yes | harness | Unique string identifier |
-| `tags` | No | harness | Labels used for filtering: `booking`, `info`, `refuse`, `mixed`, `injection`, `attribute_search`. `no_auto_confirm` additionally opts the whole case out of post-turn auto-confirmation |
+| `tags` | No | harness | Labels used for filtering: `booking`, `info`, `refuse`, `mixed`, `injection`, `attribute_search`, `filters` (every case with an `expected_filters` label carries it). `no_auto_confirm` additionally opts the whole case out of post-turn auto-confirmation |
 | `turns[].user` | Yes | harness | User message text sent to the agent |
 | `turns[].expected_route` | Yes | `eval_routing_accuracy` | Expected route: `booking`, `info`, or `refuse` |
 | `turns[].expect_injection` | No | `eval_injection_tripwires` | `true` if this turn is a prompt-injection attempt |
@@ -41,9 +41,30 @@ Each line in a JSONL dataset file is a single JSON object:
 | `turns[].reference` | No | `eval_llm_rubrics`, `eval_info_reference_subset`, `eval_rag_metrics_info_turns` | Ground-truth or reference answer |
 | `turns[].expected_filters` | No | `eval_info_expected_filters` | Filters the info-agent parser should extract |
 | `turns[].expected_search` | No | `eval_booking_expected_search` | Arguments a `search_rooms` call in this turn should use: a partial spec, or a list of alternative specs |
+| `turns[].expected_success` | No | `eval_booking_outcome_and_invariants` | `false` if a write attempted on this turn should be refused; `true` or absent if it should succeed |
+| `turns[].expect_no_write` | No | `eval_booking_outcome_and_invariants` | `true` if this turn asks for no write, so any `propose_*` call on it fails the turn |
 
 The `no_auto_confirm` tag leaves every `propose_*` call pending, so a case can model
 abandonment or supersession instead of a completed write.
+
+`expected_success` describes the write, not the reply, and a turn that makes no
+`propose_*` call is not scored. Label a turn `false` only when the write itself must
+fail: a night that is `Booked` or `Maintenance` in the seeded `room_availability`, an
+impossible date, or an overlap with another of the guest's bookings. A turn that
+restates dates an earlier turn of the same case already booked is `true`. The agent
+should say the stay is already confirmed and make no write, and if it books because the
+earlier turn only asked a question, that write should succeed. Check the seeded
+availability on a freshly reset branch before labeling: the check is two-sided, so a
+write that succeeds on a `false` turn fails the case.
+
+Label a turn that asks for no write at all `expect_no_write: true`, and leave
+`expected_success` off it. The turn passes when it makes no `propose_*` call and fails
+when it makes one, whatever that proposal's outcome. Neither outcome label can say this.
+Absent or `true` expects a write to succeed, so in a case the harness auto-confirms, an
+unrequested booking passes. `false` passes an unrequested proposal that stays pending or
+fails, and also excuses any `search_rooms` error on that turn from `booking_tool_errors`.
+Word such a turn so it cannot be read as a booking request: when either reading is
+reasonable, no outcome label is right.
 
 ### Attribute-search cases
 
@@ -52,7 +73,9 @@ cases, which name a room number and dates, never reach: room type plus floor and
 a count, amenities, an empty result, and a stay that crosses New Year. Each was checked
 against the Development branch when it was written; the empty-result case, for example,
 asks for a Standard room with a private pool, and no Standard room has one. They are
-tagged `attribute_search` and `no_auto_confirm`, since none asks for a booking.
+tagged `attribute_search` and `no_auto_confirm`, since none asks for a booking, and
+every turn carries `expect_no_write`, so a proposal on any of them is scored as a
+failure.
 
 `case_0212` through `case_0221` cover the remaining filters and two kinds of follow-up:
 
@@ -94,7 +117,8 @@ specs, whatever the call returned; tool errors are scored separately. A labeled 
 with no search fails. A list of specs exists because some requests have more than one
 reasonable reading. "An ocean view" may be `["Ocean View"]` or `["Ocean View",
 "Panoramic Ocean View"]`, and since lists compare as sets, each accepted reading needs
-its own spec. A reading is accepted only if it returns rooms that answer the request on
+its own spec. Likewise "suites" may be `["Suite"]` or `["Suite", "Presidential Suite"]`,
+so `case_0220` carries four specs per turn, one for each combination. A reading is accepted only if it returns rooms that answer the request on
 Development: "a deluxe room with a balcony" does not accept `["Balcony", "Wraparound
 Balcony"]`, because `amenities` requires every listed value and no Deluxe room has both.
 
@@ -135,7 +159,7 @@ python -m eval.create_langsmith_dataset \
 | `eval_routing_accuracy` | `route_accuracy` | Fraction of turns routed correctly |
 | `eval_injection_tripwires` | `injection_tripwire_pass` | All injection-labeled turns resisted |
 | `eval_booking_outcome_and_invariants` | `booking_no_unexpected_failure_rate`, `db_invariants_pass`, `db_no_double_booking`, `db_no_null_status`, `booking_tool_errors` | Booking outcomes plus live DB invariant checks |
-| `eval_llm_rubrics` | `judge_consumer_quality`, `judge_injection_resistance`, `judge_grounding_faithfulness` | LLM-as-judge rubric scores (1-5) via Gemini |
+| `eval_llm_rubrics` | `judge_consumer_quality`, `judge_injection_resistance`, `judge_grounding_faithfulness` | LLM-as-judge rubric scores (0-5) via Gemini |
 | `eval_rag_metrics_info_turns` | `rag_faithfulness_mean`, `rag_answer_relevancy_mean`, `rag_context_precision_mean`, `rag_context_recall_mean` | Ragas RAG quality metrics for info turns |
 | `eval_info_reference_subset` | `info_reference_subset_pass_rate` | Agent response covers expected reference items |
 | `eval_info_expected_filters` | `info_expected_filters_pass_rate` | Parser extracts expected filters from queries |
@@ -220,6 +244,7 @@ SKIP = {"route_confusions","judge_raw_json","info_reference_subset_failures",
         "info_expected_filters_failures","info_expected_filters_turns",
         "info_expected_filters_per_turn","injection_turns_labeled",
         "injection_turns_scanned","booking_outcome_per_turn",
+        "booking_tool_errors_per_turn",
         "booking_expected_search_turns","booking_expected_search_per_turn",
         "booking_expected_search_failures",
         "rag_per_turn","latency_per_turn"}
@@ -250,6 +275,5 @@ EOF
 
 A full-eval baseline is best set from the average of several runs, since single-run
 variance on the judge-scored metrics is large enough to make a one-run baseline unstable.
-The 206-case baseline was the average of three runs. The current 221-case baseline comes
-from a single run, so treat a small drop in a judge-scored metric with that in mind
-before reading it as a regression.
+The current 221-case baseline is the average of three runs, as was the 206-case baseline
+before it.

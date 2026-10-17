@@ -182,6 +182,21 @@ class ProposalStore:
         proposal_id = self._by_thread.get(thread_id)
         return self._proposals.get(proposal_id) if proposal_id else None
 
+    def get(self, proposal_id: str) -> Proposal | None:
+        """Return a proposal by id, whether pending, confirmed, or retired.
+
+        A retired record stays until its TTL purges it (see `_retire`), so
+        this still resolves a proposal that `confirm` has just refused.
+
+        Args:
+            proposal_id: Proposal to look up.
+
+        Returns:
+            Proposal | None: The proposal, or ``None`` if unknown or purged.
+
+        """
+        return self._proposals.get(proposal_id)
+
     def invalidate_thread(self, thread_id: str) -> None:
         """Invalidate any pending proposal for a thread without confirming it.
 

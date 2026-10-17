@@ -25,6 +25,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
+from unittest.mock import AsyncMock
 
 import pytest
 from psycopg.rows import dict_row
@@ -444,14 +445,24 @@ class TestBookingConfirmDismiss:
         assert dismiss_response.status_code == 200  # noqa: PLR2004
 
     def test_confirm_conflict_returns_409_with_refusal_detail(
-        self, client: TestClient,
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A second confirm for the same nights returns 409 with the real reason.
 
         Also exercises step 5's identifier cleanup: the `detail` refuses by
-        room number, never by raw `booking_id`.
+        room number, never by raw `booking_id`. And checks that the refusal
+        is recorded in the refused proposal's thread, so the agent's next
+        turn does not still point the guest at a Confirm button.
         """
+        from blue_horizon.agents.orchestration import (  # noqa: PLC0415
+            OrchestrationManager,
+        )
         from blue_horizon.api.app import orchestrator  # noqa: PLC0415
+
+        append_spy = AsyncMock()
+        monkeypatch.setattr(
+            OrchestrationManager, "append_assistant_message", append_spy,
+        )
 
         customer_id = asyncio.run(_first_customer_id())
         request = asyncio.run(_find_available_room_request())
@@ -504,6 +515,9 @@ class TestBookingConfirmDismiss:
             detail = second_response.json()["detail"]
             assert "not available" in detail
             assert str(booking_id) not in detail
+            refusal_note = append_spy.await_args_list[-1].kwargs
+            assert refusal_note["thread_id"] == second_proposal.thread_id
+            assert refusal_note["text"].startswith("Not confirmed:")
         finally:
             asyncio.run(_cancel_booking(customer_id, booking_id))
 

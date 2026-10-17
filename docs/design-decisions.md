@@ -663,6 +663,123 @@ recursion limit caps how many searches the booking agent makes in a turn, so a m
 eager to show "every room" could search floor by floor. That is a cost bound rather than
 a data leak, and a per-turn tool-call cap is the fix if it matters.
 
+### A refused confirm left the agent pointing at a dead proposal
+
+**Status:** adopted, extending the propose/confirm flow.
+
+The 2026-10-16 stress run failed reconciliation, with 26 of 27 expected bookings
+present. No write was wrong. One simulated guest's thread went like this:
+
+1. The agent proposed room 726. The auto-confirm lost the race to another guest, the
+   write refused it, and the proposal was retired. The run counted a conflict, which was
+   correct.
+2. The guest asked for the same room again. The agent made no new proposal. It said the
+   earlier request was still waiting for review, and told the guest to use the Confirm
+   button.
+3. The stress classifier counted that reply as a success, so reconciliation expected a
+   booking that was never written.
+
+Two defects lined up. First, a successful confirm wrote a receipt into the thread, but a
+refused one wrote nothing, in both `POST /v1/booking/confirm` and the harness's
+auto-confirm. The thread's last assistant message was therefore the model's own "for
+you to review", and the prompt's rule for a guest who restates a pending request sent
+them to a dialog that was gone. A real guest saw the same thing: the dialog shows the
+refusal, the guest asks again, and the agent points at a button that no longer exists.
+Second, the stress classifier's prose fallback returned "success" for any reply without
+a refusal phrase. Under propose/confirm, nothing is written without a confirm, so a turn
+that reached the fallback could never have been a success.
+
+**A refused confirm now writes an app-authored note into the thread**, through the same
+`append_assistant_message` path as the receipt. The note says "Not confirmed:", gives
+the write's reason, and says the request is closed. `booking.txt` tells the model that a
+request reported as not confirmed is closed, and that a repeat is a new request. The note
+does not say whether anything changed, because after a lost acknowledgment an earlier
+attempt on the same proposal may have landed. Like the receipt, it is written by the
+application, so the model is still never the one reporting a write's outcome.
+
+**The stress classifier's fallback now returns only "error" or "conflict".** A success
+needs a successful confirm entry. One cost is that a clarifying question now counts as a
+conflict, and if no night in its target ends up booked it also counts as a suspicious
+conflict. Since the suspicious count is informational, that is the better error to make.
+
+### A follow-up search narrowed to the rooms already shown
+
+**Status:** adopted, extending the search guidance in `booking.txt`.
+
+In two of the three full runs behind the earlier 221-case baseline, a guest who had
+searched for rooms with a private pool and a sauna asked "of those, which one is the
+biggest?" The first search matched 21 rooms and returned the default four. The follow-up searched those four room
+numbers, sorted by size, with no dates. Its answer happened to be right, because the
+largest of the 21 was among the four, but the method was wrong in two ways. It dropped
+the 17 matching rooms the guest had not seen, though the prompt already has the agent
+say that more rooms may be available. And without dates the search no longer checked
+that the rooms were free for the stay, or priced it.
+
+**`booking.txt` now says to refine by repeating the earlier search's filters and dates
+plus the new one,** and to search by room number only when the guest picks out
+specific rooms. The rule is in the prompt rather than the tool result because it is
+about reading the conversation, which a single search cannot see.
+
+The same runs also failed a search for "suites on your highest floors" once, because
+the agent included Presidential Suites. That was a reasonable reading: plain Suites stop
+at floor 17, and the floors above hold only Presidential Suites. The labels for that case
+and the other "suites" case now accept either reading, as the "ocean view" labels
+already accepted Panoramic Ocean View. In the three full runs that followed, every
+labeled search turn passed.
+
+### The booking outcome check could not see a write that should have failed
+
+**Status:** adopted, changing `booking_no_unexpected_failure_rate` and the labels of 37 turns, removing them from 15 cases, and adding an `expect_no_write` turn label.
+
+The judge marked down `case_0187` for telling the guest a booking was already
+confirmed. The transcript showed the booking was real: asked for "Mar 6 to Mar 7", the
+agent had inferred 2025, as `booking.txt` instructs, and the harness had confirmed it.
+The case labeled that turn `expected_success: false`, yet the outcome check had passed
+it. A turn labeled to fail only excused a failed write. A successful one counted as a
+match either way, so the label was never tested. In one full run, 17 cases wrote a
+booking on a turn labeled to fail, and the metric read 100%.
+
+Every one of those turns asked for nights that are free in the seeded
+`room_availability`. Some labels expected a missing year to be refused, which the prompt
+no longer does. Others expected a taken night that the current seed data has free.
+
+**The check is now two-sided:** a write that succeeds on a turn labeled to fail is a
+mismatch, as a refused write on a turn labeled to succeed already was. A one-sided check
+would also miss a regression that let through a write the database should refuse.
+
+**The labels were rechecked against a freshly reset branch.** 37 turns in 30 cases moved
+from `false` to `true`. 21 asked for free nights. The other 16 restate dates an earlier
+turn of the same case books. Those were labeled to fail because the earlier turn was
+assumed to have booked them, but when that turn only asked a question, the restated
+request is the one that books, and that write should succeed. When the earlier turn did
+book, the agent correctly says so and makes no write, which is not scored. A turn is
+now labeled `false` only when the write itself must fail. The rule is in
+[Datasets and Baselines](evaluation/datasets.md#dataset-schema).
+
+**A turn that asks for no write now carries no label.** The 15 attribute-search cases
+had every turn labeled `false`. They are `no_auto_confirm`, so a proposal on one is never
+confirmed, and the check read that pending proposal as the expected failure: a booking
+the guest never asked for passed. The same label excused their `search_rooms` errors
+from `booking_tool_errors`. Unlabeled, both count.
+
+**A turn can now say it expects no write.** That fix relies on `no_auto_confirm`, which
+applies to a whole case, so it cannot cover a search-only turn in a case that also books.
+`case_0169` books a room, asks for base rates, then said "Use 2025-03-04 to 2025-03-06",
+labeled `true`. The guest could mean the dates for the rates or a second stay, and a
+78-case run showed the agent booking it. An unrequested booking there would have passed
+under any label, since a missing label also expects success. The new per-turn
+`expect_no_write` label fails any proposal on its turn and passes a turn that makes none.
+The turn now reads "Show me those rates for 2025-03-04 to 2025-03-06" and carries it, as
+does every turn of the 15 attribute-search cases. Those cases keep `no_auto_confirm`, so
+an unrequested proposal still writes nothing, but the label no longer depends on it, and
+their turns now count toward `booking_no_unexpected_failure_rate` instead of going
+unscored.
+
+Three full runs under the new check and labels matched every scored turn, 235 to 246
+per run, and the baseline was reset from them. The metric reads the same 100% as before,
+but it now holds the agent to every label instead of only to the turns expected to
+succeed.
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

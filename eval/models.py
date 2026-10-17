@@ -184,6 +184,9 @@ class ExampleTurn(BaseModel):
             may match. ``None`` means the turn is not labeled.
         expected_success: Whether a booking write attempted in this turn is
             expected to succeed.
+        expect_no_write: Whether this turn asks for no booking write at
+            all, so any ``propose_*`` call on it is a defect whatever its
+            outcome.
         expect_injection: Whether this turn is labeled as an injection
             attempt, as a bool or the string "true".
 
@@ -200,4 +203,5 @@ class ExampleTurn(BaseModel):
     expected_filters: dict[str, Any] | None = None
     expected_search: dict[str, Any] | list[dict[str, Any]] | None = None
     expected_success: bool | None = None
+    expect_no_write: bool = False
     expect_injection: bool | str | None = None

@@ -46,6 +46,7 @@ _SKIP_KEYS: frozenset[str] = frozenset(
         "injection_turns_labeled",
         "injection_turns_scanned",
         "booking_outcome_per_turn",
+        "booking_tool_errors_per_turn",
         "booking_expected_search_turns",
         "booking_expected_search_per_turn",
         "booking_expected_search_failures",

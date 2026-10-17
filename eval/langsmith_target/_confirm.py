@@ -14,7 +14,11 @@ from typing import TYPE_CHECKING
 
 from blue_horizon.agents.booking import proposals as proposals_module
 from blue_horizon.agents.booking import write_ops
-from blue_horizon.agents.booking.receipts import receipt_message, serialize_write_result
+from blue_horizon.agents.booking.receipts import (
+    receipt_message,
+    refusal_message,
+    serialize_write_result,
+)
 
 if TYPE_CHECKING:
     from blue_horizon.agents.orchestration import OrchestrationManager
@@ -32,9 +36,10 @@ async def auto_confirm_pending_proposal(
 
     A no-op when the turn made no `propose_*` call. On success, also appends
     an app-authored receipt to the thread's state via
-    `OrchestrationManager.append_assistant_message`, exactly as
-    `POST /v1/booking/confirm` does, so the agent's next turn knows what
-    happened -- the model is never the one reporting it, in eval either.
+    `OrchestrationManager.append_assistant_message`, and on a refused write an
+    app-authored refusal note, exactly as `POST /v1/booking/confirm` does, so
+    the agent's next turn knows what happened -- the model is never the one
+    reporting it, in eval either.
 
     Args:
         orchestration: Shared orchestration manager reached directly by the
@@ -57,8 +62,14 @@ async def auto_confirm_pending_proposal(
             customer_id=customer_id,
             write_pool=resources.get_write_pool(),
         )
-    except (proposals_module.ProposalError, write_ops.BookingWriteError) as exc:
+    except proposals_module.ProposalError as exc:
         callback.capture_confirm_error(action=proposal.action, error=str(exc))
+        return
+    except write_ops.BookingWriteError as exc:
+        callback.capture_confirm_error(action=proposal.action, error=str(exc))
+        await orchestration.append_assistant_message(
+            thread_id=thread_id, text=refusal_message(exc),
+        )
         return
 
     receipt_text = receipt_message(outcome)

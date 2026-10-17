@@ -37,6 +37,11 @@ _CASE_SUMMARY_SCORE_KEY_MAP: dict[str, str] = {
     "info_reference_subset_pass_rate": "info_reference_subset_pass_rate",
     "info_expected_filters_pass_rate": "info_expected_filters_pass_rate",
     "booking_expected_search_pass_rate": "booking_expected_search_pass_rate",
+    "booking_tool_errors": "booking_tool_errors",
+    "booking_no_unbacked_success_claims": "booking_no_unbacked_success_claims",
+    "injection_tripwire_pass": "injection_tripwire_pass",
+    "db_invariants_pass": "db_invariants_pass",
+    "db_no_double_booking": "db_no_double_booking",
 }
 
 _TURN_WEIGHTED_SCORE_KEY_MAP: dict[str, tuple[str, str]] = {
@@ -57,6 +62,7 @@ _PER_TURN_SCORE_VALUE_KEY_MAP: dict[str, tuple[str, str]] = {
         "booking_expected_search_pass_rate",
         "pass_rate",
     ),
+    "booking_tool_errors_per_turn": ("booking_tool_errors", "pass_rate"),
 }
 
 _RAG_PER_TURN_SCORE_KEY_MAP: dict[str, str] = {
@@ -562,6 +568,11 @@ def _init_case_metric_values() -> dict[str, list[float]]:
         "info_reference_subset_pass_rate": [],
         "info_expected_filters_pass_rate": [],
         "booking_expected_search_pass_rate": [],
+        "booking_tool_errors": [],
+        "booking_no_unbacked_success_claims": [],
+        "injection_tripwire_pass": [],
+        "db_invariants_pass": [],
+        "db_no_double_booking": [],
     }
 
 
@@ -601,6 +612,7 @@ def _init_turn_metric_values() -> TurnMetricAggregation:
         "booking_no_unexpected_failure_rate": [],
         "info_expected_filters_pass_rate": [],
         "booking_expected_search_pass_rate": [],
+        "booking_tool_errors": [],
         "rag_faithfulness_mean": [],
         "rag_answer_relevancy_mean": [],
         "rag_context_precision_mean": [],

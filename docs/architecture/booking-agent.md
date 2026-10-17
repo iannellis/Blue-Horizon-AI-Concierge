@@ -106,6 +106,17 @@ retryable: if the database cannot be reached at all
 evaluated and the nights are unavailable) retires the proposal, because that outcome is
 already known and a retry would just re-ask a question that has been answered.
 
+**Every confirm outcome that settles a proposal is written into the thread.** A success
+appends the app-authored receipt (`receipts.receipt_message`), and a `BookingWriteError`
+appends an app-authored refusal note (`receipts.refusal_message`): "Not confirmed:", the
+write's reason, and that the request is closed. Both go through
+`OrchestrationManager.append_assistant_message`, from `POST /v1/booking/confirm` and
+from the eval harnesses' auto-confirm alike. Without the refusal note the thread's last
+assistant message is the model's own "for you to review", and when the guest asks again
+the model tells them to press a Confirm button that no longer exists. The note is
+silent on whether anything changed, since after a lost acknowledgment an earlier
+attempt on the same proposal may have landed.
+
 **The total the guest saw is checked before the write commits.** The confirm path passes
 the proposal's total to the `write_ops` function, which compares it with the total it
 computes under lock. If they differ, it raises `write_ops.PricingMismatchError` inside

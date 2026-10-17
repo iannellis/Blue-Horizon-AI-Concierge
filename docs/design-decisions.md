@@ -93,7 +93,10 @@ differently from what it proposed, the guest sees the proposal, not the descript
 
 ### Least privilege is a database grant, not a code path
 
-**Status:** adopted. Commit `a86c845`.
+**Status:** adopted. Commit `a86c845`. The SQL guardrail was later removed with
+`run_sql` (see
+[Free-form SQL had no bound on what one search could cost](#free-form-sql-had-no-bound-on-what-one-search-could-cost)).
+The grant remains the control.
 
 The SQL guardrail existed first: an AST allowlist restricting the model to `SELECT` on
 two tables. It is good, and it is not sufficient, because it is code in the same process
@@ -351,7 +354,7 @@ reasons it was wrong, not one:
 **The fix classifies failures by whether a repeat is known to be safe, not by how the
 error happened to surface:**
 
-- **Idempotent reads** (`run_sql`, `/v1/bookings`, `/v1/customers`, `/v1/health`): the
+- **Idempotent reads** (`search_rooms`, `/v1/bookings`, `/v1/customers`, `/v1/health`): the
   system absorbs the failure itself. A guest is never asked to retry a read; a failed
   one is a system state, reported and retried automatically, not a user error.
 - **The chat turn**: not auto-retried server-side, because a turn may already have

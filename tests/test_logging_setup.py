@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, TypedDict
+from unittest.mock import MagicMock
 
 import pytest
 from langgraph.graph import END, START, StateGraph
@@ -301,15 +302,27 @@ class TestConfigureLogging:
 class TestAxiomExporter:
     """`_axiom_exporter`."""
 
-    def test_sends_the_token_and_dataset_to_the_configured_endpoint(self) -> None:
-        """The exporter targets the endpoint with Axiom's two headers."""
-        exporter = logging_setup._axiom_exporter(_AXIOM_CONFIG, "xaat-key", "ds")
-        assert exporter._endpoint == _AXIOM_CONFIG.otlp_endpoint
-        assert exporter._headers == {
-            "Authorization": "Bearer xaat-key",
-            "X-Axiom-Dataset": "ds",
-        }
-        exporter.shutdown()
+    def test_sends_the_token_and_dataset_to_the_configured_endpoint(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The exporter targets the endpoint with Axiom's two headers.
+
+        Checked at the constructor call rather than on the built exporter,
+        whose attribute layout is private to OpenTelemetry and changes
+        between releases.
+
+        Args:
+            monkeypatch: Replaces the OTLP exporter class.
+
+        """
+        exporter_class = MagicMock()
+        monkeypatch.setattr(logging_setup, "OTLPLogExporter", exporter_class)
+        logging_setup._axiom_exporter(_AXIOM_CONFIG, "xaat-key", "ds")
+        exporter_class.assert_called_once_with(
+            endpoint=_AXIOM_CONFIG.otlp_endpoint,
+            headers={"Authorization": "Bearer xaat-key", "X-Axiom-Dataset": "ds"},
+            timeout=_AXIOM_CONFIG.export_timeout_s,
+        )
 
 
 class TestShipping:

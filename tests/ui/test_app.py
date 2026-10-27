@@ -1058,15 +1058,20 @@ class TestLogShipping:
         AxiomLoggingConfig.model_validate(config)
 
     def test_exporter_sends_the_token_and_dataset(self) -> None:
-        """The exporter targets the shared endpoint with Axiom's two headers."""
+        """The exporter targets the shared endpoint with Axiom's two headers.
+
+        Checked at the constructor call rather than on the built exporter,
+        whose attribute layout is private to OpenTelemetry and changes
+        between releases.
+        """
         config = _axiom_config()
-        exporter = _axiom_exporter(config, "xaat-key", "ds")
-        assert exporter._endpoint == config["otlp_endpoint"]  # noqa: SLF001
-        assert exporter._headers == {  # noqa: SLF001
-            "Authorization": "Bearer xaat-key",
-            "X-Axiom-Dataset": "ds",
-        }
-        exporter.shutdown()
+        with patch("ui.app.OTLPLogExporter") as exporter_class:
+            _axiom_exporter(config, "xaat-key", "ds")
+        exporter_class.assert_called_once_with(
+            endpoint=config["otlp_endpoint"],
+            headers={"Authorization": "Bearer xaat-key", "X-Axiom-Dataset": "ds"},
+            timeout=config["export_timeout_s"],
+        )
 
     def test_export_thread_records_are_not_shipped(self) -> None:
         """A record logged on the SDK's export thread is kept off the pipeline."""

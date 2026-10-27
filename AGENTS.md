@@ -9,7 +9,7 @@ other tools support imports.
 
 * All Python code should be well-structured, modular, follow PEP8, and have meaningful names.
 * For library modules, code should be written following the Clean Code guidelines. That is, if function A calls B then C, but B calls D, the they should be layed out in the order A,B,D,C. Same goes for methods inside classes. Pure dataclasses, classes inheriting from Protocol, and classes inheriting from the Pydantic BaseModel, can go near the top of the file. Do as you wish for scripts.
-* After completing each of the user's requests that involves a Python code change, using the project's Python environment (its path is machine-specific; see `AGENTS.local.md`), run `ruff --select ALL --no-cache` on each Python file edited. Fix all listed problems. Then run pyright on each Python file edited. Fix all listed problems.
+* After completing each of the user's requests that involves a Python code change, using the project's Python environment (its path is machine-specific; see `AGENTS.local.md`), run `ruff check --no-cache` on each Python file edited (`pyproject.toml` selects every rule, so do not pass `--select`, which would override its `ignore` list). Fix all listed problems. Then run pyright on each Python file edited. Fix all listed problems.
 * Each Python function, method, class, and the module should have a complete Google docstring including descriptions of inputs, output, and any exceptions raised.
 * When writing free-form text (readme, documentation, or comments), do NOT use em-dashes.
 
@@ -153,7 +153,7 @@ which is untracked. In a fresh clone, create one before running the commands bel
 Dependency groups are `ui`, `eval`, `notebook`, `lint`, and `docs`.
 
 ```bash
-ruff check --select ALL --no-cache <file>
+ruff check --no-cache <file>
 python -m pyright --pythonpath <python executable> <file>
 
 pytest -m "not db_integration"   # unit tests, no external services

@@ -70,7 +70,7 @@ tests/
 Per the project conventions, after any Python change:
 
 ```bash
-ruff check --select ALL --no-cache <file>
+ruff check --no-cache <file>
 python -m pyright --pythonpath <python executable> <file>
 ```
 

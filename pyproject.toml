@@ -78,6 +78,17 @@ build-backend = "uv_build"
 # not uv_build's default src/ layout.
 module-root = ""
 
+[tool.ruff.lint]
+# Every rule, so `ruff check` needs no --select; a CLI --select would override `ignore`.
+select = ["ALL"]
+ignore = [
+    # The BSD 3-Clause LICENSE file covers copyright; a per-file notice adds nothing.
+    "CPY001",
+    # Each conflicts with a rule kept (D211, D212); ruff dropped these two anyway.
+    "D203",
+    "D213",
+]
+
 [tool.pytest.ini_options]
 markers = [
     "db_integration: needs a real Postgres reachable via PGSQL_RW_DB_URL/PGSQL_RO_DB_URL with the bh_agent_rw/bh_agent_ro roles granted (see blue_horizon/load_data/regrant_booking_agent_role.sql); tests/api/test_app.py additionally needs REDIS_URL and OPENAI_API_KEY to start the real app. Excluded from the default run; see .github/workflows/ci.yml's db-integration-tests job.",

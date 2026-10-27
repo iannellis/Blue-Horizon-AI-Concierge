@@ -64,11 +64,8 @@ docs = [
     "mkdocs-material (>=9.5.0,<10.0.0)",
     # Pulls in griffe, which reads the source statically rather than importing
     # it -- so a docs build needs no runtime dependencies and no credentials.
-    "mkdocstrings[python] (>=0.27.0,<1.0.0)",
-    # 12.2 made `md` a required argument of pymdownx.highlight.Highlight, which
-    # mkdocstrings 0.x subclasses without passing it, so every page with a
-    # ::: directive fails to render.
-    "pymdown-extensions (>=10.0,<12.2)",
+    "mkdocstrings[python] (>=1.0.0,<2.0.0)",
+    "pymdown-extensions (>=10.0,<13.0)",
 ]
 
 [build-system]

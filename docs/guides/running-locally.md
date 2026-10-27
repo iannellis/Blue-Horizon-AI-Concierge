@@ -11,7 +11,30 @@
 uv sync --group ui
 ```
 
-Add `--all-groups` to install the eval, notebook, and lint groups as well.
+The project's dependency groups, from `pyproject.toml`:
+
+| Group | Needed for |
+|---|---|
+| `ui` | The Streamlit UI. Required to run the app |
+| `eval` | The evaluation harness, stress test, and the test suite |
+| `notebook` | The exploration notebooks |
+| `lint` | `ruff` and `pyright` |
+| `docs` | Building this site |
+
+Pass `--group` once per group, or `--all-groups` to install all of them.
+
+By default `uv sync` creates a `.venv/` in the repository root. To use an environment
+kept elsewhere, point `UV_PROJECT_ENVIRONMENT` at it first, or `uv sync` will create a
+stray `.venv/` next to the code instead:
+
+```bash
+export UV_PROJECT_ENVIRONMENT=/path/to/env
+uv sync --group ui
+```
+
+If `VIRTUAL_ENV` is set to a different environment, `uv` prints a mismatch warning. It is
+harmless. Either activate the environment and run the commands below directly, or prefix
+each with `uv run`.
 
 Set the environment variables described in [Configuration](configuration.md) in a `.env`
 file at the project root. Both the API and the UI read it.

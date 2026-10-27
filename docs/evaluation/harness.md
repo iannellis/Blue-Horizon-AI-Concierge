@@ -91,9 +91,18 @@ eval/
 | `NEON_API_KEY` | Yes | Neon management API key (branch reset) |
 | `REDIS_URL` | Yes | Redis connection URL (agent cache) |
 
+CI installs the pinned list with pip. Locally, use uv instead:
+
 ```bash
+# CI
 pip install -r eval/requirements.txt
+
+# Local
+uv sync --group ui --group eval
 ```
+
+`eval/requirements.txt` is generated from `uv.lock`; see
+[Updating the pinned requirements files](../guides/deployment.md#updating-the-pinned-requirements-files).
 
 The `_EVAL`-suffixed database URLs are copied onto their plain-named counterparts early
 in `main()`, before the first `load_app_config()` call. That ordering matters: CI only

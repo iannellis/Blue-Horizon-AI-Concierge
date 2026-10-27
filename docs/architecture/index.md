@@ -53,7 +53,7 @@ ui/
 deploy/                # Docker/deployment configuration
   supervisord.conf     # Runs FastAPI + Streamlit under supervisord
   generate_secrets.py  # Writes Streamlit secrets from HF Space env vars
-  requirements.txt     # Pinned production dependencies
+  requirements.txt     # Pinned production dependencies, generated from uv.lock
 
 eval/                  # Evaluation framework
 

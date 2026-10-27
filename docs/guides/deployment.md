@@ -106,6 +106,26 @@ Secrets, set on the `CI` environment:
 
 Variables: `LANGSMITH_TRACING`, `LANGCHAIN_PROJECT`, `HF_SPACE`.
 
+## Updating the pinned requirements files
+
+`deploy/requirements.txt` (the `ui` group, installed by the `Dockerfile`) and
+`eval/requirements.txt` (the `ui` and `eval` groups, installed by the CI workflows) are
+generated from `uv.lock`. Do not edit them by hand. After changing dependencies in
+`pyproject.toml`, refresh the lock file and regenerate both:
+
+```bash
+uv lock
+uv run python scripts/export_requirements.py
+```
+
+Commit the changed `uv.lock` and both `requirements.txt` files together.
+
+Use the script rather than a bare `uv export`. `uv export` includes the project itself by
+default, but the image copies only `blue_horizon/` and `ui/`, not `pyproject.toml` or the
+build backend, so pip would be handed a package it cannot build and the image build would
+fail. The script passes `--no-emit-project` to prevent that. To change which groups go
+into which file, edit `REQUIREMENTS_TARGETS` in `scripts/export_requirements.py`.
+
 ## The documentation site
 
 This site is built with [MkDocs](https://www.mkdocs.org/) and the

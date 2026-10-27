@@ -20,9 +20,9 @@ eval/
 # Secrets — must never enter the image; set these as HF Space secrets instead
 .env
 
-# Poetry / build artefacts — deps are installed from requirements.txt
+# Build artefacts — deps are installed from deploy/requirements.txt
 pyproject.toml
-poetry.lock
+uv.lock
 
 # Data: exclude everything under data. Resets are done via Neon branches.
 data/

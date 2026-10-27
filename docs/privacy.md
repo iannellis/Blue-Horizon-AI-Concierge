@@ -47,7 +47,10 @@ night.
 The demo logs events such as request timings, errors, and model usage to
 [Axiom](https://axiom.co/privacy), a logging service. These logs identify a
 conversation only by a random ID and the fictional guest's number. They never contain
-your name, email address, or messages.
+your name or email address. They do not record your messages or the concierge's
+replies, but they do record the room-search filters a request used (such as dates and
+room type), and a report of an error can include part of what the concierge derived
+from your message.
 
 ## What is not done with it
 

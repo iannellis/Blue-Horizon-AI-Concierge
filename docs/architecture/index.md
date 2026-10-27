@@ -162,7 +162,11 @@ reached the database carries `duration_ms`, spanning its retries, so a cold data
 start shows there. A confirm that attempted a write carries `action` and
 `duration_ms`; a replayed confirm writes nothing and carries neither.
 
-Guest messages, model replies, and `search_rooms` result rooms are never logged.
+Guest messages, model replies, and `search_rooms` result rooms are never logged. An
+error's traceback can still carry model output: a structured-output validation failure,
+or LangChain failing to parse tool arguments, puts the values the model produced in the
+exception text, and for the information agent those are search queries reworded from
+the guest's message.
 
 The UI logs at `INFO` under the `ui.app` logger: failed or timed-out chat requests,
 failures to reach the API, and unexpected confirm statuses. Each line names the

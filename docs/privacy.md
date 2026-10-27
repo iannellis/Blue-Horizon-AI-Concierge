@@ -75,6 +75,8 @@ including its Limited Use requirements.
 Questions about this policy can be raised as an issue on the project's
 [GitHub repository](https://github.com/iannellis/Blue-Horizon-AI-Concierge/issues).
 
+Use of the demo is also covered by the [terms of service](terms.md).
+
 ## Changes
 
 If this policy changes, the date at the top of this page will change with it.

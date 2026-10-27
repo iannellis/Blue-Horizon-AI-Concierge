@@ -103,6 +103,7 @@ nav:
       - Booking Agent: reference/booking.md
       - API and Config: reference/api.md
   - Privacy Policy: privacy.md
+  - Terms of Service: terms.md
 
 extra:
   social:

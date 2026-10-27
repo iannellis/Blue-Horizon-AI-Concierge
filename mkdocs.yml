@@ -102,6 +102,7 @@ nav:
       - Information Agent: reference/information.md
       - Booking Agent: reference/booking.md
       - API and Config: reference/api.md
+  - Privacy Policy: privacy.md
 
 extra:
   social:

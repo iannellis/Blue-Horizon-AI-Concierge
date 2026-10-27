@@ -60,6 +60,8 @@ _SERVICE_NAME = "blue-horizon-ui"
 # The SDK names its batch export thread with this prefix.
 _EXPORT_THREAD_PREFIX = "OtelBatch"
 
+_PRIVACY_POLICY_URL = "https://iannellis.github.io/Blue-Horizon-AI-Concierge/privacy/"
+
 _API_BASE: str = os.getenv("BLUE_HORIZON_API_URL", "http://127.0.0.1:8000").rstrip("/")
 _AUTH_ENABLED: bool = bool(os.getenv("GOOGLE_CLIENT_ID"))
 _CHAT_TIMEOUT_S: float = 90.0
@@ -791,6 +793,11 @@ def _render_login_page() -> None:
         "Sign in with Google",
         on_click=st.login,
         use_container_width=True,
+    )
+    st.caption(
+        "Your name and email are used only to show who is signed in and to count "
+        "your messages against the hourly limit. See the "
+        f"[privacy policy]({_PRIVACY_POLICY_URL}).",
     )
 
 

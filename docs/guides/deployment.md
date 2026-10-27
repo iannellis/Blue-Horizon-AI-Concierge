@@ -28,6 +28,8 @@ carries the block.
 `deploy/.streamlit/config.toml` disables Streamlit's CORS and XSRF checks. The Space
 serves the app through HuggingFace's own proxy, whose origin does not match the one
 Streamlit sees, and with the checks on, requests fail with origin-mismatch errors.
+It also turns off Streamlit's usage statistics, which visitors' browsers would
+otherwise send to Streamlit; the [privacy policy](../privacy.md) says no trackers run.
 
 Optional Google OAuth can be enabled by setting `GOOGLE_CLIENT_ID`,
 `GOOGLE_CLIENT_SECRET`, and `COOKIE_SECRET` as HuggingFace Space secrets.

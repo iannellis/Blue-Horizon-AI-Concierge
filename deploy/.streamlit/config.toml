@@ -4,3 +4,7 @@ port = 8501
 # Disable CORS and XSRF checks behind the HuggingFace Space proxy.
 enableCORS = false
 enableXsrfProtection = false
+
+[browser]
+# Visitors' browsers would otherwise send usage telemetry to Streamlit.
+gatherUsageStats = false

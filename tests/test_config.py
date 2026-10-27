@@ -21,6 +21,9 @@ EXPECTED_MAX_SEARCH_RESULTS = 15
 EXPECTED_DATA_PATH = Path("data/pandas")
 EXPECTED_PROPOSAL_TTL_S = 1800.0
 EXPECTED_SEEDED_CUSTOMER_COUNT = 15
+EXPECTED_MAX_MESSAGE_CHARS = 500
+EXPECTED_MAX_TURNS_PER_HOUR = 7
+EXPECTED_DEFAULT_MAX_HISTORY_TURNS = 10
 
 SAMPLE_APP_CONFIG: dict[str, object] = {
     "orchestration": {
@@ -63,6 +66,10 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
                 "its own. Please check back later."
             ),
         },
+    },
+    "chat": {
+        "max_message_chars": EXPECTED_MAX_MESSAGE_CHARS,
+        "max_turns_per_hour": EXPECTED_MAX_TURNS_PER_HOUR,
     },
     "info": {
         "retrieval": {
@@ -167,6 +174,12 @@ def test_parse_app_config_from_dict() -> None:
         == EXPECTED_SEEDED_CUSTOMER_COUNT
     )
     assert cfg.logging.quiet_loggers == ("httpx",)
+    assert cfg.chat.max_message_chars == EXPECTED_MAX_MESSAGE_CHARS
+    assert cfg.chat.max_turns_per_hour == EXPECTED_MAX_TURNS_PER_HOUR
+    assert (
+        cfg.orchestration.orchestration.max_history_turns
+        == EXPECTED_DEFAULT_MAX_HISTORY_TURNS
+    )
 
 
 def test_default_search_results_cannot_exceed_maximum() -> None:
@@ -198,6 +211,9 @@ def test_load_packaged_app_config() -> None:
     assert cfg.orchestration.messages.unavailable
     assert cfg.orchestration.messages.failed
     assert cfg.orchestration.orchestration.unavailable_retry_after_s > 0
+    assert cfg.orchestration.orchestration.max_history_turns > 0
+    assert cfg.chat.max_message_chars > 0
+    assert cfg.chat.max_turns_per_hour > 0
     assert cfg.info.redis.health_check_interval_s > 0
     assert (
         0

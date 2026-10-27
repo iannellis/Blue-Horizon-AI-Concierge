@@ -404,6 +404,11 @@ class OrchestrationRuntimeConfig(FrozenModel):
             or `FAILED`). Short by design: the init loop keeps retrying in
             both states, so a client polling at this interval sees a
             transient outage recover on its own.
+        max_history_turns: Most completed guest turns a thread's history
+            keeps. Older turns are dropped when each turn finalizes, so the
+            router and sub-agents see at most this many earlier turns plus
+            the current message, which bounds the tokens a long
+            conversation adds to every call.
 
     """
 
@@ -414,6 +419,7 @@ class OrchestrationRuntimeConfig(FrozenModel):
     booking_timeout_s: float
     llm_concurrency: Annotated[int, Field(ge=1)] = 10
     unavailable_retry_after_s: Annotated[float, Field(gt=0.0)] = 5.0
+    max_history_turns: PositiveInt = 10
 
 
 class OrchestrationPromptsConfig(FrozenModel):
@@ -474,6 +480,26 @@ class OrchestrationConfig(FrozenModel):
     messages: MessagesConfig
 
 
+class ChatConfig(FrozenModel):
+    """Limits on what one visitor may send through the chat.
+
+    The UI reads this section straight from the TOML file, since it imports
+    no `blue_horizon` code, so these keys are a contract with `ui/app.py`.
+
+    Attributes:
+        max_message_chars: Longest message `/v1/chat` accepts. The UI's
+            input box stops at the same length, so a guest never reaches
+            the API's rejection.
+        max_turns_per_hour: Most messages one visitor may send in any
+            rolling hour. Enforced by the UI, the only component that knows
+            who the visitor is; the API never reads it.
+
+    """
+
+    max_message_chars: PositiveInt
+    max_turns_per_hour: PositiveInt
+
+
 class AxiomLoggingConfig(FrozenModel):
     """Endpoint and batching for the API's log shipping to Axiom.
 
@@ -529,6 +555,7 @@ class AppConfig(BaseSettings):
 
     Attributes:
         orchestration: Router/orchestrator settings.
+        chat: Per-message and per-visitor chat limits.
         info: Information agent settings.
         booking: Booking agent settings.
         load_data: Data ingestion settings for local loaders.
@@ -567,6 +594,7 @@ class AppConfig(BaseSettings):
     )
 
     orchestration: OrchestrationConfig
+    chat: ChatConfig
     info: InfoRagConfig
     booking: BookingSqlConfig
     load_data: LoadDataConfig

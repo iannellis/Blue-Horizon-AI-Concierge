@@ -389,10 +389,12 @@ async def chat(payload: ChatPayload, request: Request) -> Response:
         otherwise.
 
     Raises:
-        HTTPException: 409 if `thread_id` is already bound to a different
-            `customer_id`.
+        HTTPException: 422 if `text` is longer than
+            `[chat].max_message_chars`; 409 if `thread_id` is already bound
+            to a different `customer_id`.
 
     """
+    _check_message_length(payload.text)
     if not orchestrator.is_ready:
         return _not_ready_response()
 
@@ -422,6 +424,29 @@ async def chat(payload: ChatPayload, request: Request) -> Response:
     if proposal is not None:
         response["proposal"] = _proposal_event(proposal)
     return JSONResponse(response)
+
+
+def _check_message_length(text: str) -> None:
+    """Reject a chat message longer than the configured cap.
+
+    Checked before readiness, since an oversized message is wrong whatever
+    state the orchestrator is in, and before any model call, since the cap
+    exists to bound what one message can cost.
+
+    Args:
+        text: The guest's message text.
+
+    Raises:
+        HTTPException: 422 if `text` is longer than
+            `[chat].max_message_chars`.
+
+    """
+    max_chars = load_app_config().chat.max_message_chars
+    if len(text) > max_chars:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Message is longer than {max_chars} characters.",
+        )
 
 
 async def _event_stream(payload: ChatPayload) -> AsyncGenerator[str]:

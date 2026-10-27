@@ -7,7 +7,8 @@ The file is structured into sections that map to the Pydantic models in
 
 | Section | Controls |
 |---------|----------|
-| `[orchestration]` | Router LLM, timeouts, retry backoff, concurrency limit |
+| `[orchestration]` | Router LLM, timeouts, retry backoff, concurrency limit, history length |
+| `[chat]` | The longest message a guest may send, and how many messages one visitor may send per hour |
 | `[info]` | Information agent LLM, embeddings model, Redis tuning, retrieval `top_k` |
 | `[booking]` | Booking agent LLM, search bounds, DB pool settings |
 | `[booking.proposals]` | `ttl_s`, how long an unconfirmed proposal stays in the in-process store before it is purged |
@@ -23,6 +24,27 @@ Neon branch management (project ID, branch name, reset tuning) lives entirely in
 **`[orchestration.orchestration].llm_concurrency`** (default 15) caps concurrent LLM
 pipeline executions. It prevents tokens-per-minute exhaustion under high concurrency,
 which otherwise fails every in-flight request at once rather than making a few wait.
+
+**`[orchestration.orchestration].max_history_turns`** (default 10) is how many completed
+guest turns a thread's history keeps. The router and the chosen sub-agent are sent the
+whole history on every turn, so without a cap each message in a long conversation costs
+more than the one before it. Older turns are dropped when each turn finalizes, which
+means a guest who refers back further than this is asking about something the
+concierge no longer sees. See
+[Orchestration](../architecture/orchestration.md#history-length).
+
+**`[chat]`** bounds what one visitor can spend on the model provider. Both the API and
+the UI use it. Like `[logging.axiom]`, the UI reads it straight from the TOML file, so
+renaming a key breaks the UI even though the API's typed config would still load.
+
+- `max_message_chars` (default 1000) is the longest message `/v1/chat` accepts. A longer
+  one gets a `422` before any model call. The UI's input box stops at the same length,
+  so a guest never sees that rejection.
+- `max_turns_per_hour` (default 10) is how many messages one visitor may send in any
+  rolling hour, a resend included. Only the UI enforces it, since only the UI knows who
+  the visitor is: a signed-in visitor is counted by Google account, and without auth,
+  by session. The API never reads this key. See
+  [Architecture](../architecture/index.md#usage-limits).
 
 **`[booking.agent].default_search_results`** (default 4) is how many rooms one
 `search_rooms` call returns when the model does not set `limit`. The result also carries

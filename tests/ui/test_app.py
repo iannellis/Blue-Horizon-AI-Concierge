@@ -14,7 +14,8 @@ a full Streamlit AppTest harness to exercise meaningfully, which is out of
 scope for this module. The guest claim registry it calls into
 (`_try_claim_guest`, `_touch_claim`, `_release_claim`) is plain module
 state guarded by a lock, with no widget dependency, so it is covered here
-directly.
+directly, as is the hourly turn limit registry (`_reserve_turn`,
+`_turn_limit_reset_at`) built the same way.
 
 The entire module is skipped if streamlit is not installed in the current
 environment (it lives in the optional ``ui`` dependency group).
@@ -45,6 +46,7 @@ from ui.app import (  # noqa: E402
     ChatTurnResult,
     _axiom_config,
     _axiom_exporter,
+    _chat_limits,
     _check_health,
     _configure_logging,
     _confirm_proposal,
@@ -62,10 +64,14 @@ from ui.app import (  # noqa: E402
     _render_book_summary,
     _render_cancel_summary,
     _render_modify_summary,
+    _reserve_turn,
+    _sent_turns,
     _shipping_handler,
     _stream_message,
     _touch_claim,
     _try_claim_guest,
+    _turn_limit_reset_at,
+    _visitor_key,
 )
 
 # ---------------------------------------------------------------------------
@@ -931,6 +937,80 @@ class TestGuestClaimRegistry:
     def test_release_none_is_a_no_op(self) -> None:
         """Releasing `None` (no claim ever held) does not raise."""
         _release_claim(None)
+
+
+# ---------------------------------------------------------------------------
+# Turn limit registry
+# ---------------------------------------------------------------------------
+
+
+class TestTurnLimitRegistry:
+    """_reserve_turn / _turn_limit_reset_at cap each visitor's hourly turns."""
+
+    def setup_method(self) -> None:
+        """Start each test with an empty turn registry."""
+        _sent_turns.clear()
+
+    def teardown_method(self) -> None:
+        """Leave no turns behind for the next test."""
+        _sent_turns.clear()
+
+    def test_limits_come_from_the_api_config(self) -> None:
+        """The UI reads the same `[chat]` section the API's typed config does."""
+        limits = _chat_limits()
+        assert limits.max_message_chars > 0
+        assert limits.max_turns_per_hour > 0
+
+    def test_reserves_up_to_the_limit_then_refuses(self) -> None:
+        """Exactly `max_turns_per_hour` turns are granted within the window."""
+        limit = _chat_limits().max_turns_per_hour
+        granted = [_reserve_turn("visitor-a") for _ in range(limit)]
+        assert all(granted)
+        assert _reserve_turn("visitor-a") is False
+        assert len(_sent_turns["visitor-a"]) == limit
+
+    def test_reset_at_is_when_the_oldest_turn_ages_out(self) -> None:
+        """A visitor at the limit gets a turn back an hour after their oldest."""
+        assert _turn_limit_reset_at("visitor-a") is None
+        oldest = datetime.now(UTC) - timedelta(minutes=50)
+        limit = _chat_limits().max_turns_per_hour
+        _sent_turns["visitor-a"] = [oldest] * limit
+        assert _turn_limit_reset_at("visitor-a") == oldest + timedelta(hours=1)
+
+    def test_turns_older_than_an_hour_are_swept(self) -> None:
+        """Turns outside the window no longer count, and empty visitors are dropped."""
+        stale = datetime.now(UTC) - timedelta(hours=1, seconds=1)
+        _sent_turns["visitor-a"] = [stale] * _chat_limits().max_turns_per_hour
+        _sent_turns["visitor-b"] = [stale]
+        assert _reserve_turn("visitor-a") is True
+        assert len(_sent_turns["visitor-a"]) == 1
+        assert "visitor-b" not in _sent_turns
+
+    def test_visitors_are_counted_separately(self) -> None:
+        """One visitor at the limit does not limit another."""
+        limit = _chat_limits().max_turns_per_hour
+        _sent_turns["visitor-a"] = [datetime.now(UTC)] * limit
+        assert _reserve_turn("visitor-b") is True
+
+    def test_signed_in_visitor_is_keyed_by_account(self) -> None:
+        """With auth on, every tab of one Google account shares one allowance."""
+        with (
+            patch("ui.app._AUTH_ENABLED", new=True),
+            patch("ui.app.st") as mock_st,
+        ):
+            mock_st.user.is_logged_in = True
+            mock_st.user.email = "guest@example.com"
+            mock_st.session_state.session_id = "session-a"
+            assert _visitor_key() == "user:guest@example.com"
+
+    def test_anonymous_visitor_is_keyed_by_session(self) -> None:
+        """Without auth, the session id is all there is to count by."""
+        with (
+            patch("ui.app._AUTH_ENABLED", new=False),
+            patch("ui.app.st") as mock_st,
+        ):
+            mock_st.session_state.session_id = "session-a"
+            assert _visitor_key() == "session:session-a"
 
 
 # ---------------------------------------------------------------------------

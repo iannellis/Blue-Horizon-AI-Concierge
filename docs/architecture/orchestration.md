@@ -110,6 +110,20 @@ router never reads an apology in history as something the concierge said. See
 [Design Goals and Decisions](../design-decisions.md#a-failed-turn-was-reported-as-a-successful-one)
 for the reasoning.
 
+## History length
+
+`finalize` also caps how much history a thread keeps. After dropping tool chatter and
+any failed turn, it keeps only the most recent
+`[orchestration.orchestration].max_history_turns` completed turns (default 10), so the
+router and the sub-agent on the next turn see at most that many earlier turns plus the
+new message. Every turn resends the whole history to both, so without the cap the cost
+of a message grows with the length of the conversation. A failed turn is dropped before
+the cap is applied, so it never pushes a completed turn out.
+
+The cap applies to what the model sees, not to what the guest sees: the UI keeps its own
+copy of the conversation and still shows every message. Bookings are unaffected, since
+`list_my_bookings` reads them from the database rather than from history.
+
 ## Readiness
 
 `OrchestrationManager` tracks a three-state `Readiness` enum, not a boolean, because

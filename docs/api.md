@@ -28,6 +28,10 @@ on `/v1/chat`.
 `thread_id` is bound to whichever `customer_id` first uses it. A later request reusing
 that `thread_id` under a different `customer_id` is rejected with `409 Conflict`.
 
+`text` longer than `[chat].max_message_chars` (default 1000) is rejected with
+`422 Unprocessable Entity` on both content-negotiated branches, before the readiness
+check and before any model call. `detail` names the limit.
+
 ## Readiness (503)
 
 Both content-negotiated branches of `/v1/chat` are gated on the orchestrator's
@@ -168,6 +172,7 @@ identically is what this API is deliberately designed to avoid:
 | Response | Retryable? | Why |
 |---|---|---|
 | `/v1/chat` `503` | Yes, after `retry_after_s` | Nothing ran; the init loop keeps retrying regardless of `status` |
+| `/v1/chat` `422` | No, not with the same text | The message is over `[chat].max_message_chars`; nothing ran |
 | `/v1/customers`, `/v1/bookings` `503` | Yes, after `Retry-After` | The startup window, or an unreachable database. Both are idempotent reads |
 | Mid-stream `error` event, or JSON `502`/`503`/`504` | Yes for `timeout`, `internal`, and `unavailable`; no for `thread_mismatch` | The failed turn is dropped from history and its proposal invalidated, so resending the same text is safe. The system never resends on its own: the guest decides |
 | Confirm `503` | Yes - the proposal is still pending | Nothing was decided; see the table above |

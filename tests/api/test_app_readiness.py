@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Iterator
 
 _HTTP_OK = 200
+_HTTP_UNPROCESSABLE = 422
 _HTTP_BAD_GATEWAY = 502
 _HTTP_SERVICE_UNAVAILABLE = 503
 _HTTP_GATEWAY_TIMEOUT = 504
@@ -227,6 +228,46 @@ class TestDataEndpointsDatabaseUnreachable:
 # ---------------------------------------------------------------------------
 # /v1/chat failed turns
 # ---------------------------------------------------------------------------
+
+
+class TestChatMessageLength:
+    """`/v1/chat` rejects a message over `[chat].max_message_chars` unsent."""
+
+    @pytest.mark.parametrize("accept", ["application/json", "text/event-stream"])
+    def test_oversized_message_returns_422_before_any_model_call(
+        self, client: TestClient, mock_orchestrator: MagicMock, accept: str,
+    ) -> None:
+        """Both branches refuse it before readiness or the orchestrator."""
+        mock_orchestrator.is_ready = True
+        max_chars = app_module.load_app_config().chat.max_message_chars
+
+        response = client.post(
+            "/v1/chat",
+            json={"thread_id": "t1", "customer_id": 1, "text": "x" * (max_chars + 1)},
+            headers={"Accept": accept},
+        )
+
+        assert response.status_code == _HTTP_UNPROCESSABLE
+        assert str(max_chars) in response.json()["detail"]
+        mock_orchestrator.ainvoke.assert_not_called()
+        mock_orchestrator.ainvoke_stream.assert_not_called()
+
+    def test_message_at_the_cap_is_accepted(
+        self, client: TestClient, mock_orchestrator: MagicMock,
+    ) -> None:
+        """The cap is inclusive: a message of exactly that length is sent."""
+        mock_orchestrator.is_ready = True
+        mock_orchestrator.ainvoke = AsyncMock(
+            return_value={"messages": [], "turn_error": "internal"},
+        )
+        max_chars = app_module.load_app_config().chat.max_message_chars
+
+        client.post(
+            "/v1/chat",
+            json={"thread_id": "t1", "customer_id": 1, "text": "x" * max_chars},
+        )
+
+        mock_orchestrator.ainvoke.assert_awaited_once()
 
 
 class TestChatFailedTurn:

@@ -87,6 +87,31 @@ docs/                  # This documentation site
 
 See the [API Reference](../api.md) for the wire-level detail.
 
+## Usage limits
+
+Three limits bound what one visitor can spend on the model provider. Each is
+enforced by the component that has the information to enforce it.
+
+| Limit | Default | Enforced by |
+|---|---|---|
+| Message length (`[chat].max_message_chars`) | 1000 characters | The UI's input box, and `/v1/chat` with a `422` |
+| Messages per visitor per rolling hour (`[chat].max_turns_per_hour`) | 10 | The UI |
+| Turns of history the model sees (`[orchestration.orchestration].max_history_turns`) | 10 | `finalize`; see [Orchestration](orchestration.md#history-length) |
+
+The hourly limit lives in the UI because the API sees only a `thread_id` and a
+`customer_id`, and neither names the visitor: a **New Conversation** click makes a
+new thread, and a guest goes back to the pool for the next visitor. The UI counts a
+signed-in visitor by Google account, so a second tab does not grant a second
+allowance. Without auth it counts by session, whose id survives a hard refresh
+through the `sid` URL parameter. Like the guest claim registry, the count is held in
+the Streamlit process and resets when it restarts. Every message sent counts, a resend
+included, whether or not the turn then completes. A visitor at the limit sees how
+many minutes remain, and the input re-enables on its own once a message ages out of
+the hour.
+
+These bound one visitor's spend, not the total. The hard ceiling on total spend is
+the monthly budget on the deployment's OpenAI project, set outside this codebase.
+
 ## Logging
 
 Both processes log to stderr, which `supervisord` forwards to the container log. The

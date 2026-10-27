@@ -783,6 +783,32 @@ per run, and the baseline was reset from them. The metric reads the same 100% as
 but it now holds the agent to every label instead of only to the turns expected to
 succeed.
 
+### Opening the demo to the public needed a cap on what one visitor can spend
+
+**Status:** adopted, adding `[chat]` and `[orchestration.orchestration].max_history_turns`.
+
+The deployed demo was gated by a Google OAuth allow-list, which kept usage to a few
+known people and so hid the fact that nothing bounded what one of them could spend.
+Opening it to anyone exposed three costs that grew without limit. A message could be any
+length. A visitor could send any number of them. And because each turn resends the
+whole history to the router and a sub-agent, every message in a long conversation cost
+more than the one before it. `llm_concurrency` did not help: it caps how many turns run
+at once, not how many one visitor sends.
+
+**Each limit sits where the information to enforce it lives.** The API rejects an
+oversized message with a `422`, and the UI's input box stops at the same length, so the
+cap holds even for a client that is not the UI. History is trimmed in `finalize`, the
+node that already rewrites history on every turn. The hourly turn limit is enforced in
+the UI alone, because the API cannot tell who is sending: a `thread_id` changes with
+every new conversation, and a `customer_id` passes to the next visitor when a guest
+claim expires, so a limit keyed on either would be either easy to reset or charged to
+the wrong person. The UI counts a signed-in visitor by Google account, so opening a
+second tab does not grant a second allowance.
+
+None of these caps total spend. That is the job of the monthly budget on the
+deployment's OpenAI project, which lives outside the codebase and stops the bill even
+if every limit here were bypassed.
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 _FACTORY_LOGGER = "blue_horizon.agents.orchestration.factory"
 _SHORT_TIMEOUT_S = 0.05
 _HANG_S = 5.0
+_MAX_HISTORY_TURNS = 2
 
 
 class _FakeRouter:
@@ -130,6 +131,7 @@ def _build_graph(router: _FakeRouter, sub_agent: _FakeSubAgent) -> CompiledState
             router_timeout_s=_SHORT_TIMEOUT_S,
             info_timeout_s=_SHORT_TIMEOUT_S,
             booking_timeout_s=_SHORT_TIMEOUT_S,
+            max_history_turns=_MAX_HISTORY_TURNS,
         ),
     )
     resources = SimpleNamespace(
@@ -407,6 +409,28 @@ class TestFailedTurn:
             "Tell me about your concert hall.",
             "Here you go.",
         ]
+
+
+class TestHistoryTrim:
+    """History keeps only the most recent `max_history_turns` completed turns."""
+
+    def test_oldest_turns_are_dropped_past_the_cap(self) -> None:
+        """A third turn pushes the first out of a two-turn history."""
+        graph = _build_graph(_FakeRouter(), _FakeSubAgent())
+        for text in ("First", "Second", "Third"):
+            state = _run_turn(graph, text)
+        assert _contents(state) == ["Second", "Here you go.", "Third", "Here you go."]
+
+    def test_failed_turn_does_not_count_toward_the_cap(self) -> None:
+        """A dropped failure leaves the completed turns before it in place."""
+        sub_agent = _FakeSubAgent()
+        graph = _build_graph(_FakeRouter(), sub_agent)
+        _run_turn(graph, "First")
+        _run_turn(graph, "Second")
+        sub_agent.fail = True
+        state = _run_turn(graph, "Third")
+        assert state["turn_error"] == "internal"
+        assert _contents(state) == ["First", "Here you go.", "Second", "Here you go."]
 
 
 class TestGroupTurns:

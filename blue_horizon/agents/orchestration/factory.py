@@ -226,6 +226,11 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
         concierge said, and a guest resending the same text would otherwise
         leave the unanswered question in history twice.
 
+        Only the most recent ``max_history_turns`` completed turns are kept.
+        History is resent to the router and a sub-agent on every turn, so
+        without a cap each message in a long conversation would cost more
+        than the one before it.
+
         Args:
             state: Current conversation state.
 
@@ -244,10 +249,10 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
             turn_error = turn_error or "internal"
             turns.pop()
 
+        completed = [(human, replies) for human, replies in turns if replies]
         kept: list[BaseMessage] = []
-        for human, replies in turns:
-            if replies:
-                kept.extend([human, *replies])
+        for human, replies in completed[-cfg.orchestration.max_history_turns :]:
+            kept.extend([human, *replies])
 
         patch: dict[str, Any] = {
             "messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES), *kept],

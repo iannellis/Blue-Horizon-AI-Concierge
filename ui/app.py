@@ -19,8 +19,10 @@ Environment variables:
 from __future__ import annotations
 
 import dataclasses
+import functools
 import json
 import logging
+import math
 import os
 import secrets
 import threading
@@ -74,6 +76,9 @@ _HTTP_CONFLICT: int = 409
 _HTTP_SERVICE_UNAVAILABLE: int = 503
 _HEALTH_POLL_ONLINE_INTERVAL_S: int = 30
 _HEALTH_POLL_OFFLINE_INTERVAL_S: int = 5
+# How often a visitor at the hourly turn limit is checked for having a turn
+# back, so the chat input re-enables without their having to click anything.
+_TURN_LIMIT_POLL_INTERVAL_S: int = 30
 # How long an assigned guest stays reserved for a session with no activity --
 # covers both an idle-but-open tab and one that was simply closed, since a
 # closed tab produces no further reruns to refresh the claim either way.
@@ -607,6 +612,147 @@ def _persist_guest_identity(customer_id: int) -> None:
     """
     st.query_params["sid"] = st.session_state.session_id
     st.query_params["cid"] = str(customer_id)
+
+
+# ============================
+# Turn limit registry
+# ============================
+#
+# Held in this process for the same reason as the guest claim registry above.
+# It bounds what one visitor can spend on the model provider, so it is keyed
+# by who is sending, not by guest or thread: a "New Conversation" click makes
+# a fresh thread, and the guest returns to the pool for the next visitor.
+
+
+@dataclasses.dataclass(frozen=True)
+class _ChatLimits:
+    """The ``[chat]`` limits shared with the API.
+
+    Attributes:
+        max_message_chars: Longest message the input box accepts.
+        max_turns_per_hour: Most messages one visitor may send in any
+            rolling hour.
+
+    """
+
+    max_message_chars: int
+    max_turns_per_hour: int
+
+
+_TURN_LIMIT_WINDOW = timedelta(hours=1)
+_sent_turns: dict[str, list[datetime]] = {}
+_sent_turns_lock = threading.Lock()
+
+
+@functools.cache
+def _chat_limits() -> _ChatLimits:
+    """Read the API's ``[chat]`` limits from its config file, once.
+
+    Returns:
+        _ChatLimits: The message length cap and the hourly turn limit.
+
+    Raises:
+        OSError: If `_APP_CONFIG_PATH` cannot be read.
+        KeyError: If the file has no ``[chat]`` section, or it lacks a key.
+
+    """
+    data = tomllib.loads(_APP_CONFIG_PATH.read_text(encoding="utf-8"))
+    chat = data["chat"]
+    return _ChatLimits(
+        max_message_chars=int(chat["max_message_chars"]),
+        max_turns_per_hour=int(chat["max_turns_per_hour"]),
+    )
+
+
+def _visitor_key() -> str:
+    """Identify who is sending, for the hourly turn limit.
+
+    A signed-in visitor is counted by Google account, so opening a second tab
+    does not grant a second allowance. Without auth the session is all there
+    is to go on; its id survives a hard refresh through the ``sid`` URL
+    param, so a refresh does not reset the count either.
+
+    Returns:
+        str: A key naming the account or, failing that, the session.
+
+    """
+    if _AUTH_ENABLED and st.user.is_logged_in and st.user.email:
+        return f"user:{st.user.email}"
+    return f"session:{st.session_state.session_id}"
+
+
+def _turn_limit_reset_at(visitor: str) -> datetime | None:
+    """Report when a visitor at the hourly limit may send again.
+
+    Args:
+        visitor: Key from `_visitor_key`.
+
+    Returns:
+        datetime | None: When the oldest turn in the window ages out, or
+        ``None`` if the visitor is under the limit and may send now.
+
+    """
+    with _sent_turns_lock:
+        _sweep_sent_turns_locked()
+        return _reset_at_locked(visitor)
+
+
+def _sweep_sent_turns_locked() -> None:
+    """Drop turns older than the window, and visitors left with none.
+
+    Callers must hold `_sent_turns_lock`.
+
+    """
+    cutoff = datetime.now(UTC) - _TURN_LIMIT_WINDOW
+    for visitor in list(_sent_turns):
+        recent = [sent for sent in _sent_turns[visitor] if sent > cutoff]
+        if recent:
+            _sent_turns[visitor] = recent
+        else:
+            del _sent_turns[visitor]
+
+
+def _reset_at_locked(visitor: str) -> datetime | None:
+    """Return when a swept visitor may send again, as `_turn_limit_reset_at`.
+
+    Callers must hold `_sent_turns_lock` and have just swept the registry.
+
+    Args:
+        visitor: Key from `_visitor_key`.
+
+    Returns:
+        datetime | None: When the oldest turn in the window ages out, or
+        ``None`` if the visitor is under the limit.
+
+    """
+    sent = _sent_turns.get(visitor, [])
+    if len(sent) < _chat_limits().max_turns_per_hour:
+        return None
+    return sent[0] + _TURN_LIMIT_WINDOW
+
+
+def _reserve_turn(visitor: str) -> bool:
+    """Count one turn against a visitor's hourly limit, if they have one left.
+
+    The check and the count happen under one lock, so two tabs of the same
+    signed-in visitor cannot both take the last turn. A turn is counted when
+    it is sent, whether or not it then completes: the model provider is
+    usually paid either way.
+
+    Args:
+        visitor: Key from `_visitor_key`.
+
+    Returns:
+        bool: ``True`` if the turn was counted and may be sent, ``False`` if
+        the visitor is already at the limit.
+
+    """
+    with _sent_turns_lock:
+        _sweep_sent_turns_locked()
+        if _reset_at_locked(visitor) is not None:
+            return False
+        _sent_turns.setdefault(visitor, []).append(datetime.now(UTC))
+        return True
 
 
 # ============================
@@ -1157,7 +1303,12 @@ def _render_pending_resend() -> None:
         return
     st.warning(st.session_state.pending_resend_message)
     online = st.session_state.api_online
-    if st.button("Send again", disabled=not online, use_container_width=True):
+    limited = _turn_limit_reset_at(_visitor_key()) is not None
+    if st.button(
+        "Send again", disabled=not online or limited, use_container_width=True,
+    ):
+        if not _reserve_turn(_visitor_key()):
+            st.rerun()
         with st.chat_message("assistant"):
             _submit_chat_message(prompt)
         st.rerun()
@@ -1176,10 +1327,21 @@ def _render_chat() -> None:
     if st.session_state.pending_proposal is not None:
         _render_proposal_dialog(st.session_state.pending_proposal)
 
+    reset_at = _turn_limit_reset_at(_visitor_key())
+    if reset_at is not None:
+        _render_turn_limit_note(reset_at)
+        _render_turn_limit_poll()
+
     placeholder = "Ask about the hotel, or get help searching or booking rooms..."
     if prompt := st.chat_input(
-        placeholder, disabled=st.session_state.customer_id is None,
+        placeholder,
+        max_chars=_chat_limits().max_message_chars,
+        disabled=st.session_state.customer_id is None or reset_at is not None,
     ):
+        # Checked again here, not only above: another tab of the same
+        # signed-in visitor may have taken the last turn since this render.
+        if not _reserve_turn(_visitor_key()):
+            st.rerun()
         _dismiss_pending_proposal()
         # A new message supersedes any resend still offered for an earlier,
         # failed one -- typing past it means the guest has moved on.
@@ -1192,6 +1354,36 @@ def _render_chat() -> None:
 
         with st.chat_message("assistant"):
             _submit_chat_message(prompt)
+        st.rerun()
+
+
+def _render_turn_limit_note(reset_at: datetime) -> None:
+    """Tell a visitor at the hourly turn limit why they cannot send, and until when.
+
+    Args:
+        reset_at: When the visitor's oldest turn in the window ages out.
+
+    """
+    seconds_left = max((reset_at - datetime.now(UTC)).total_seconds(), 0.0)
+    minutes_left = max(math.ceil(seconds_left / 60), 1)
+    unit = "minute" if minutes_left == 1 else "minutes"
+    st.info(
+        f"You've reached this demo's limit of "
+        f"{_chat_limits().max_turns_per_hour} messages per hour, which keeps "
+        f"it affordable to run in public. You can send another message in "
+        f"about {minutes_left} {unit}.",
+    )
+
+
+@st.fragment(run_every=_TURN_LIMIT_POLL_INTERVAL_S)
+def _render_turn_limit_poll() -> None:
+    """Silently rerun the app once the visitor has a turn back.
+
+    Registered only while the visitor is at the limit, the same pattern as
+    `_render_recovery_poll`: the next full rerun drops the fragment, so
+    polling stops once the chat input is enabled again.
+    """
+    if _turn_limit_reset_at(_visitor_key()) is None:
         st.rerun()
 
 

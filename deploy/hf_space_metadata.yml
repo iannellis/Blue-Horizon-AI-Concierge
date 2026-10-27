@@ -1,0 +1,11 @@
+# HuggingFace Space configuration. The deploy job in .github/workflows/ci.yml
+# prepends this to README.md as front matter on the commit it pushes to the
+# Space, so the GitHub README stays free of it.
+# Reference: https://huggingface.co/docs/hub/spaces-config-reference
+title: Blue Horizon AI Concierge
+emoji: 🏨
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+startup_duration_timeout: 1h

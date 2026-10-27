@@ -1,13 +1,3 @@
----
-title: Blue Horizon AI Concierge
-emoji: 🏨
-colorFrom: blue
-colorTo: indigo
-sdk: docker
-app_port: 7860
-startup_duration_timeout: 1h
----
-
 # Blue Horizon AI Concierge
 
 **An AI hotel concierge that answers questions about the hotel and books rooms, built so

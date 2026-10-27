@@ -19,6 +19,12 @@ docker run -p 7860:7860 \
 The UI is served on port `7860`. The FastAPI backend runs internally on
 `127.0.0.1:8000` and is not exposed outside the container.
 
+The Space's own settings (title, SDK, `app_port`, startup timeout) live in
+`deploy/hf_space_metadata.yml`, not in `README.md`. HuggingFace reads them from the
+README's YAML front matter, so the deploy job prepends that file to `README.md` on the
+commit it pushes to the Space. Edit the YAML file to change them; the GitHub README never
+carries the block.
+
 `deploy/.streamlit/config.toml` disables Streamlit's CORS and XSRF checks. The Space
 serves the app through HuggingFace's own proxy, whose origin does not match the one
 Streamlit sees, and with the checks on, requests fail with origin-mismatch errors.

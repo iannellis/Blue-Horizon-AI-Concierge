@@ -285,6 +285,10 @@ jobs:
           git remote add space "https://user:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}"
           MAIN_SHA=$(git rev-parse --short HEAD)
           git checkout --orphan hf-deploy
+          # The Space reads its configuration from README.md front matter,
+          # which is kept out of the GitHub README and injected here instead
+          { echo "---"; cat deploy/hf_space_metadata.yml; echo "---"; echo; cat README.md; } > README.hf.md
+          mv README.hf.md README.md
           # Do not attempt to push data directory as it isn't pulled above
           git rm -r --cached --ignore-unmatch -- data
           git add -A -- . ':!data'

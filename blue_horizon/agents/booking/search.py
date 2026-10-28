@@ -28,7 +28,16 @@ if TYPE_CHECKING:
 
     from psycopg import AsyncConnection
 
-SortBy = Literal["price", "floor_desc", "square_feet_desc", "room_number"]
+SortBy = Literal[
+    "price",
+    "price_desc",
+    "floor",
+    "floor_desc",
+    "square_feet",
+    "square_feet_desc",
+    "room_number",
+    "room_number_desc",
+]
 
 
 @dataclass(frozen=True)
@@ -96,8 +105,11 @@ _ROOM_FILTERS: Final = sql.SQL("""
     AND (%(min_floor)s::int IS NULL OR r.floor >= %(min_floor)s::int)
     AND (%(max_floor)s::int IS NULL OR r.floor <= %(max_floor)s::int)
     AND (%(min_occupancy)s::int IS NULL OR r.max_occupancy >= %(min_occupancy)s::int)
+    AND (%(max_occupancy)s::int IS NULL OR r.max_occupancy <= %(max_occupancy)s::int)
     AND (%(min_square_feet)s::int IS NULL
         OR r.square_feet >= %(min_square_feet)s::int)
+    AND (%(max_square_feet)s::int IS NULL
+        OR r.square_feet <= %(max_square_feet)s::int)
     AND (%(accessible)s::boolean IS NULL
         OR r.accessibility = %(accessible)s::boolean)""")
 
@@ -112,6 +124,7 @@ WITH stay AS MATERIALIZED (
         ra.room_id,
         COUNT(*) AS nights,
         SUM(ra.price) AS total_price,
+        MIN(ra.price) AS min_price,
         MAX(ra.price) AS max_price
     FROM room_availability AS ra
     WHERE ra.date >= %(check_in)s::date
@@ -125,6 +138,8 @@ SELECT {columns}, s.nights, s.total_price
 FROM rooms AS r
 JOIN stay AS s ON s.room_id = r.room_id
 WHERE {filters}
+    AND (%(min_nightly_price)s::numeric IS NULL
+        OR s.min_price >= %(min_nightly_price)s::numeric)
     AND (%(max_nightly_price)s::numeric IS NULL
         OR s.max_price <= %(max_nightly_price)s::numeric)
 ORDER BY {order_by}
@@ -137,21 +152,26 @@ WHERE {filters}
 ORDER BY {order_by}
 LIMIT %(limit)s""")
 
-# Price ordering needs a stay; without dates it falls back to room number.
-_ORDER_BY: Final[dict[tuple[SortBy, bool], sql.SQL]] = {
-    ("price", True): sql.SQL("s.total_price, r.room_number"),
-    ("price", False): sql.SQL("r.room_number"),
-    ("floor_desc", True): sql.SQL("r.floor DESC, s.total_price, r.room_number"),
-    ("floor_desc", False): sql.SQL("r.floor DESC, r.room_number"),
-    ("square_feet_desc", True): sql.SQL(
-        "r.square_feet DESC NULLS LAST, s.total_price, r.room_number",
+# Sort key to (ascending, descending) ORDER BY term. square_feet is nullable,
+# and Postgres puts NULLs first under DESC, so its descending term says
+# NULLS LAST to keep unknown sizes at the end either way.
+_SORT_TERMS: Final[dict[str, tuple[sql.SQL, sql.SQL]]] = {
+    "price": (sql.SQL("s.total_price"), sql.SQL("s.total_price DESC")),
+    "floor": (sql.SQL("r.floor"), sql.SQL("r.floor DESC")),
+    "square_feet": (
+        sql.SQL("r.square_feet"),
+        sql.SQL("r.square_feet DESC NULLS LAST"),
     ),
-    ("square_feet_desc", False): sql.SQL(
-        "r.square_feet DESC NULLS LAST, r.room_number",
-    ),
-    ("room_number", True): sql.SQL("r.room_number"),
-    ("room_number", False): sql.SQL("r.room_number"),
+    "room_number": (sql.SQL("r.room_number"), sql.SQL("r.room_number DESC")),
 }
+
+# (lower bound, upper bound) argument pairs that must not cross.
+_RANGE_BOUNDS: Final = (
+    ("min_floor", "max_floor"),
+    ("min_occupancy", "max_occupancy"),
+    ("min_square_feet", "max_square_feet"),
+    ("min_nightly_price", "max_nightly_price"),
+)
 
 
 def build_search_args_model(
@@ -186,10 +206,10 @@ def build_search_args_model(
         f"Nights {meta.first_night} through {meta.last_night} can be searched; "
         f"the latest check-out is {meta.last_check_out}."
     )
-    room_type = _literal(meta.enum_values.get("room_type", []))
-    bed_type = _literal(meta.enum_values.get("room_bed_type", []))
-    amenity = _literal(meta.amenities)
-    view_type = _literal(meta.view_types)
+    room_types = _optional_list_of(meta.enum_values.get("room_type", []))
+    bed_types = _optional_list_of(meta.enum_values.get("room_bed_type", []))
+    amenities = _optional_list_of(meta.amenities)
+    view_types = _optional_list_of(meta.view_types)
     floor_bounds: dict[str, Any] = {"ge": meta.min_floor, "le": meta.max_floor}
 
     return create_model(
@@ -226,19 +246,19 @@ def build_search_args_model(
             ),
         ),
         room_types=(
-            list[room_type] | None,
+            room_types,
             Field(default=None, description="Any of these room types."),
         ),
         bed_types=(
-            list[bed_type] | None,
+            bed_types,
             Field(default=None, description="Any of these bed types."),
         ),
         amenities=(
-            list[amenity] | None,
+            amenities,
             Field(default=None, description="The room must have all of these."),
         ),
         view_types=(
-            list[view_type] | None,
+            view_types,
             Field(default=None, description="The room must have any of these."),
         ),
         min_floor=(
@@ -267,13 +287,33 @@ def build_search_args_model(
             int | None,
             Field(default=None, ge=1, description="Minimum guests the room sleeps."),
         ),
+        max_occupancy=(
+            int | None,
+            Field(
+                default=None,
+                ge=1,
+                description="The room sleeps at most this many guests.",
+            ),
+        ),
         min_square_feet=(
             int | None,
             Field(default=None, ge=1, description="Minimum room size in square feet."),
         ),
+        max_square_feet=(
+            int | None,
+            Field(default=None, ge=1, description="Maximum room size in square feet."),
+        ),
         accessible=(
             bool | None,
             Field(default=None, description="Require (true) or exclude (false)."),
+        ),
+        min_nightly_price=(
+            float | None,
+            Field(
+                default=None,
+                gt=0,
+                description="Every night must cost at least this. Requires dates.",
+            ),
         ),
         max_nightly_price=(
             float | None,
@@ -300,23 +340,30 @@ def build_search_args_model(
             Field(
                 default="price",
                 description=(
-                    "Result order. 'price' is cheapest stay first (room number "
-                    "without dates); the others are highest floor, largest room, "
-                    "and room number."
+                    "Result order: total stay price, floor, room size, or room "
+                    "number, lowest first. Add '_desc' for highest first, e.g. "
+                    "'price_desc' for the most expensive stay first. Price "
+                    "ordering needs dates; without them results are in room "
+                    "number order."
                 ),
             ),
         ),
     )
 
 
-def _literal(values: Sequence[str]) -> Any:  # noqa: ANN401
-    """Build a `Literal` type over values known only at runtime.
+def _optional_list_of(values: Sequence[str]) -> Any:  # noqa: ANN401
+    """Build an optional list-of-`Literal` type over values known at runtime.
+
+    The whole annotation is built here, not at the `create_model` call site,
+    because `list[x] | None` over a runtime variable `x` is a value expression
+    whose static type is `UnionType`, which `create_model` does not accept as
+    a field type.
 
     Args:
         values: Allowed string values; must be non-empty.
 
     Returns:
-        The `Literal[...]` type admitting exactly `values`.
+        The type `list[Literal[...]] | None` admitting exactly `values`.
 
     Raises:
         ValueError: If `values` is empty, since `Literal[()]` is not a type.
@@ -325,7 +372,8 @@ def _literal(values: Sequence[str]) -> Any:  # noqa: ANN401
     if not values:
         msg = "Cannot build a search vocabulary from an empty value list"
         raise ValueError(msg)
-    return Literal[tuple(values)]  # pyright: ignore[reportInvalidTypeArguments]
+    allowed = Literal[tuple(values)]  # pyright: ignore[reportInvalidTypeArguments]
+    return list[allowed] | None
 
 
 def _consistency_validator(meta: RoomsMetadata) -> Any:  # noqa: ANN401
@@ -353,7 +401,8 @@ def _consistency_validator(meta: RoomsMetadata) -> Any:  # noqa: ANN401
             `args`, unchanged.
 
         Raises:
-            ValueError: If the dates, price, or floor range are inconsistent.
+            ValueError: If the dates are inconsistent, a price filter has no
+                dates, or a lower bound is above its upper bound.
 
         """
         check_in: dt.date | None = args.check_in
@@ -368,16 +417,16 @@ def _consistency_validator(meta: RoomsMetadata) -> Any:  # noqa: ANN401
             if check_in < meta.first_night or check_out > meta.last_check_out:
                 msg = f"Dates {check_in} to {check_out} are out of range. {window}"
                 raise ValueError(msg)
-        elif args.max_nightly_price is not None:
-            msg = "max_nightly_price needs check_in and check_out."
-            raise ValueError(msg)
-        if (
-            args.min_floor is not None
-            and args.max_floor is not None
-            and args.min_floor > args.max_floor
-        ):
-            msg = "min_floor cannot be above max_floor."
-            raise ValueError(msg)
+        else:
+            for price in ("min_nightly_price", "max_nightly_price"):
+                if getattr(args, price) is not None:
+                    msg = f"{price} needs check_in and check_out."
+                    raise ValueError(msg)
+        for lower, upper in _RANGE_BOUNDS:
+            low, high = getattr(args, lower), getattr(args, upper)
+            if low is not None and high is not None and low > high:
+                msg = f"{lower} cannot be above {upper}."
+                raise ValueError(msg)
         return args
 
     return model_validator(mode="after")(check)
@@ -461,8 +510,36 @@ def select_search_query(*, sort_by: SortBy, dated: bool) -> sql.Composed:
     return template.format(
         columns=_ROOM_COLUMNS,
         filters=_ROOM_FILTERS,
-        order_by=_ORDER_BY[sort_by, dated],
+        order_by=_order_by(sort_by, dated=dated),
     )
+
+
+def _order_by(sort_by: SortBy, *, dated: bool) -> sql.Composed:
+    """Compose the ORDER BY list for a requested result order.
+
+    Ties on the primary key break by cheapest stay (dated searches only),
+    then by room number, so every ordering is total and repeatable. Room
+    numbers are unique, so a room number ordering needs no tiebreak. Price
+    ordering needs a stay, so without dates it falls back to room number.
+
+    Args:
+        sort_by: Requested result order; a `_desc` suffix means highest first.
+        dated: Whether the search has a check-in and check-out.
+
+    Returns:
+        A comma-separated list of fixed ORDER BY terms.
+
+    """
+    key = sort_by.removesuffix("_desc")
+    descending = sort_by.endswith("_desc")
+    if key == "price" and not dated:
+        key, descending = "room_number", False
+    terms = [_SORT_TERMS[key][descending]]
+    if dated and key not in {"price", "room_number"}:
+        terms.append(_SORT_TERMS["price"][0])
+    if key != "room_number":
+        terms.append(_SORT_TERMS["room_number"][0])
+    return sql.SQL(", ").join(terms)
 
 
 def _room_result(row: dict[str, Any]) -> dict[str, Any]:

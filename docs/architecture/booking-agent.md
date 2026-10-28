@@ -37,9 +37,11 @@ The model never writes SQL. Its one read tool, `search_rooms`, takes typed filte
 | `amenities` | The room has all of these |
 | `view_types` | The room has any of these |
 | `min_floor`, `max_floor` | A floor range; "top floor" is both set to the highest floor |
-| `min_occupancy`, `min_square_feet`, `accessible` | Room attributes |
-| `max_nightly_price` | Every night at or below this; needs dates |
-| `sort_by` | Cheapest stay, highest floor, largest room, or room number |
+| `min_occupancy`, `max_occupancy` | How many guests the room sleeps, bounded from either side |
+| `min_square_feet`, `max_square_feet` | Room size, bounded from either side |
+| `accessible` | Require or exclude accessible rooms |
+| `min_nightly_price`, `max_nightly_price` | Every night at or above, or at or below, this; needs dates |
+| `sort_by` | Stay price, floor, room size, or room number, lowest first; a `_desc` form (`price_desc`, `floor_desc`, ...) runs highest first. Price ordering needs dates; without them results are in room number order |
 
 The allowed values for room type, bed type, amenity, and view type are read from the
 database at startup (`db_utils.fetch_rooms_metadata`) and become `Literal` types in the

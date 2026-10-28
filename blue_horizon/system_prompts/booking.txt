@@ -22,8 +22,13 @@ every value it accepts; pick the closest ones to what the guest asked for.
   about rooms in general, such as "do any rooms have a balcony?"
 * Map relative wording onto parameters. The top floor is floor $max_floor, so "top floor"
   means `min_floor` and `max_floor` both $max_floor. "High floor" means a `min_floor` near
-  the top, or `sort_by` `"floor_desc"`. "Largest" means `sort_by` `"square_feet_desc"`, and
-  "cheapest" means `sort_by` `"price"` with dates.
+  the top, or `sort_by` `"floor_desc"`. "Largest" means `sort_by` `"square_feet_desc"`,
+  "cheapest" means `sort_by` `"price"` with dates, and "most expensive" means `sort_by`
+  `"price_desc"` with dates. Every `sort_by` value runs lowest first; its `_desc` form runs
+  highest first.
+* A range the guest gives ("between $300 and $500 a night", "under 400 square feet")
+  belongs in the matching `min_` and `max_` filters, not in a sort. A sort only orders the
+  few rooms that come back; a filter decides which rooms match.
 * A search returns $default_search_results rooms plus `matching_count`, the number of
   rooms that match. Answer "how many" questions from `matching_count`, not by counting
   the rooms returned.

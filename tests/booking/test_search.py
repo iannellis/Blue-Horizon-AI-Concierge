@@ -120,10 +120,38 @@ class TestDateWindow:
         with pytest.raises(ValidationError, match="both"):
             _validate(args_model, **dates)
 
-    def test_price_needs_dates(self, args_model: type[BaseModel]) -> None:
-        """A nightly price cap means nothing without a stay."""
-        with pytest.raises(ValidationError, match="max_nightly_price"):
-            _validate(args_model, max_nightly_price=300)
+    @pytest.mark.parametrize("price", ["min_nightly_price", "max_nightly_price"])
+    def test_price_needs_dates(
+        self, args_model: type[BaseModel], price: str,
+    ) -> None:
+        """A nightly price bound means nothing without a stay."""
+        with pytest.raises(ValidationError, match=price):
+            _validate(args_model, **{price: 300})
+
+    def test_price_range_with_dates_accepted(
+        self, args_model: type[BaseModel],
+    ) -> None:
+        """A nightly price range with a stay is valid."""
+        _validate(
+            args_model,
+            check_in="2025-03-03",
+            check_out="2025-03-05",
+            min_nightly_price=300,
+            max_nightly_price=500,
+        )
+
+    def test_inverted_price_range_rejected(
+        self, args_model: type[BaseModel],
+    ) -> None:
+        """A price floor above the price cap is rejected."""
+        with pytest.raises(ValidationError, match="min_nightly_price"):
+            _validate(
+                args_model,
+                check_in="2025-03-03",
+                check_out="2025-03-05",
+                min_nightly_price=500,
+                max_nightly_price=300,
+            )
 
     def test_price_with_dates_accepted(self, args_model: type[BaseModel]) -> None:
         """A nightly price cap with a stay is valid."""
@@ -193,10 +221,29 @@ class TestFloors:
         with pytest.raises(ValidationError):
             _validate(args_model, **kwargs)
 
-    def test_inverted_range_rejected(self, args_model: type[BaseModel]) -> None:
-        """min_floor above max_floor is rejected."""
-        with pytest.raises(ValidationError, match="min_floor"):
-            _validate(args_model, min_floor=15, max_floor=10)
+    @pytest.mark.parametrize(
+        ("lower", "upper"),
+        [
+            ("min_floor", "max_floor"),
+            ("min_occupancy", "max_occupancy"),
+            ("min_square_feet", "max_square_feet"),
+        ],
+    )
+    def test_inverted_range_rejected(
+        self, args_model: type[BaseModel], lower: str, upper: str,
+    ) -> None:
+        """A lower bound above its upper bound is rejected."""
+        with pytest.raises(ValidationError, match=f"{lower} cannot be above"):
+            _validate(args_model, **{lower: 15, upper: 10})
+
+    @pytest.mark.parametrize(
+        "bound", ["max_occupancy", "max_square_feet"],
+    )
+    def test_upper_bound_alone_accepted(
+        self, args_model: type[BaseModel], bound: str,
+    ) -> None:
+        """An upper bound on an undated attribute needs no other filter."""
+        _validate(args_model, **{bound: 2})
 
     def test_schema_names_the_top_floor(self, args_model: type[BaseModel]) -> None:
         """The max_floor description tells the model which floor is the top."""
@@ -222,7 +269,12 @@ class TestQuerySelection:
         [
             ("price", True, "ORDER BY s.total_price, r.room_number"),
             ("price", False, "ORDER BY r.room_number"),
+            ("price_desc", True, "ORDER BY s.total_price DESC, r.room_number"),
+            ("price_desc", False, "ORDER BY r.room_number"),
+            ("floor", True, "ORDER BY r.floor, s.total_price, r.room_number"),
             ("floor_desc", False, "ORDER BY r.floor DESC, r.room_number"),
+            ("square_feet", False, "ORDER BY r.square_feet, r.room_number"),
+            ("room_number_desc", True, "ORDER BY r.room_number DESC\n"),
             (
                 "square_feet_desc",
                 False,

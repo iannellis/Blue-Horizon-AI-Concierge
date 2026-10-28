@@ -29,6 +29,7 @@ from tenacity import (
 )
 
 from blue_horizon.agents._lifecycle import require
+from blue_horizon.agents.booking import write_ops
 from blue_horizon.agents.booking.config import render_system_prompt
 from blue_horizon.agents.booking.db_utils import (
     _tool_error_message_for_model,
@@ -220,7 +221,13 @@ class BookingSqlResources:
         self.pgsql_rw_db_url = pgsql_rw_db_url
         self.pool: AsyncConnectionPool[Any] | None = None
         self.write_pool: AsyncConnectionPool[Any] | None = None
-        self.proposals = ProposalStore(ttl_s=config.proposals.ttl_s)
+        self.room_night_limit = write_ops.RoomNightLimit(
+            max_room_nights=config.limits.max_room_nights_per_guest,
+            window_hours=config.limits.room_night_window_hours,
+        )
+        self.proposals = ProposalStore(
+            ttl_s=config.proposals.ttl_s, room_night_limit=self.room_night_limit,
+        )
         self.system_prompt = None
         self.rooms_metadata = None
         self._search_args_model = None

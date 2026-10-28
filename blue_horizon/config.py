@@ -282,6 +282,22 @@ class BookingProposalsConfig(FrozenModel):
     ttl_s: float
 
 
+class BookingLimitsConfig(FrozenModel):
+    """Configuration for the per-guest room-night limit on booking writes.
+
+    Attributes:
+        max_room_nights_per_guest: Most room-nights (one room for one night)
+            a guest may hold across bookings made in the window. Checked when
+            a booking or modification is proposed, and again inside its write.
+        room_night_window_hours: Length of the rolling window, ending now,
+            whose bookings count toward the limit.
+
+    """
+
+    max_room_nights_per_guest: int = Field(ge=1)
+    room_night_window_hours: int = Field(ge=1)
+
+
 class BookingDbConfig(FrozenModel):
     """Combined database configuration for the booking agent.
 
@@ -312,6 +328,7 @@ class BookingSqlConfig(FrozenModel):
         prompts: Prompt template paths.
         db: Database behavior configuration.
         proposals: Human-in-the-loop proposal store configuration.
+        limits: Per-guest room-night limit.
 
     """
 
@@ -320,6 +337,7 @@ class BookingSqlConfig(FrozenModel):
     prompts: BookingPromptsConfig
     db: BookingDbConfig
     proposals: BookingProposalsConfig
+    limits: BookingLimitsConfig
 
 
 class LoadDataInfoConfig(FrozenModel):

@@ -12,6 +12,7 @@ The file is structured into sections that map to the Pydantic models in
 | `[info]` | Information agent LLM, embeddings model, Redis tuning, retrieval `top_k` |
 | `[booking]` | Booking agent LLM, search bounds, DB pool settings |
 | `[booking.proposals]` | `ttl_s`, how long an unconfirmed proposal stays in the in-process store before it is purged |
+| `[booking.limits]` | How many room-nights one guest may book in a rolling window |
 | `[load_data]` | Paths to the source data pickles, and `seeded_customer_count` |
 | `[logging]` | The API's root log level, the third-party loggers kept quiet, and the endpoint and batching for log shipping to Axiom |
 
@@ -101,6 +102,14 @@ it that a retry could duplicate.
 **`[booking.proposals].ttl_s`** (default 1800) bounds the proposal store's size only. A
 proposal reserves no inventory, so expiry costs a guest nothing beyond having to ask
 again. Thirty minutes is long enough for a guest to step away before confirming.
+
+**`[booking.limits].max_room_nights_per_guest`** (default 60) is the most room-nights
+one guest may hold across bookings made in the last `room_night_window_hours`
+(default 24). Sixty covers any stay a real guest would ask the demo for, such as three
+rooms for a fortnight, and is about twice what the busiest guest books in a full eval
+run, but stops one visitor from booking out a room type for weeks. The window matches
+the nightly reset. Both the propose tools and the writes read these values; see
+[Booking agent](../architecture/booking-agent.md#room-night-limit).
 
 **`[info.retrieval].top_k`** (default 4) is both the number of candidates retrieved per
 source and the most amenity or service cards the information agent presents. The eval

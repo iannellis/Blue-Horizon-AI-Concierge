@@ -265,6 +265,39 @@ async def _availability_status(
     return row["status"], row["price"]
 
 
+async def _window_room_nights(
+    pool: AsyncConnectionPool[Any], *, customer_id: int, window_hours: int,
+) -> int:
+    """Count a guest's room-nights on bookings made in the window.
+
+    The shared branch may already hold bookings for the guest from other
+    work, so the limit tests set their limit relative to this count rather
+    than assuming it starts at zero.
+
+    Args:
+        pool: Read-write booking database pool.
+        customer_id: Guest whose room-nights to count.
+        window_hours: Length of the rolling window, ending now.
+
+    Returns:
+        int: Room-nights on the guest's non-cancelled bookings in the window.
+
+    """
+    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            """
+            SELECT COALESCE(SUM(br.check_out - br.check_in), 0) AS nights
+            FROM booking_rooms br
+            JOIN bookings b ON b.booking_id = br.booking_id
+            WHERE b.customer_id = %s AND b.status <> 'cancelled'
+              AND b.booked_at > now() - %s * interval '1 hour'
+            """,
+            (customer_id, window_hours),
+        )
+        row = await cur.fetchone()
+    return row["nights"]
+
+
 async def _hand_insert_conflicting_booking_room(
     pool: AsyncConnectionPool[Any],
     *,
@@ -991,6 +1024,233 @@ class TestCommitBookingConstraintTranslation:
                     )
 
         asyncio.run(_run())
+
+
+class TestRoomNightLimit:
+    """The per-guest room-night limit, checked inside each booking write."""
+
+    _WINDOW_HOURS = 24
+
+    async def _limit_with_headroom(
+        self, pool: AsyncConnectionPool[Any], customer_id: int, headroom: int,
+    ) -> write_ops.RoomNightLimit:
+        """Build a limit `headroom` room-nights above the guest's current total.
+
+        Args:
+            pool: Read-write booking database pool.
+            customer_id: Guest the limit is for.
+            headroom: Room-nights the guest may still book under the limit.
+
+        Returns:
+            write_ops.RoomNightLimit: The limit.
+
+        """
+        held = await _window_room_nights(
+            pool, customer_id=customer_id, window_hours=self._WINDOW_HOURS,
+        )
+        return write_ops.RoomNightLimit(
+            max_room_nights=held + headroom, window_hours=self._WINDOW_HOURS,
+        )
+
+    def test_booking_past_the_limit_books_nothing(self, rw_db_url: str) -> None:
+        """The preview and the write both refuse, and no night is booked."""
+
+        async def _run() -> None:
+            async with _rw_pool(rw_db_url) as pool:
+                customer_id, _ = await _first_two_customer_ids(pool)
+                request, _ = await _find_available_block(pool, nights=2)
+                limit = await self._limit_with_headroom(pool, customer_id, 1)
+
+                with pytest.raises(write_ops.BookingLimitError):
+                    await write_ops.check_room_night_limit(
+                        pool,
+                        customer_id=customer_id,
+                        limit=limit,
+                        booking_id=None,
+                        nights_before=0,
+                        nights_after=2,
+                    )
+                with pytest.raises(write_ops.BookingLimitError) as caught:
+                    await write_ops.commit_booking(
+                        pool,
+                        customer_id=customer_id,
+                        rooms=[request],
+                        room_night_limit=limit,
+                    )
+
+                assert caught.value.total_room_nights == limit.max_room_nights + 1
+                status, _ = await _availability_status(
+                    pool, room_id=request.room_id, on_date=request.check_in,
+                )
+                assert status == "Available"
+
+        asyncio.run(_run())
+
+    def test_a_second_booking_counts_the_first(self, rw_db_url: str) -> None:
+        """Room-nights accumulate across bookings made in the window."""
+
+        async def _run() -> None:
+            async with _rw_pool(rw_db_url) as pool:
+                customer_id, _ = await _first_two_customer_ids(pool)
+                first_request, _ = await _find_available_block(pool, nights=2)
+                second_request, _ = await _find_available_block(
+                    pool,
+                    nights=2,
+                    not_before=first_request.check_out + dt.timedelta(days=30),
+                )
+                limit = await self._limit_with_headroom(pool, customer_id, 3)
+
+                first = await write_ops.commit_booking(
+                    pool,
+                    customer_id=customer_id,
+                    rooms=[first_request],
+                    room_night_limit=limit,
+                )
+                try:
+                    with pytest.raises(write_ops.BookingLimitError):
+                        await write_ops.commit_booking(
+                            pool,
+                            customer_id=customer_id,
+                            rooms=[second_request],
+                            room_night_limit=limit,
+                        )
+                finally:
+                    await write_ops.cancel_booking(
+                        pool, customer_id=customer_id, booking_id=first.booking_id,
+                    )
+
+        asyncio.run(_run())
+
+    def test_concurrent_bookings_cannot_both_pass(self, rw_db_url: str) -> None:
+        """The guest's advisory lock makes the second write count the first.
+
+        Without it, both transactions would read the total before either
+        committed, and both would book.
+        """
+
+        async def _run() -> None:
+            async with _rw_pool(rw_db_url) as pool:
+                customer_id, _ = await _first_two_customer_ids(pool)
+                first_request, _ = await _find_available_block(pool, nights=2)
+                second_request, _ = await _find_available_block(
+                    pool,
+                    nights=2,
+                    not_before=first_request.check_out + dt.timedelta(days=30),
+                )
+                limit = await self._limit_with_headroom(pool, customer_id, 2)
+
+                outcomes = await asyncio.gather(
+                    *(
+                        write_ops.commit_booking(
+                            pool,
+                            customer_id=customer_id,
+                            rooms=[request],
+                            room_night_limit=limit,
+                        )
+                        for request in (first_request, second_request)
+                    ),
+                    return_exceptions=True,
+                )
+                committed = [
+                    o for o in outcomes if isinstance(o, write_ops.CommitResult)
+                ]
+                try:
+                    refused = [
+                        o for o in outcomes
+                        if isinstance(o, write_ops.BookingLimitError)
+                    ]
+                    assert len(committed) == 1
+                    assert len(refused) == 1
+                finally:
+                    for result in committed:
+                        await write_ops.cancel_booking(
+                            pool,
+                            customer_id=customer_id,
+                            booking_id=result.booking_id,
+                        )
+
+        asyncio.run(_run())
+
+    def test_modification_is_checked_only_when_it_adds_nights(
+        self, rw_db_url: str,
+    ) -> None:
+        """A same-length move passes at the limit; a longer one is refused."""
+
+        async def _run() -> None:
+            async with _rw_pool(rw_db_url) as pool:
+                customer_id, _ = await _first_two_customer_ids(pool)
+                old_request, _ = await _find_available_block(pool, nights=2)
+                same_length, _ = await _find_available_block(
+                    pool,
+                    nights=2,
+                    not_before=old_request.check_out + dt.timedelta(days=30),
+                )
+                longer, _ = await _find_available_block(
+                    pool,
+                    nights=3,
+                    not_before=same_length.check_out + dt.timedelta(days=30),
+                )
+                limit = await self._limit_with_headroom(pool, customer_id, 2)
+
+                committed = await write_ops.commit_booking(
+                    pool,
+                    customer_id=customer_id,
+                    rooms=[old_request],
+                    room_night_limit=limit,
+                )
+                try:
+                    booking_room_id = await _first_booking_room_id(
+                        pool,
+                        customer_id=customer_id,
+                        booking_id=committed.booking_id,
+                    )
+                    await write_ops.modify_booking(
+                        pool,
+                        customer_id=customer_id,
+                        booking_id=committed.booking_id,
+                        changes=[_move_instruction(booking_room_id, same_length)],
+                        room_night_limit=limit,
+                    )
+                    with pytest.raises(write_ops.BookingLimitError):
+                        await write_ops.modify_booking(
+                            pool,
+                            customer_id=customer_id,
+                            booking_id=committed.booking_id,
+                            changes=[_move_instruction(booking_room_id, longer)],
+                            room_night_limit=limit,
+                        )
+                    status, _ = await _availability_status(
+                        pool, room_id=longer.room_id, on_date=longer.check_in,
+                    )
+                    assert status == "Available"
+                finally:
+                    await write_ops.cancel_booking(
+                        pool, customer_id=customer_id, booking_id=committed.booking_id,
+                    )
+
+        asyncio.run(_run())
+
+
+def _move_instruction(
+    booking_room_id: int, request: write_ops.RoomRequest,
+) -> write_ops.ModifyRoomInstruction:
+    """Build an instruction moving a room-stay to a requested room and range.
+
+    Args:
+        booking_room_id: Room-stay to move.
+        request: Room and date range to move it to.
+
+    Returns:
+        write_ops.ModifyRoomInstruction: The move.
+
+    """
+    return write_ops.ModifyRoomInstruction(
+        booking_room_id=booking_room_id,
+        new_room_id=request.room_id,
+        new_room_number=request.room_number,
+        new_check_in=request.check_in,
+        new_check_out=request.check_out,
+    )
 
 
 class TestListCustomers:

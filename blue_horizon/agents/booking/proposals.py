@@ -114,21 +114,32 @@ class ProposalStore:
     .resources.OrchestrationResources` on a database reset.
     """
 
-    __slots__ = ("_by_thread", "_proposals", "_results", "_ttl_s")
+    __slots__ = (
+        "_by_thread", "_proposals", "_results", "_room_night_limit", "_ttl_s",
+    )
 
-    def __init__(self, *, ttl_s: float) -> None:
+    def __init__(
+        self,
+        *,
+        ttl_s: float,
+        room_night_limit: write_ops.RoomNightLimit | None = None,
+    ) -> None:
         """Initialize an empty store.
 
         Args:
             ttl_s: Seconds after which an unconfirmed proposal is purged.
                 Confirmed proposals are exempt, so a delayed duplicate
                 confirm can still replay its cached result.
+            room_night_limit: Limit on the room-nights one guest may book,
+                passed to every booking and modification write. ``None``
+                applies no limit.
 
         """
         self._proposals: dict[str, Proposal] = {}
         self._by_thread: dict[str, str] = {}
         self._results: dict[str, WriteResult] = {}
         self._ttl_s = ttl_s
+        self._room_night_limit = room_night_limit
 
     def create(
         self,
@@ -308,7 +319,9 @@ class ProposalStore:
         # proposal across a failed attempt safe at all.
         started = time.perf_counter()
         try:
-            result = await _commit_proposal(write_pool, proposal)
+            result = await _commit_proposal(
+                write_pool, proposal, room_night_limit=self._room_night_limit,
+            )
         except write_ops.PricingMismatchError as exc:
             self._retire(proposal)
             # Nothing was written, but only a bug can cause this, so it is
@@ -542,12 +555,16 @@ def _write_timing(proposal: Proposal, started: float) -> dict[str, object]:
 async def _commit_proposal(
     write_pool: AsyncConnectionPool[Any],
     proposal: Proposal,
+    *,
+    room_night_limit: write_ops.RoomNightLimit | None,
 ) -> WriteResult:
     """Dispatch a confirmed proposal to its matching `write_ops` function.
 
     Args:
         write_pool: Read-write booking database pool (`bh_agent_rw`).
         proposal: The proposal being confirmed.
+        room_night_limit: Limit passed to a booking or modification write.
+            A cancellation only releases nights, so it takes none.
 
     Returns:
         The `write_ops` result for `proposal.action`.
@@ -573,6 +590,7 @@ async def _commit_proposal(
             customer_id=proposal.customer_id,
             rooms=cast("list[write_ops.RoomRequest]", proposal.details),
             expected_total=expected_total,
+            room_night_limit=room_night_limit,
         )
     if proposal.action == "cancel":
         booking_id, instructions = cast("CancelDetails", proposal.details)
@@ -590,4 +608,5 @@ async def _commit_proposal(
         booking_id=booking_id,
         changes=changes,
         expected_total=expected_total,
+        room_night_limit=room_night_limit,
     )

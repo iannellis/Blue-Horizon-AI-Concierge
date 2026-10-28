@@ -160,9 +160,9 @@ defenses hold.
 |---|---|---|
 | `search_rooms` | `bh_agent_ro`, fixed parameterized query | Up to `limit` rooms (clamped to `max_search_results`) plus `matching_count` |
 | `list_my_bookings` | Server-injected `customer_id` via `RunnableConfig` | This guest's reservations |
-| `propose_booking` | None (in-process) | A proposal id |
+| `propose_booking` | None (in-process) | A proposal id, or a refusal past the [room-night limit](#room-night-limit) |
 | `propose_cancellation` | None (in-process) | A proposal id |
-| `propose_modification` | None (in-process) | A proposal id |
+| `propose_modification` | None (in-process) | A proposal id, or a refusal past the [room-night limit](#room-night-limit) |
 
 `list_my_bookings` takes its `customer_id` from `RunnableConfig`, injected by the
 server. The parameter is invisible to the model, so the model cannot ask for another
@@ -196,6 +196,48 @@ so a night's rate survives a book/cancel round trip.
 
 See the [Stress Test](../evaluation/stress-test.md) for how this holds up under 50
 concurrent sessions deliberately fighting over the same 10 rooms.
+
+## Room-night limit
+
+One guest may hold at most `[booking.limits].max_room_nights_per_guest` room-nights (60
+by default) across bookings made in the last `room_night_window_hours` (24). A
+room-night is one room for one night, so a three-room, two-night stay counts six.
+Without the limit, one visitor could book every room of a type for weeks and leave every
+other visitor a sold-out hotel until the nightly reset.
+
+The count covers the guest's bookings whose `booked_at` falls in the window and whose
+status is not `cancelled`. The window leaves out the seeded guests' loaded history,
+which was booked when the Parent branch was loaded, and lines up with the nightly
+reset. A cancelled booking does not count, since it released its nights.
+
+`commit_booking` and `modify_booking` enforce it inside their transactions, through
+`write_ops._require_room_night_allowance`, and raise `write_ops.BookingLimitError`, a
+`BookingWriteError`, when a write would go over. The confirm path treats it like any
+other refusal: the proposal is retired, the guest gets a `409` whose `detail` names the
+limit and the total the write would have reached, and the refusal note goes into the
+thread. `cancel_booking` is never checked, since it only releases nights. The
+`ProposalStore` holds the limit and passes it to both writes, so the eval harness's
+auto-confirm applies it too.
+
+A modification is checked only when it adds room-nights, so a guest already over the
+limit (after it was lowered, say) can still move or shorten a stay. The booking being
+modified counts in full when it was itself made in the window. A booking made before the
+window counts only for the nights the modification adds, so a seeded guest can extend an
+old reservation, but only by what the limit leaves.
+
+**Each write first takes the guest's advisory lock,**
+`pg_advisory_xact_lock(namespace, customer_id)`, held until the transaction ends.
+Without it, two confirms for one guest, from two tabs or from two visitors sharing a
+guest, could each read the total before the other committed, and both would pass. A
+`SELECT ... FOR UPDATE` on the guest's `customers` row would serialize them the same
+way, but it needs `UPDATE` on `customers`, which `bh_agent_rw` deliberately lacks. The
+advisory lock needs no grant. It is taken before any row lock, so it adds no new
+lock-ordering deadlock.
+
+`propose_booking` and `propose_modification` run the same check without the lock
+(`write_ops.check_room_night_limit`) and refuse with its reason, so the model can tell
+the guest before a dialog appears. That check is a courtesy; the one inside the write
+decides.
 
 ## Guest identity
 

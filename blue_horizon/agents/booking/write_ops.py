@@ -36,6 +36,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# First key of the per-guest advisory lock taken before a write counts the
+# guest's room-nights, so it cannot collide with any other advisory lock.
+_ROOM_NIGHT_LOCK_NAMESPACE = 0x4248  # "BH"
+
 
 class BookingWriteError(Exception):
     """Raised when a booking write cannot be completed as requested.
@@ -82,6 +86,44 @@ class PricingMismatchError(BookingWriteError):
         self.computed_total = computed_total
 
 
+class BookingLimitError(BookingWriteError):
+    """Raised when a write would take a guest past the room-night limit.
+
+    Raised inside the write's transaction, before it commits, or by
+    `check_room_night_limit` before a proposal is stored. As a
+    `BookingWriteError` it retires the proposal, since a retry would count
+    the same room-nights again.
+
+    Attributes:
+        max_room_nights: The limit, from `RoomNightLimit`.
+        window_hours: The rolling window the limit applies to.
+        total_room_nights: Room-nights the guest would hold in the window
+            if the write went ahead.
+
+    """
+
+    def __init__(
+        self, *, max_room_nights: int, window_hours: int, total_room_nights: int,
+    ) -> None:
+        """Store the counts behind a guest-facing message.
+
+        Args:
+            max_room_nights: The limit, from `RoomNightLimit`.
+            window_hours: The rolling window the limit applies to.
+            total_room_nights: Room-nights the guest would hold in the
+                window if the write went ahead.
+
+        """
+        super().__init__(
+            f"Each guest can book at most {max_room_nights} room-nights in "
+            f"{window_hours} hours, and this request would bring this guest "
+            f"to {total_room_nights}.",
+        )
+        self.max_room_nights = max_room_nights
+        self.window_hours = window_hours
+        self.total_room_nights = total_room_nights
+
+
 class BookingUnavailableError(Exception):
     """Raised when a booking write cannot reach the database at all.
 
@@ -93,6 +135,26 @@ class BookingUnavailableError(Exception):
     distinction to decide whether a failed confirm should retire its
     proposal or leave it pending for another attempt.
     """
+
+
+@dataclass(frozen=True, slots=True)
+class RoomNightLimit:
+    """How many room-nights one guest may book in a rolling window.
+
+    A room-night is one room for one night, so a three-room, two-night stay
+    is six. Only bookings made inside the window count, which leaves out the
+    seeded guests' loaded history; cancelled bookings do not count, since
+    they released their nights.
+
+    Attributes:
+        max_room_nights: Most room-nights a guest may hold across bookings
+            made in the window.
+        window_hours: Length of the rolling window, ending now.
+
+    """
+
+    max_room_nights: int
+    window_hours: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -422,12 +484,55 @@ async def price_modification_room(
             return await _price_one_room(cur, request, lock=False, owned=owned)
 
 
+async def check_room_night_limit(  # noqa: PLR0913
+    pool: AsyncConnectionPool[Any],
+    *,
+    customer_id: int,
+    limit: RoomNightLimit,
+    booking_id: int | None,
+    nights_before: int,
+    nights_after: int,
+) -> None:
+    """Refuse a proposal that would take the guest past the room-night limit.
+
+    Used by the `propose_booking` and `propose_modification` tools, so the
+    model can tell the guest before a confirmation dialog appears. Reads
+    without locking; the write repeats the check under the guest's advisory
+    lock, and that check is the one that counts.
+
+    Args:
+        pool: Read-write booking database pool (`bh_agent_rw`).
+        customer_id: Server-injected identity of the guest.
+        limit: The room-night limit to apply.
+        booking_id: Booking being modified, or ``None`` for a new booking.
+        nights_before: Room-nights the booking holds now; 0 for a new one.
+        nights_after: Room-nights the booking would hold after the write.
+
+    Raises:
+        BookingLimitError: If the write would add room-nights and take the
+            guest past `limit`.
+        BookingUnavailableError: If the database could not be reached.
+
+    """
+    with reraise_operational_as_unavailable():
+        async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            await _require_room_night_allowance(
+                cur,
+                customer_id=customer_id,
+                limit=limit,
+                booking_id=booking_id,
+                nights_before=nights_before,
+                nights_after=nights_after,
+            )
+
+
 async def commit_booking(
     pool: AsyncConnectionPool[Any],
     *,
     customer_id: int,
     rooms: Sequence[RoomRequest],
     expected_total: Decimal | None = None,
+    room_night_limit: RoomNightLimit | None = None,
 ) -> CommitResult:
     """Book every requested room-night, all-or-nothing, in one transaction.
 
@@ -438,6 +543,9 @@ async def commit_booking(
         expected_total: Total the guest's confirmation dialog showed. When
             set, nothing is booked unless the total priced under lock
             matches it. ``None`` skips the check.
+        room_night_limit: Limit on the room-nights the guest may book. When
+            set, the guest's advisory lock is taken first, so two confirms
+            for one guest cannot both pass the count. ``None`` skips it.
 
     Returns:
         CommitResult: The new booking's id, confirmation number, and priced
@@ -450,6 +558,8 @@ async def commit_booking(
             `room_availability` and `booking_rooms` have drifted out of
             sync, since the `FOR UPDATE` lock above already re-validates
             availability). No partial writes are made either way.
+        BookingLimitError: If `room_night_limit` is set and the booking
+            would take the guest past it. Nothing is written.
         PricingMismatchError: If `expected_total` is set and differs from
             the total priced under lock. Nothing is written.
         BookingUnavailableError: If the database could not be reached at
@@ -460,9 +570,23 @@ async def commit_booking(
     with reraise_operational_as_unavailable():
         async with pool.connection() as conn:
             async with conn.transaction(), conn.cursor(row_factory=dict_row) as cur:
+                if room_night_limit is not None:
+                    await _lock_guest(cur, customer_id)
                 priced = [
                     await _price_one_room(cur, room, lock=True) for room in rooms
                 ]
+                if room_night_limit is not None:
+                    await _require_room_night_allowance(
+                        cur,
+                        customer_id=customer_id,
+                        limit=room_night_limit,
+                        booking_id=None,
+                        nights_before=0,
+                        nights_after=sum(
+                            _stay_nights(stay.check_in, stay.check_out)
+                            for stay in priced
+                        ),
+                    )
                 total_amount = sum(
                     (stay.total_amount for stay in priced), Decimal("0.00"),
                 )
@@ -582,13 +706,14 @@ async def cancel_booking(
         )
 
 
-async def modify_booking(
+async def modify_booking(  # noqa: PLR0913
     pool: AsyncConnectionPool[Any],
     *,
     customer_id: int,
     booking_id: int,
     changes: Sequence[ModifyRoomInstruction],
     expected_total: Decimal | None = None,
+    room_night_limit: RoomNightLimit | None = None,
 ) -> ModifyResult:
     """Release and reacquire room-stays atomically; nothing changes unless all succeed.
 
@@ -602,6 +727,9 @@ async def modify_booking(
             confirmation dialog showed. When set, the transaction is rolled
             back unless the total after the changes matches it. ``None``
             skips the check.
+        room_night_limit: Limit on the room-nights the guest may book,
+            applied only when the change adds room-nights. ``None`` skips
+            it.
 
     Returns:
         ModifyResult: The booking's priced room-stays after modification.
@@ -615,6 +743,9 @@ async def modify_booking(
             drifted out of sync, since the `FOR UPDATE` lock above already
             re-validates availability). No partial writes are made either
             way.
+        BookingLimitError: If `room_night_limit` is set and the change adds
+            room-nights that take the guest past it. The transaction is
+            rolled back.
         PricingMismatchError: If `expected_total` is set and differs from
             the booking's total after the changes. The transaction is
             rolled back.
@@ -627,8 +758,14 @@ async def modify_booking(
         async with pool.connection() as conn, conn.transaction(), conn.cursor(
             row_factory=dict_row,
         ) as cur:
+            if room_night_limit is not None:
+                await _lock_guest(cur, customer_id)
             existing = await _lock_booking_rooms(
                 cur, booking_id=booking_id, customer_id=customer_id,
+            )
+            nights_before = sum(
+                _stay_nights(row["check_in"], row["check_out"])
+                for row in existing.values()
             )
 
             for change in changes:
@@ -692,6 +829,18 @@ async def modify_booking(
                 )
                 for row in rows
             )
+            if room_night_limit is not None:
+                await _require_room_night_allowance(
+                    cur,
+                    customer_id=customer_id,
+                    limit=room_night_limit,
+                    booking_id=booking_id,
+                    nights_before=nights_before,
+                    nights_after=sum(
+                        _stay_nights(stay.check_in, stay.check_out)
+                        for stay in rooms_out
+                    ),
+                )
             total_amount = sum(
                 (stay.total_amount for stay in rooms_out), Decimal("0.00"),
             )
@@ -1225,6 +1374,112 @@ def _require_expected_total(
     if expected_total is not None and computed_total != expected_total:
         raise PricingMismatchError(
             expected_total=expected_total, computed_total=computed_total,
+        )
+
+
+async def _lock_guest(
+    cur: psycopg.AsyncCursor[dict[str, Any]], customer_id: int,
+) -> None:
+    """Take the guest's advisory lock for the rest of the transaction.
+
+    Serialises a guest's writes so the room-night count each one reads
+    includes any write that committed just before it. A lock on the guest's
+    `customers` row would do the same, but `SELECT ... FOR UPDATE` needs
+    `UPDATE` on `customers`, which `bh_agent_rw` deliberately lacks. Taken
+    before any row lock, in every write that takes it, so it adds no new
+    lock-order deadlock.
+
+    Args:
+        cur: Open cursor inside the caller's transaction.
+        customer_id: Guest whose writes to serialise.
+
+    """
+    await cur.execute(
+        "SELECT pg_advisory_xact_lock(%s, %s)",
+        (_ROOM_NIGHT_LOCK_NAMESPACE, customer_id),
+    )
+
+
+def _stay_nights(check_in: dt.date, check_out: dt.date) -> int:
+    """Count the nights in a room-stay.
+
+    Args:
+        check_in: First night of the stay (inclusive).
+        check_out: Departure date (exclusive of the final night).
+
+    Returns:
+        int: Number of nights, one room-night each.
+
+    """
+    return (check_out - check_in).days
+
+
+async def _require_room_night_allowance(  # noqa: PLR0913
+    cur: psycopg.AsyncCursor[dict[str, Any]],
+    *,
+    customer_id: int,
+    limit: RoomNightLimit,
+    booking_id: int | None,
+    nights_before: int,
+    nights_after: int,
+) -> None:
+    """Refuse a write that would add room-nights past the guest's limit.
+
+    A write that adds no room-nights always passes, so a guest already over
+    the limit (say, after it was lowered) can still shorten or cancel. The
+    other bookings made in the window count in full. The booking being
+    written counts in full when it was itself made in the window, and
+    otherwise only for the nights this write adds: a booking made before the
+    window, such as a seeded guest's loaded history, is not counted until it
+    grows.
+
+    Args:
+        cur: Open cursor; inside the write's transaction for a write.
+        customer_id: Guest whose room-nights to count.
+        limit: The room-night limit to apply.
+        booking_id: Booking being written, or ``None`` for a new booking.
+        nights_before: Room-nights the booking held before the write.
+        nights_after: Room-nights the booking holds after the write.
+
+    Raises:
+        BookingLimitError: If the write adds room-nights and the guest's
+            total would exceed `limit.max_room_nights`.
+
+    """
+    added_nights = nights_after - nights_before
+    if added_nights <= 0:
+        return
+
+    await cur.execute(
+        """
+        SELECT
+            COALESCE(
+                SUM(br.check_out - br.check_in)
+                    FILTER (WHERE b.booking_id IS DISTINCT FROM %(booking_id)s),
+                0
+            ) AS other_nights,
+            COALESCE(bool_or(b.booking_id = %(booking_id)s), false)
+                AS booking_in_window
+        FROM bookings b
+        LEFT JOIN booking_rooms br ON br.booking_id = b.booking_id
+        WHERE b.customer_id = %(customer_id)s
+          AND b.status <> 'cancelled'
+          AND b.booked_at > now() - %(window_hours)s * interval '1 hour'
+        """,
+        {
+            "booking_id": booking_id,
+            "customer_id": customer_id,
+            "window_hours": limit.window_hours,
+        },
+    )
+    row = cast("dict[str, Any]", await cur.fetchone())
+    booking_nights = nights_after if row["booking_in_window"] else added_nights
+    total_room_nights = row["other_nights"] + booking_nights
+    if total_room_nights > limit.max_room_nights:
+        raise BookingLimitError(
+            max_room_nights=limit.max_room_nights,
+            window_hours=limit.window_hours,
+            total_room_nights=total_room_nights,
         )
 
 

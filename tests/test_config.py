@@ -20,6 +20,7 @@ EXPECTED_DEFAULT_SEARCH_RESULTS = 4
 EXPECTED_MAX_SEARCH_RESULTS = 15
 EXPECTED_DATA_PATH = Path("data/pandas")
 EXPECTED_PROPOSAL_TTL_S = 1800.0
+EXPECTED_MAX_ROOM_NIGHTS = 60
 EXPECTED_SEEDED_CUSTOMER_COUNT = 15
 EXPECTED_MAX_MESSAGE_CHARS = 500
 EXPECTED_MAX_TURNS_PER_HOUR = 7
@@ -135,6 +136,10 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
             },
         },
         "proposals": {"ttl_s": EXPECTED_PROPOSAL_TTL_S},
+        "limits": {
+            "max_room_nights_per_guest": EXPECTED_MAX_ROOM_NIGHTS,
+            "room_night_window_hours": 24,
+        },
     },
     "load_data": {
         "information_redis": {"data_path": str(EXPECTED_DATA_PATH)},
@@ -168,6 +173,9 @@ def test_parse_app_config_from_dict() -> None:
     )
     assert cfg.booking.agent.max_search_results == EXPECTED_MAX_SEARCH_RESULTS
     assert cfg.booking.proposals.ttl_s == EXPECTED_PROPOSAL_TTL_S
+    assert (
+        cfg.booking.limits.max_room_nights_per_guest == EXPECTED_MAX_ROOM_NIGHTS
+    )
     assert cfg.load_data.information_redis.data_path == EXPECTED_DATA_PATH
     assert (
         cfg.load_data.booking_pgsql.seeded_customer_count
@@ -221,6 +229,8 @@ def test_load_packaged_app_config() -> None:
         <= cfg.booking.agent.max_search_results
     )
     assert cfg.booking.proposals.ttl_s > 0
+    assert cfg.booking.limits.max_room_nights_per_guest > 0
+    assert cfg.booking.limits.room_night_window_hours > 0
     assert isinstance(cfg.load_data.booking_pgsql.data_path, Path)
     assert cfg.load_data.booking_pgsql.seeded_customer_count > 0
     assert cfg.logging.level

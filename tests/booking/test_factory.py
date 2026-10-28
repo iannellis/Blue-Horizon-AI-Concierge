@@ -86,6 +86,7 @@ _BOOKING_CONFIG_DICT: dict[str, Any] = {
         "retry": {"max_transient_retries": 1, "transient_retry_backoff_s": 0.15},
     },
     "proposals": {"ttl_s": 1800.0},
+    "limits": {"max_room_nights_per_guest": 60, "room_night_window_hours": 24},
 }
 
 

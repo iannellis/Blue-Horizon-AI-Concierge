@@ -112,6 +112,12 @@ the hour.
 These bound one visitor's spend, not the total. The hard ceiling on total spend is
 the monthly budget on the deployment's OpenAI project, set outside this codebase.
 
+A fourth limit protects the hotel's inventory rather than spend. One guest may hold at
+most 60 room-nights (`[booking.limits].max_room_nights_per_guest`) across bookings made
+in the last 24 hours, enforced inside the booking writes, so one visitor cannot sell the
+hotel out for everyone else until the nightly reset. See
+[Booking agent](booking-agent.md#room-night-limit).
+
 ## Logging
 
 Both processes log to stderr, which `supervisord` forwards to the container log. The

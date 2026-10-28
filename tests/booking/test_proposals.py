@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 
 from blue_horizon.agents.booking import proposals as proposals_module
+from blue_horizon.agents.booking import write_ops
 from blue_horizon.agents.booking.proposals import (
     ProposalNotFoundError,
     ProposalOwnershipError,
@@ -35,14 +36,13 @@ if TYPE_CHECKING:
 
     from psycopg_pool import AsyncConnectionPool
 
-    from blue_horizon.agents.booking import write_ops
-
 _THREAD_ID = "thread-1"
 _OTHER_THREAD_ID = "thread-2"
 _CUSTOMER_ID = 7
 _OTHER_CUSTOMER_ID = 9
 _DEFAULT_TTL_S = 1800.0
 _PROPOSALS_LOGGER = "blue_horizon.agents.booking.proposals"
+_ROOM_NIGHT_LIMIT = write_ops.RoomNightLimit(max_room_nights=60, window_hours=24)
 
 # confirm() forwards write_pool to a write_ops function monkeypatched out in
 # every test below, so its value is never actually inspected; typed as None
@@ -109,17 +109,22 @@ async def _fake_find_booking_for_rooms_returns_none(
     return None
 
 
-def _make_store(*, ttl_s: float = _DEFAULT_TTL_S) -> ProposalStore:
+def _make_store(
+    *,
+    ttl_s: float = _DEFAULT_TTL_S,
+    room_night_limit: write_ops.RoomNightLimit | None = None,
+) -> ProposalStore:
     """Build an empty `ProposalStore`.
 
     Args:
         ttl_s: TTL passed through to the store.
+        room_night_limit: Room-night limit passed through to the store.
 
     Returns:
         A fresh, empty `ProposalStore`.
 
     """
-    return ProposalStore(ttl_s=ttl_s)
+    return ProposalStore(ttl_s=ttl_s, room_night_limit=room_night_limit)
 
 
 def _create_book_proposal(
@@ -285,7 +290,7 @@ class TestConfirm:
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A `book` proposal's confirm calls `write_ops.commit_booking`."""
-        store = _make_store()
+        store = _make_store(room_night_limit=_ROOM_NIGHT_LIMIT)
         proposal = _create_book_proposal(store, total="100.00")
         fake_result = _FakeCommitResult(total_amount=Decimal("100.00"))
         calls: list[dict[str, Any]] = []
@@ -296,6 +301,7 @@ class TestConfirm:
             customer_id: int,
             rooms: Sequence[write_ops.RoomRequest],
             expected_total: Decimal | None = None,
+            room_night_limit: write_ops.RoomNightLimit | None = None,
         ) -> _FakeCommitResult:
             """Record the call and return a fixed result.
 
@@ -305,6 +311,7 @@ class TestConfirm:
                 customer_id: Forwarded by `confirm()`, recorded for assertion.
                 rooms: Forwarded by `confirm()`, recorded for assertion.
                 expected_total: Forwarded by `confirm()`, recorded for assertion.
+                room_night_limit: Forwarded by `confirm()`, recorded for assertion.
 
             Returns:
                 The fixed `fake_result`.
@@ -316,6 +323,7 @@ class TestConfirm:
                     "customer_id": customer_id,
                     "rooms": rooms,
                     "expected_total": expected_total,
+                    "room_night_limit": room_night_limit,
                 },
             )
             return fake_result
@@ -339,6 +347,7 @@ class TestConfirm:
                 "customer_id": _CUSTOMER_ID,
                 "rooms": [],
                 "expected_total": Decimal("100.00"),
+                "room_night_limit": _ROOM_NIGHT_LIMIT,
             },
         ]
 
@@ -416,7 +425,7 @@ class TestConfirm:
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A `modify` proposal's confirm calls `write_ops.modify_booking`."""
-        store = _make_store()
+        store = _make_store(room_night_limit=_ROOM_NIGHT_LIMIT)
         # A bare string stands in for a ModifyRoomInstruction: confirm()'s
         # dispatch only forwards `details` opaquely to the monkeypatched
         # fake_modify_booking below, never inspecting its structure.
@@ -431,13 +440,14 @@ class TestConfirm:
         fake_result = _FakeCommitResult(total_amount=Decimal("75.00"))
         calls: list[dict[str, Any]] = []
 
-        async def fake_modify_booking(
+        async def fake_modify_booking(  # noqa: PLR0913
             write_pool: AsyncConnectionPool[Any],
             *,
             customer_id: int,
             booking_id: int,
             changes: Sequence[write_ops.ModifyRoomInstruction],
             expected_total: Decimal | None = None,
+            room_night_limit: write_ops.RoomNightLimit | None = None,
         ) -> _FakeCommitResult:
             """Record the call and return a fixed result.
 
@@ -448,6 +458,7 @@ class TestConfirm:
                 booking_id: Forwarded by `confirm()`, recorded for assertion.
                 changes: Forwarded by `confirm()`, recorded for assertion.
                 expected_total: Forwarded by `confirm()`, recorded for assertion.
+                room_night_limit: Forwarded by `confirm()`, recorded for assertion.
 
             Returns:
                 The fixed `fake_result`.
@@ -460,6 +471,7 @@ class TestConfirm:
                     "booking_id": booking_id,
                     "changes": changes,
                     "expected_total": expected_total,
+                    "room_night_limit": room_night_limit,
                 },
             )
             return fake_result
@@ -483,6 +495,7 @@ class TestConfirm:
                 "booking_id": 456,
                 "changes": changes,
                 "expected_total": Decimal("75.00"),
+                "room_night_limit": _ROOM_NIGHT_LIMIT,
             },
         ]
 
@@ -505,6 +518,7 @@ class TestConfirm:
             customer_id: int,
             rooms: Sequence[write_ops.RoomRequest],
             expected_total: Decimal | None = None,
+            room_night_limit: write_ops.RoomNightLimit | None = None,
         ) -> _FakeCommitResult:
             """Count the call and return a fixed result.
 
@@ -514,12 +528,13 @@ class TestConfirm:
                 customer_id: Unused; only the call count matters here.
                 rooms: Unused; only the call count matters here.
                 expected_total: Unused; the total the real write checks before COMMIT.
+                room_night_limit: Unused; the limit the real write applies.
 
             Returns:
                 The fixed `fake_result`.
 
             """
-            _ = write_pool, customer_id, rooms, expected_total
+            _ = write_pool, customer_id, rooms, expected_total, room_night_limit
             nonlocal call_count
             call_count += 1
             return fake_result
@@ -566,9 +581,10 @@ class TestConfirm:
             customer_id: int,
             rooms: Sequence[write_ops.RoomRequest],
             expected_total: Decimal | None = None,
+            room_night_limit: write_ops.RoomNightLimit | None = None,
         ) -> _FakeCommitResult:
             """Refuse unconditionally, simulating nights taken in the meantime."""
-            _ = write_pool, customer_id, rooms, expected_total
+            _ = write_pool, customer_id, rooms, expected_total, room_night_limit
             msg = "Room 101 is not available for every night requested."
             raise proposals_module.write_ops.BookingWriteError(msg)
 
@@ -616,9 +632,10 @@ class TestConfirm:
             customer_id: int,
             rooms: Sequence[write_ops.RoomRequest],
             expected_total: Decimal | None = None,
+            room_night_limit: write_ops.RoomNightLimit | None = None,
         ) -> _FakeCommitResult:
             """Simulate a dead pool on the first call only."""
-            _ = write_pool, customer_id, rooms, expected_total
+            _ = write_pool, customer_id, rooms, expected_total, room_night_limit
             msg = "Could not reach the database to complete this request."
             raise proposals_module.write_ops.BookingUnavailableError(msg)
 
@@ -664,9 +681,10 @@ class TestConfirm:
             customer_id: int,
             rooms: Sequence[write_ops.RoomRequest],
             expected_total: Decimal | None = None,
+            room_night_limit: write_ops.RoomNightLimit | None = None,
         ) -> _FakeCommitResult:
             """Simulate the ack being lost after a commit that landed."""
-            _ = write_pool, customer_id, rooms, expected_total
+            _ = write_pool, customer_id, rooms, expected_total, room_night_limit
             msg = "Could not reach the database to complete this request."
             raise proposals_module.write_ops.BookingUnavailableError(msg)
 
@@ -735,9 +753,10 @@ class TestConfirm:
             customer_id: int,
             rooms: Sequence[write_ops.RoomRequest],
             expected_total: Decimal | None = None,
+            room_night_limit: write_ops.RoomNightLimit | None = None,
         ) -> _FakeCommitResult:
             """Simulate a dead pool."""
-            _ = write_pool, customer_id, rooms, expected_total
+            _ = write_pool, customer_id, rooms, expected_total, room_night_limit
             msg = "Could not reach the database to complete this request."
             raise proposals_module.write_ops.BookingUnavailableError(msg)
 
@@ -860,9 +879,10 @@ class TestConfirm:
             customer_id: int,
             rooms: Sequence[write_ops.RoomRequest],
             expected_total: Decimal | None = None,
+            room_night_limit: write_ops.RoomNightLimit | None = None,
         ) -> _FakeCommitResult:
             """Fail with BookingUnavailableError once, then succeed."""
-            _ = write_pool, customer_id, rooms, expected_total
+            _ = write_pool, customer_id, rooms, expected_total, room_night_limit
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -920,9 +940,10 @@ class TestConfirm:
             customer_id: int,
             rooms: Sequence[write_ops.RoomRequest],
             expected_total: Decimal | None = None,
+            room_night_limit: write_ops.RoomNightLimit | None = None,
         ) -> _FakeCommitResult:
             """Simulate a dead pool."""
-            _ = write_pool, customer_id, rooms, expected_total
+            _ = write_pool, customer_id, rooms, expected_total, room_night_limit
             msg = "Could not reach the database to complete this request."
             raise proposals_module.write_ops.BookingUnavailableError(msg)
 
@@ -974,9 +995,10 @@ class TestConfirm:
             customer_id: int,
             rooms: Sequence[write_ops.RoomRequest],
             expected_total: Decimal | None = None,
+            room_night_limit: write_ops.RoomNightLimit | None = None,
         ) -> _FakeCommitResult:
             """Simulate a dead pool."""
-            _ = write_pool, customer_id, rooms, expected_total
+            _ = write_pool, customer_id, rooms, expected_total, room_night_limit
             msg = "Could not reach the database to complete this request."
             raise proposals_module.write_ops.BookingUnavailableError(msg)
 
@@ -1042,6 +1064,7 @@ class TestConfirm:
             customer_id: int,
             rooms: Sequence[write_ops.RoomRequest],
             expected_total: Decimal | None = None,
+            room_night_limit: write_ops.RoomNightLimit | None = None,
         ) -> _FakeCommitResult:
             """Return a fixed successful result, ignoring all arguments.
 
@@ -1051,12 +1074,13 @@ class TestConfirm:
                 customer_id: Unused; the test only cares about the result.
                 rooms: Unused; the test only cares about the result.
                 expected_total: Unused; the total the real write checks before COMMIT.
+                room_night_limit: Unused; the limit the real write applies.
 
             Returns:
                 A fixed result matching the proposal's total.
 
             """
-            _ = write_pool, customer_id, rooms, expected_total
+            _ = write_pool, customer_id, rooms, expected_total, room_night_limit
             return _FakeCommitResult(total_amount=Decimal("100.00"))
 
         monkeypatch.setattr(
@@ -1099,6 +1123,7 @@ class TestConfirm:
             customer_id: int,
             rooms: Sequence[write_ops.RoomRequest],
             expected_total: Decimal | None = None,
+            room_night_limit: write_ops.RoomNightLimit | None = None,
         ) -> _FakeCommitResult:
             """Refuse as the real write does when its total disagrees.
 
@@ -1108,12 +1133,13 @@ class TestConfirm:
                 customer_id: Unused; the test only cares about the mismatch.
                 rooms: Unused; the test only cares about the mismatch.
                 expected_total: Unused; the test only cares about the mismatch.
+                room_night_limit: Unused; the limit the real write applies.
 
             Raises:
                 PricingMismatchError: Unconditionally.
 
             """
-            _ = write_pool, customer_id, rooms, expected_total
+            _ = write_pool, customer_id, rooms, expected_total, room_night_limit
             raise proposals_module.write_ops.PricingMismatchError(
                 expected_total=Decimal("100.00"), computed_total=Decimal("999.00"),
             )
@@ -1170,9 +1196,10 @@ class TestAuditLogging:
             customer_id: int,
             rooms: Sequence[write_ops.RoomRequest],
             expected_total: Decimal | None = None,
+            room_night_limit: write_ops.RoomNightLimit | None = None,
         ) -> _FakeCommitResult:
             """Return a fixed successful result, ignoring all arguments."""
-            _ = write_pool, customer_id, rooms, expected_total
+            _ = write_pool, customer_id, rooms, expected_total, room_night_limit
             return fake_result
 
         monkeypatch.setattr(

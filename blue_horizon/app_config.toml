@@ -151,6 +151,12 @@ transient_retry_backoff_s = 0.15
 # Seconds an unconfirmed proposal stays in the store before it is purged
 ttl_s = 1800
 
+[booking.limits]
+# Most room-nights one guest may book within the window
+max_room_nights_per_guest = 60
+# Rolling window, in hours, whose bookings count toward the limit
+room_night_window_hours = 24
+
 [load_data.information_redis]
 # Folder with the Redis ingestion pickles, relative to the repo root
 data_path = "data/pandas"

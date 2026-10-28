@@ -217,7 +217,8 @@ def build_booking_agent(
 
         Returns:
             Dict with `proposal_id` on success, or `status: "error"` and
-            `error` if any requested night is unavailable.
+            `error` if any requested night is unavailable or the booking
+            would take the guest past the room-night limit.
 
         """
         customer_id, thread_id = _identity_from_config(config)
@@ -235,6 +236,16 @@ def build_booking_agent(
             ]
             priced = await write_ops.price_rooms(
                 resources.get_write_pool(), requests,
+            )
+            await write_ops.check_room_night_limit(
+                resources.get_write_pool(),
+                customer_id=customer_id,
+                limit=resources.room_night_limit,
+                booking_id=None,
+                nights_before=0,
+                nights_after=sum(
+                    (stay.check_out - stay.check_in).days for stay in priced
+                ),
             )
         except write_ops.BookingWriteError as exc:
             return _tool_refusal("propose_booking", exc)
@@ -320,8 +331,9 @@ def build_booking_agent(
 
         Returns:
             Dict with `proposal_id` on success, or `status: "error"` and
-            `error` if the booking is not found or a replacement is
-            unavailable.
+            `error` if the booking is not found, a replacement is
+            unavailable, or the change would take the guest past the
+            room-night limit.
 
         """
         customer_id, thread_id = _identity_from_config(config)
@@ -333,6 +345,14 @@ def build_booking_agent(
             )
             instructions, summary_changes, total = await _price_modification(
                 resources.get_write_pool(), booking=booking, changes=changes,
+            )
+            await write_ops.check_room_night_limit(
+                resources.get_write_pool(),
+                customer_id=customer_id,
+                limit=resources.room_night_limit,
+                booking_id=booking_id,
+                nights_before=_room_nights(booking, []),
+                nights_after=_room_nights(booking, instructions),
             )
         except write_ops.BookingWriteError as exc:
             return _tool_refusal("propose_modification", exc, booking_id=booking_id)
@@ -737,3 +757,30 @@ async def _price_modification(
         )
 
     return instructions, summary_changes, unchanged_total + changed_total
+
+
+def _room_nights(
+    booking: write_ops.BookingSummary,
+    instructions: Sequence[write_ops.ModifyRoomInstruction],
+) -> int:
+    """Count a booking's room-nights with a modification's changes applied.
+
+    Args:
+        booking: The booking as it stands.
+        instructions: Replacement ranges, keyed by `booking_room_id`; an
+            empty sequence counts the booking unchanged.
+
+    Returns:
+        int: Room-nights across the booking's room-stays, each replaced
+        room-stay counted by its new range.
+
+    """
+    replaced = {i.booking_room_id: i for i in instructions}
+    nights = 0
+    for stay in booking.rooms:
+        change = replaced.get(stay.booking_room_id)
+        if change is None:
+            nights += (stay.check_out - stay.check_in).days
+        else:
+            nights += (change.new_check_out - change.new_check_in).days
+    return nights

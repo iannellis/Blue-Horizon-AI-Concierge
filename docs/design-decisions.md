@@ -809,6 +809,46 @@ None of these caps total spend. That is the job of the monthly budget on the
 deployment's OpenAI project, which lives outside the codebase and stops the bill even
 if every limit here were bypassed.
 
+### One visitor could book out the hotel for everyone else
+
+**Status:** adopted, adding `[booking.limits]`.
+
+Nothing limited how much one guest could book. A single `propose_booking` call can list
+many rooms, each for a long stay, and four searches of fifteen rooms each fit in one
+turn, so one message could book about sixty rooms. Every other visitor would then see a
+sold-out room type or date range until the nightly reset. The hourly message limit
+bounds how often a visitor writes, not how much each write takes.
+
+**The limit counts room-nights, not bookings.** One booking can hold sixty rooms, so a
+cap on bookings bounds nothing. A room-night is one room for one night, and a guest may
+hold 60 of them across bookings made in the last 24 hours. Counting by `booked_at`
+needed no schema change: the seeded guests' loaded history predates the window, and the
+window matches the nightly reset. Cancelled bookings do not count, since they released
+their nights.
+
+**It is enforced inside the write, with an earlier check that only informs.**
+`commit_booking` and `modify_booking` count and refuse inside their transactions, so the
+limit holds whatever the model or a client does, and `write_ops.py` stays the only
+writer. The propose tools run the same count without a lock so the model can tell the
+guest before a dialog appears, but a proposal that passed can still be refused at
+confirm.
+
+**A per-guest advisory lock, not a row lock, makes the count safe under concurrency.**
+The count reads, then writes, so two confirms for one guest could each see the total
+before the other committed. The usual fix, `SELECT ... FOR UPDATE` on the guest's
+`customers` row, needs `UPDATE` on `customers`, and widening `bh_agent_rw`'s grants for
+a lock was not worth it. `pg_advisory_xact_lock(namespace, customer_id)` serializes one
+guest's writes without touching a grant, is released when the transaction ends, and uses
+a two-key form so it cannot collide with any other advisory lock.
+
+**A modification is checked only when it adds room-nights.** A guest over the limit can
+still move or shorten a stay. A booking made before the window, such as a seeded guest's
+reservation, counts only for the nights a modification adds. That leaves one gap: the
+growth is not recorded, so extending the same old booking again starts from the full
+allowance. Closing it would take a column recording when each room-stay was last
+acquired, and so a reload of the Parent branch. Each extension still takes a guest
+message and a confirm under the hourly limit, which was judged enough for a demo.
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

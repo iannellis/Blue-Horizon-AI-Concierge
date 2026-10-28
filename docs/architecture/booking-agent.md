@@ -243,9 +243,12 @@ decides.
 
 Guests are identified without a real login, since this is a demo. A session with no
 guest yet claims a random one that nobody else currently holds, tracked in an in-memory
-claim registry guarded by a lock. A single module-level dict is sufficient because the
-whole Space runs as one Streamlit process, so every browser session already lives on a
-thread of that same process.
+claim registry guarded by a lock. One in-memory dict is sufficient because the whole
+Space runs as one Streamlit process, so every browser session already lives on a thread
+of that same process. The dict and its lock are created by an `st.cache_resource`
+function rather than held in a module global, because Streamlit runs the script in a
+fresh module on every rerun and a global would start empty each time. The hourly turn
+limit's registry is held the same way.
 
 A claim's activity timestamp refreshes on every rerun of its session, so a closed or
 ten-minutes-idle tab ages out and returns its guest to the pool. Signing out releases

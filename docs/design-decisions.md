@@ -849,6 +849,26 @@ allowance. Closing it would take a column recording when each room-stay was last
 acquired, and so a reload of the Parent branch. Each extension still takes a guest
 message and a confirm under the hourly limit, which was judged enough for a demo.
 
+### The guest claims and the turn limit were erased on every rerun
+
+**Status:** fixed.
+
+Testing the hourly turn limit by hand got to twelve messages with no sign of a limit.
+Both the turn registry and the guest claim registry were module-level dicts, and
+Streamlit executes `ui/app.py` in a new module on every rerun, so each rerun started
+with both empty. A turn was recorded in a dict the next rerun discarded, so no visitor
+ever got past one. The guest claim registry had the same defect from the start: every
+new session saw no claims, so two visitors could be handed the same guest, and the
+capacity message could never appear. The locks were recreated too, so they excluded
+nothing.
+
+The unit tests imported the module once and called the functions directly, so the dicts
+lived for the whole test session and the tests passed. Both registries are now created
+by `st.cache_resource` functions, which return the same object to every rerun and every
+session in the process. The tests now also execute the script twice in fresh modules, as
+Streamlit does, and check that a turn and a claim recorded in the first run hold in the
+second.
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

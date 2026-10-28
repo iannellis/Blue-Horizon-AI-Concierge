@@ -12,10 +12,12 @@ Not covered here: `st.dialog`-decorated flows, session-state-driven widgets
 `_render_guest_assignment` itself), and button click handling -- these need
 a full Streamlit AppTest harness to exercise meaningfully, which is out of
 scope for this module. The guest claim registry it calls into
-(`_try_claim_guest`, `_touch_claim`, `_release_claim`) is plain module
-state guarded by a lock, with no widget dependency, so it is covered here
+(`_try_claim_guest`, `_touch_claim`, `_release_claim`) is process state
+guarded by a lock, with no widget dependency, so it is covered here
 directly, as is the hourly turn limit registry (`_reserve_turn`,
-`_turn_limit_reset_at`) built the same way.
+`_turn_limit_reset_at`) built the same way. Both are also checked across
+two executions of the script, since Streamlit runs it in a fresh module on
+every rerun and state in a plain global would not survive.
 
 The entire module is skipped if streamlit is not installed in the current
 environment (it lives in the optional ``ui`` dependency group).
@@ -24,8 +26,11 @@ environment (it lives in the optional ``ui`` dependency group).
 # ruff: noqa: S101
 
 import logging
+import sys
+import types
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock, patch
 
@@ -51,7 +56,7 @@ from ui.app import (  # noqa: E402
     _configure_logging,
     _confirm_proposal,
     _fetch_bookings,
-    _guest_claims,
+    _guest_claim_registry,
     _GuestClaim,
     _handle_stream_event,
     _http_error_message,
@@ -65,12 +70,12 @@ from ui.app import (  # noqa: E402
     _render_cancel_summary,
     _render_modify_summary,
     _reserve_turn,
-    _sent_turns,
     _shipping_handler,
     _stream_message,
     _touch_claim,
     _try_claim_guest,
     _turn_limit_reset_at,
+    _turn_registry,
     _visitor_key,
 )
 
@@ -875,17 +880,17 @@ class TestGuestClaimRegistry:
 
     def setup_method(self) -> None:
         """Start each test with an empty claim registry."""
-        _guest_claims.clear()
+        _guest_claim_registry().claims.clear()
 
     def teardown_method(self) -> None:
         """Leave no claims behind for the next test."""
-        _guest_claims.clear()
+        _guest_claim_registry().claims.clear()
 
     def test_claims_an_available_guest(self) -> None:
         """An unclaimed candidate is assigned to the requesting session."""
         customer_id = _try_claim_guest("session-a", [1, 2, 3])
         assert customer_id in {1, 2, 3}
-        assert _guest_claims[customer_id].session_id == "session-a"
+        assert _guest_claim_registry().claims[customer_id].session_id == "session-a"
 
     def test_returns_none_when_all_claimed(self) -> None:
         """No candidate is left unclaimed → None, not a collision."""
@@ -894,27 +899,27 @@ class TestGuestClaimRegistry:
 
     def test_expired_claim_is_swept_and_reclaimable(self) -> None:
         """A claim idle past the TTL is dropped and its guest reassignable."""
-        _guest_claims[1] = _GuestClaim(
+        _guest_claim_registry().claims[1] = _GuestClaim(
             session_id="session-a",
             last_seen=datetime.now(UTC) - timedelta(seconds=_GUEST_CLAIM_TTL_S + 1),
         )
         customer_id = _try_claim_guest("session-b", [1])
         assert customer_id == 1
-        assert _guest_claims[1].session_id == "session-b"
+        assert _guest_claim_registry().claims[1].session_id == "session-b"
 
     def test_touch_refreshes_own_claim(self) -> None:
         """Touching a claim this session holds refreshes it and returns its id."""
         _try_claim_guest("session-a", [1])
-        before = _guest_claims[1].last_seen
+        before = _guest_claim_registry().claims[1].last_seen
         result = _touch_claim(1, "session-a")
         assert result == 1
-        assert _guest_claims[1].last_seen >= before
+        assert _guest_claim_registry().claims[1].last_seen >= before
 
     def test_touch_recreates_missing_claim(self) -> None:
         """A claim missing entirely (e.g. after a process restart) is recreated."""
         result = _touch_claim(1, "session-a")
         assert result == 1
-        assert _guest_claims[1].session_id == "session-a"
+        assert _guest_claim_registry().claims[1].session_id == "session-a"
 
     def test_touch_refuses_to_steal_another_sessions_claim(self) -> None:
         """A claim now held by a different session is left alone, not stolen.
@@ -926,13 +931,13 @@ class TestGuestClaimRegistry:
         _try_claim_guest("session-a", [1])
         result = _touch_claim(1, "session-b")
         assert result is None
-        assert _guest_claims[1].session_id == "session-a"
+        assert _guest_claim_registry().claims[1].session_id == "session-a"
 
     def test_release_drops_the_claim(self) -> None:
         """Releasing a held claim removes it from the registry."""
         _try_claim_guest("session-a", [1])
         _release_claim(1)
-        assert 1 not in _guest_claims
+        assert 1 not in _guest_claim_registry().claims
 
     def test_release_none_is_a_no_op(self) -> None:
         """Releasing `None` (no claim ever held) does not raise."""
@@ -949,11 +954,11 @@ class TestTurnLimitRegistry:
 
     def setup_method(self) -> None:
         """Start each test with an empty turn registry."""
-        _sent_turns.clear()
+        _turn_registry().sent.clear()
 
     def teardown_method(self) -> None:
         """Leave no turns behind for the next test."""
-        _sent_turns.clear()
+        _turn_registry().sent.clear()
 
     def test_limits_come_from_the_api_config(self) -> None:
         """The UI reads the same `[chat]` section the API's typed config does."""
@@ -967,29 +972,29 @@ class TestTurnLimitRegistry:
         granted = [_reserve_turn("visitor-a") for _ in range(limit)]
         assert all(granted)
         assert _reserve_turn("visitor-a") is False
-        assert len(_sent_turns["visitor-a"]) == limit
+        assert len(_turn_registry().sent["visitor-a"]) == limit
 
     def test_reset_at_is_when_the_oldest_turn_ages_out(self) -> None:
         """A visitor at the limit gets a turn back an hour after their oldest."""
         assert _turn_limit_reset_at("visitor-a") is None
         oldest = datetime.now(UTC) - timedelta(minutes=50)
         limit = _chat_limits().max_turns_per_hour
-        _sent_turns["visitor-a"] = [oldest] * limit
+        _turn_registry().sent["visitor-a"] = [oldest] * limit
         assert _turn_limit_reset_at("visitor-a") == oldest + timedelta(hours=1)
 
     def test_turns_older_than_an_hour_are_swept(self) -> None:
         """Turns outside the window no longer count, and empty visitors are dropped."""
         stale = datetime.now(UTC) - timedelta(hours=1, seconds=1)
-        _sent_turns["visitor-a"] = [stale] * _chat_limits().max_turns_per_hour
-        _sent_turns["visitor-b"] = [stale]
+        _turn_registry().sent["visitor-a"] = [stale] * _chat_limits().max_turns_per_hour
+        _turn_registry().sent["visitor-b"] = [stale]
         assert _reserve_turn("visitor-a") is True
-        assert len(_sent_turns["visitor-a"]) == 1
-        assert "visitor-b" not in _sent_turns
+        assert len(_turn_registry().sent["visitor-a"]) == 1
+        assert "visitor-b" not in _turn_registry().sent
 
     def test_visitors_are_counted_separately(self) -> None:
         """One visitor at the limit does not limit another."""
         limit = _chat_limits().max_turns_per_hour
-        _sent_turns["visitor-a"] = [datetime.now(UTC)] * limit
+        _turn_registry().sent["visitor-a"] = [datetime.now(UTC)] * limit
         assert _reserve_turn("visitor-b") is True
 
     def test_signed_in_visitor_is_keyed_by_account(self) -> None:
@@ -1011,6 +1016,87 @@ class TestTurnLimitRegistry:
         ):
             mock_st.session_state.session_id = "session-a"
             assert _visitor_key() == "session:session-a"
+
+
+# ---------------------------------------------------------------------------
+# Registries across reruns
+# ---------------------------------------------------------------------------
+
+
+_RERUN_MODULE_NAME = "ui_app_rerun"
+
+
+@pytest.fixture
+def rerun_app(monkeypatch: pytest.MonkeyPatch) -> Iterator[types.ModuleType]:
+    """Execute ui/app.py in a fresh module, as Streamlit does on every rerun.
+
+    The tests above import the module once, so its globals live as long as
+    the test session and cannot show state lost between reruns. A test gets
+    the next rerun by calling `_execute_app_source` again.
+
+    Args:
+        monkeypatch: Registers the module in `sys.modules` for the test, as
+            Streamlit registers its `__main__` module, so dataclasses can
+            resolve the module's string annotations.
+
+    Yields:
+        types.ModuleType: The first run's module.
+
+    """
+    module = _execute_app_source(monkeypatch)
+    yield module
+    module._guest_claim_registry.clear()  # noqa: SLF001
+    module._turn_registry.clear()  # noqa: SLF001
+
+
+def _execute_app_source(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
+    """Run ui/app.py's source in a new module, without calling `main`.
+
+    Args:
+        monkeypatch: Used to register the module in `sys.modules`.
+
+    Returns:
+        types.ModuleType: The freshly executed module.
+
+    """
+    path = Path(__file__).resolve().parents[2] / "ui" / "app.py"
+    module = types.ModuleType(_RERUN_MODULE_NAME)
+    module.__file__ = str(path)
+    monkeypatch.setitem(sys.modules, _RERUN_MODULE_NAME, module)
+    code = compile(path.read_text(encoding="utf-8"), str(path), "exec")
+    exec(code, module.__dict__)  # noqa: S102
+    return module
+
+
+class TestRegistriesSurviveReruns:
+    """Claims and turns recorded in one rerun are still there in the next.
+
+    Streamlit runs the script in a new module on every rerun, so state held
+    in a plain module global starts empty each time. The registries live in
+    `st.cache_resource` to avoid that.
+    """
+
+    def test_turns_counted_in_one_rerun_still_count_in_the_next(
+        self,
+        rerun_app: types.ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A visitor who used their allowance is still limited after a rerun."""
+        for _ in range(_chat_limits().max_turns_per_hour):
+            assert rerun_app._reserve_turn("visitor-a") is True  # noqa: SLF001
+        next_run = _execute_app_source(monkeypatch)
+        assert next_run._reserve_turn("visitor-a") is False  # noqa: SLF001
+        assert next_run._turn_limit_reset_at("visitor-a") is not None  # noqa: SLF001
+
+    def test_a_claimed_guest_stays_claimed_in_the_next_rerun(
+        self,
+        rerun_app: types.ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Another session cannot be handed a guest claimed in an earlier rerun."""
+        assert rerun_app._try_claim_guest("session-a", [1]) == 1  # noqa: SLF001
+        next_run = _execute_app_source(monkeypatch)
+        assert next_run._try_claim_guest("session-b", [1]) is None  # noqa: SLF001
 
 
 # ---------------------------------------------------------------------------

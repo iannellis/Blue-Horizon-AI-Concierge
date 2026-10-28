@@ -493,10 +493,14 @@ def _dismiss_pending_proposal() -> None:
 #
 # The whole HuggingFace Space runs as one Streamlit process (see
 # deploy/supervisord.conf), and every browser session lives inside it as a
-# thread of that same process, so a plain module-level dict guarded by a
-# lock is enough to keep concurrent sessions off each other's guest --
-# no database table or backend endpoint required. It resets if the process
-# restarts, which is fine: that clears every session's UI state too.
+# thread of that same process, so an in-memory dict guarded by a lock is
+# enough to keep concurrent sessions off each other's guest -- no database
+# table or backend endpoint required. It resets if the process restarts,
+# which is fine: that clears every session's UI state too.
+#
+# The dict cannot be a plain module global. Streamlit executes this file in
+# a fresh module on every rerun, so a global would start empty each time.
+# `st.cache_resource` returns the same object to every rerun and session.
 
 
 @dataclasses.dataclass
@@ -513,8 +517,29 @@ class _GuestClaim:
     last_seen: datetime
 
 
-_guest_claims: dict[int, _GuestClaim] = {}
-_guest_claims_lock = threading.Lock()
+@dataclasses.dataclass
+class _GuestClaimRegistry:
+    """Every live guest claim, and the lock that guards them.
+
+    Attributes:
+        claims: Each claimed guest's id, mapped to its claim.
+        lock: Held while reading or changing `claims`.
+
+    """
+
+    claims: dict[int, _GuestClaim] = dataclasses.field(default_factory=dict)
+    lock: threading.Lock = dataclasses.field(default_factory=threading.Lock)
+
+
+@st.cache_resource(show_spinner=False)
+def _guest_claim_registry() -> _GuestClaimRegistry:
+    """Return the guest claim registry shared by every session in this process.
+
+    Returns:
+        _GuestClaimRegistry: The same registry on every call.
+
+    """
+    return _GuestClaimRegistry()
 
 
 def _try_claim_guest(session_id: str, candidate_ids: list[int]) -> int | None:
@@ -533,29 +558,33 @@ def _try_claim_guest(session_id: str, candidate_ids: list[int]) -> int | None:
         currently claimed by a live session.
 
     """
-    with _guest_claims_lock:
-        _sweep_expired_claims_locked()
-        available = [cid for cid in candidate_ids if cid not in _guest_claims]
+    registry = _guest_claim_registry()
+    with registry.lock:
+        _sweep_expired_claims_locked(registry.claims)
+        available = [cid for cid in candidate_ids if cid not in registry.claims]
         if not available:
             return None
         chosen = secrets.choice(available)
-        _guest_claims[chosen] = _GuestClaim(
+        registry.claims[chosen] = _GuestClaim(
             session_id=session_id,
             last_seen=datetime.now(UTC),
         )
         return chosen
 
 
-def _sweep_expired_claims_locked() -> None:
+def _sweep_expired_claims_locked(claims: dict[int, _GuestClaim]) -> None:
     """Drop claims idle past `_GUEST_CLAIM_TTL_S`.
 
-    Callers must hold `_guest_claims_lock`.
+    Callers must hold the registry's lock.
+
+    Args:
+        claims: The registry's claims, swept in place.
 
     """
     cutoff = datetime.now(UTC) - timedelta(seconds=_GUEST_CLAIM_TTL_S)
-    expired = [cid for cid, claim in _guest_claims.items() if claim.last_seen < cutoff]
+    expired = [cid for cid, claim in claims.items() if claim.last_seen < cutoff]
     for cid in expired:
-        del _guest_claims[cid]
+        del claims[cid]
 
 
 def _touch_claim(customer_id: int, session_id: str) -> int | None:
@@ -578,11 +607,12 @@ def _touch_claim(customer_id: int, session_id: str) -> int | None:
         `session_id`, `None` if another session now holds it.
 
     """
-    with _guest_claims_lock:
-        claim = _guest_claims.get(customer_id)
+    registry = _guest_claim_registry()
+    with registry.lock:
+        claim = registry.claims.get(customer_id)
         if claim is not None and claim.session_id != session_id:
             return None
-        _guest_claims[customer_id] = _GuestClaim(
+        registry.claims[customer_id] = _GuestClaim(
             session_id=session_id,
             last_seen=datetime.now(UTC),
         )
@@ -599,8 +629,9 @@ def _release_claim(customer_id: int | None) -> None:
     """
     if customer_id is None:
         return
-    with _guest_claims_lock:
-        _guest_claims.pop(customer_id, None)
+    registry = _guest_claim_registry()
+    with registry.lock:
+        registry.claims.pop(customer_id, None)
 
 
 def _persist_guest_identity(customer_id: int) -> None:
@@ -622,10 +653,11 @@ def _persist_guest_identity(customer_id: int) -> None:
 # Turn limit registry
 # ============================
 #
-# Held in this process for the same reason as the guest claim registry above.
-# It bounds what one visitor can spend on the model provider, so it is keyed
-# by who is sending, not by guest or thread: a "New Conversation" click makes
-# a fresh thread, and the guest returns to the pool for the next visitor.
+# Held in this process, through `st.cache_resource`, for the same reasons as
+# the guest claim registry above. It bounds what one visitor can spend on the
+# model provider, so it is keyed by who is sending, not by guest or thread: a
+# "New Conversation" click makes a fresh thread, and the guest returns to the
+# pool for the next visitor.
 
 
 @dataclasses.dataclass(frozen=True)
@@ -643,9 +675,33 @@ class _ChatLimits:
     max_turns_per_hour: int
 
 
+@dataclasses.dataclass
+class _TurnRegistry:
+    """Every visitor's turns in the window, and the lock that guards them.
+
+    Attributes:
+        sent: Each visitor's key, mapped to when they sent each turn, oldest
+            first.
+        lock: Held while reading or changing `sent`.
+
+    """
+
+    sent: dict[str, list[datetime]] = dataclasses.field(default_factory=dict)
+    lock: threading.Lock = dataclasses.field(default_factory=threading.Lock)
+
+
 _TURN_LIMIT_WINDOW = timedelta(hours=1)
-_sent_turns: dict[str, list[datetime]] = {}
-_sent_turns_lock = threading.Lock()
+
+
+@st.cache_resource(show_spinner=False)
+def _turn_registry() -> _TurnRegistry:
+    """Return the turn registry shared by every session in this process.
+
+    Returns:
+        _TurnRegistry: The same registry on every call.
+
+    """
+    return _TurnRegistry()
 
 
 @functools.cache
@@ -696,32 +752,39 @@ def _turn_limit_reset_at(visitor: str) -> datetime | None:
         ``None`` if the visitor is under the limit and may send now.
 
     """
-    with _sent_turns_lock:
-        _sweep_sent_turns_locked()
-        return _reset_at_locked(visitor)
+    registry = _turn_registry()
+    with registry.lock:
+        _sweep_sent_turns_locked(registry.sent)
+        return _reset_at_locked(registry.sent, visitor)
 
 
-def _sweep_sent_turns_locked() -> None:
+def _sweep_sent_turns_locked(sent_turns: dict[str, list[datetime]]) -> None:
     """Drop turns older than the window, and visitors left with none.
 
-    Callers must hold `_sent_turns_lock`.
+    Callers must hold the registry's lock.
+
+    Args:
+        sent_turns: The registry's turns, swept in place.
 
     """
     cutoff = datetime.now(UTC) - _TURN_LIMIT_WINDOW
-    for visitor in list(_sent_turns):
-        recent = [sent for sent in _sent_turns[visitor] if sent > cutoff]
+    for visitor in list(sent_turns):
+        recent = [sent for sent in sent_turns[visitor] if sent > cutoff]
         if recent:
-            _sent_turns[visitor] = recent
+            sent_turns[visitor] = recent
         else:
-            del _sent_turns[visitor]
+            del sent_turns[visitor]
 
 
-def _reset_at_locked(visitor: str) -> datetime | None:
+def _reset_at_locked(
+    sent_turns: dict[str, list[datetime]], visitor: str,
+) -> datetime | None:
     """Return when a swept visitor may send again, as `_turn_limit_reset_at`.
 
-    Callers must hold `_sent_turns_lock` and have just swept the registry.
+    Callers must hold the registry's lock and have just swept it.
 
     Args:
+        sent_turns: The registry's turns.
         visitor: Key from `_visitor_key`.
 
     Returns:
@@ -729,7 +792,7 @@ def _reset_at_locked(visitor: str) -> datetime | None:
         ``None`` if the visitor is under the limit.
 
     """
-    sent = _sent_turns.get(visitor, [])
+    sent = sent_turns.get(visitor, [])
     if len(sent) < _chat_limits().max_turns_per_hour:
         return None
     return sent[0] + _TURN_LIMIT_WINDOW
@@ -751,11 +814,12 @@ def _reserve_turn(visitor: str) -> bool:
         the visitor is already at the limit.
 
     """
-    with _sent_turns_lock:
-        _sweep_sent_turns_locked()
-        if _reset_at_locked(visitor) is not None:
+    registry = _turn_registry()
+    with registry.lock:
+        _sweep_sent_turns_locked(registry.sent)
+        if _reset_at_locked(registry.sent, visitor) is not None:
             return False
-        _sent_turns.setdefault(visitor, []).append(datetime.now(UTC))
+        registry.sent.setdefault(visitor, []).append(datetime.now(UTC))
         return True
 
 

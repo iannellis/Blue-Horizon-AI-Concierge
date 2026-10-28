@@ -253,6 +253,13 @@ function rather than held in a module global, because Streamlit runs the script 
 fresh module on every rerun and a global would start empty each time. The hourly turn
 limit's registry is held the same way.
 
+A claim is held by the visitor, not the browser session: the Google account when signed
+in, the session otherwise, the same key the hourly turn limit counts by. A session that
+starts without a guest, after a hard refresh or in a second tab, gets back the guest its
+visitor already holds. Nothing about the guest is put in the URL, so a shared link does
+not carry the sender's guest with it. Without auth the session id is kept in the `sid`
+URL parameter, since nothing else survives a refresh.
+
 A claim's activity timestamp refreshes on every rerun of its session, so a closed or
 ten-minutes-idle tab ages out and returns its guest to the pool. Signing out releases
 the claim immediately. If every seeded guest is claimed, the session sees a capacity

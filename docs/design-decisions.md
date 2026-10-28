@@ -904,6 +904,25 @@ The loader now stamps every pre-existing booking with midnight UTC on the first 
 stand-in. This one comes from the data rather than the clock, so it is the same on every
 reload and can never fall inside the window.
 
+### The guest followed a shared link
+
+**Status:** fixed.
+
+A claim was held by a random session id, and the UI wrote that id and the guest's id
+into the URL as `sid` and `cid` so a hard refresh could restore both. That made the
+address bar a bearer token. A visitor who copied it to share the demo handed the
+recipient their guest, and both could then book and cancel as that guest. Editing `cid`
+by hand also picked a specific guest whenever nobody held it, since a missing claim was
+recreated for whichever session asked.
+
+A claim is now held by the visitor, keyed the same way as the hourly turn limit: the
+Google account when signed in, the session otherwise. A session starting without a guest
+looks up the claim its visitor already holds, so a refresh keeps the guest with nothing
+in the URL. Without auth the session is the only identity, so `sid` is still written
+there, but `cid` no longer is. One account in two tabs now shares one guest, as it
+already shared one turn allowance. A process restart empties the registry, so a visitor
+gets a new guest afterwards, where the URL used to restore the old one.
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

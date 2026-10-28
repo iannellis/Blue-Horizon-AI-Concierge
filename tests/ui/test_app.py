@@ -61,11 +61,11 @@ from ui.app import (  # noqa: E402
     _GuestClaim,
     _handle_stream_event,
     _http_error_message,
-    _int_or_none,
+    _init_session_state,
     _log_api_failure,
     _not_from_export_thread,
     _parse_sse_line,
-    _persist_guest_identity,
+    _persist_session_id,
     _release_claim,
     _render_book_summary,
     _render_cancel_summary,
@@ -873,27 +873,6 @@ class TestSummaryRenderers:
 
 
 # ---------------------------------------------------------------------------
-# _int_or_none
-# ---------------------------------------------------------------------------
-
-
-class TestIntOrNone:
-    """_int_or_none parses a query-param string, tolerating garbage."""
-
-    def test_parses_valid_int(self) -> None:
-        """A numeric string parses to its int value."""
-        assert _int_or_none("7") == 7  # noqa: PLR2004
-
-    def test_none_input_returns_none(self) -> None:
-        """A missing query param (None) returns None."""
-        assert _int_or_none(None) is None
-
-    def test_non_numeric_string_returns_none(self) -> None:
-        """A malformed value (e.g. a hand-edited URL) returns None, not a raise."""
-        assert _int_or_none("not-a-number") is None
-
-
-# ---------------------------------------------------------------------------
 # Guest claim registry
 # ---------------------------------------------------------------------------
 
@@ -910,10 +889,22 @@ class TestGuestClaimRegistry:
         _guest_claim_registry().claims.clear()
 
     def test_claims_an_available_guest(self) -> None:
-        """An unclaimed candidate is assigned to the requesting session."""
+        """An unclaimed candidate is assigned to the requesting visitor."""
         customer_id = _try_claim_guest("session-a", [1, 2, 3])
         assert customer_id in {1, 2, 3}
-        assert _guest_claim_registry().claims[customer_id].session_id == "session-a"
+        assert _guest_claim_registry().claims[customer_id].holder == "session-a"
+
+    def test_returns_the_guest_the_visitor_already_holds(self) -> None:
+        """A refresh or second tab gets the visitor's guest, not a new one."""
+        first = _try_claim_guest("user:a@example.com", [1, 2, 3])
+        again = _try_claim_guest("user:a@example.com", [1, 2, 3])
+        assert again == first
+        assert len(_guest_claim_registry().claims) == 1
+
+    def test_ignores_a_held_guest_no_longer_seeded(self) -> None:
+        """A claim on a guest missing from the list is not handed back."""
+        _try_claim_guest("session-a", [9])
+        assert _try_claim_guest("session-a", [1]) == 1
 
     def test_returns_none_when_all_claimed(self) -> None:
         """No candidate is left unclaimed → None, not a collision."""
@@ -923,12 +914,12 @@ class TestGuestClaimRegistry:
     def test_expired_claim_is_swept_and_reclaimable(self) -> None:
         """A claim idle past the TTL is dropped and its guest reassignable."""
         _guest_claim_registry().claims[1] = _GuestClaim(
-            session_id="session-a",
+            holder="session-a",
             last_seen=datetime.now(UTC) - timedelta(seconds=_GUEST_CLAIM_TTL_S + 1),
         )
         customer_id = _try_claim_guest("session-b", [1])
         assert customer_id == 1
-        assert _guest_claim_registry().claims[1].session_id == "session-b"
+        assert _guest_claim_registry().claims[1].holder == "session-b"
 
     def test_touch_refreshes_own_claim(self) -> None:
         """Touching a claim this session holds refreshes it and returns its id."""
@@ -939,22 +930,21 @@ class TestGuestClaimRegistry:
         assert _guest_claim_registry().claims[1].last_seen >= before
 
     def test_touch_recreates_missing_claim(self) -> None:
-        """A claim missing entirely (e.g. after a process restart) is recreated."""
+        """A claim missing entirely (e.g. released by another tab) is recreated."""
         result = _touch_claim(1, "session-a")
         assert result == 1
-        assert _guest_claim_registry().claims[1].session_id == "session-a"
+        assert _guest_claim_registry().claims[1].holder == "session-a"
 
-    def test_touch_refuses_to_steal_another_sessions_claim(self) -> None:
-        """A claim now held by a different session is left alone, not stolen.
+    def test_touch_refuses_to_steal_another_visitors_claim(self) -> None:
+        """A claim now held by a different visitor is left alone, not stolen.
 
-        This is what makes it safe to restore `customer_id` from the URL
-        after a refresh: if the guest was reassigned while this session was
-        away, touching it must not silently take it back.
+        If the guest was reassigned while this session was away, touching it
+        must not silently take it back.
         """
         _try_claim_guest("session-a", [1])
         result = _touch_claim(1, "session-b")
         assert result is None
-        assert _guest_claim_registry().claims[1].session_id == "session-a"
+        assert _guest_claim_registry().claims[1].holder == "session-a"
 
     def test_release_drops_the_claim(self) -> None:
         """Releasing a held claim removes it from the registry."""
@@ -1123,20 +1113,88 @@ class TestRegistriesSurviveReruns:
 
 
 # ---------------------------------------------------------------------------
-# _persist_guest_identity
+# Session id in the URL
 # ---------------------------------------------------------------------------
 
 
-class TestPersistGuestIdentity:
-    """_persist_guest_identity writes sid/cid into the URL query params."""
+class _SessionState(dict):
+    """Dict with attribute access, standing in for `st.session_state`."""
 
-    def test_writes_session_and_customer_ids(self) -> None:
-        """Both ids land in `st.query_params`, customer_id as a string."""
-        with patch("ui.app.st") as mock_st:
+    def __getattr__(self, name: str) -> object:
+        """Read a key as an attribute.
+
+        Args:
+            name: Key to read.
+
+        Returns:
+            object: The stored value.
+
+        Raises:
+            AttributeError: If the key is absent.
+
+        """
+        try:
+            return self[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
+
+    def __setattr__(self, name: str, value: object) -> None:
+        """Write a key as an attribute.
+
+        Args:
+            name: Key to write.
+            value: Value to store.
+
+        """
+        self[name] = value
+
+
+class TestSessionIdInUrl:
+    """Only an anonymous session's id travels in the URL, never a guest id."""
+
+    def test_writes_sid_without_auth(self) -> None:
+        """Without auth the session id lands in `st.query_params`."""
+        with (
+            patch("ui.app._AUTH_ENABLED", new=False),
+            patch("ui.app.st") as mock_st,
+        ):
             mock_st.session_state.session_id = "session-a"
-            _persist_guest_identity(7)
-        mock_st.query_params.__setitem__.assert_any_call("sid", "session-a")
-        mock_st.query_params.__setitem__.assert_any_call("cid", "7")
+            _persist_session_id()
+        mock_st.query_params.__setitem__.assert_called_once_with("sid", "session-a")
+
+    def test_writes_nothing_with_auth(self) -> None:
+        """A signed-in visitor's claim is found by account, not by URL."""
+        with (
+            patch("ui.app._AUTH_ENABLED", new=True),
+            patch("ui.app.st") as mock_st,
+        ):
+            mock_st.session_state.session_id = "session-a"
+            _persist_session_id()
+        mock_st.query_params.__setitem__.assert_not_called()
+
+    def test_restores_sid_without_auth(self) -> None:
+        """A hard refresh keeps an anonymous session's id."""
+        with (
+            patch("ui.app._AUTH_ENABLED", new=False),
+            patch("ui.app.st") as mock_st,
+        ):
+            mock_st.session_state = _SessionState()
+            mock_st.query_params = {"sid": "session-a", "cid": "7"}
+            _init_session_state()
+        assert mock_st.session_state.session_id == "session-a"
+        assert mock_st.session_state.customer_id is None
+
+    def test_ignores_url_with_auth(self) -> None:
+        """A shared link does not carry the sender's session or guest."""
+        with (
+            patch("ui.app._AUTH_ENABLED", new=True),
+            patch("ui.app.st") as mock_st,
+        ):
+            mock_st.session_state = _SessionState()
+            mock_st.query_params = {"sid": "session-a", "cid": "7"}
+            _init_session_state()
+        assert mock_st.session_state.session_id != "session-a"
+        assert mock_st.session_state.customer_id is None
 
 
 # ---------------------------------------------------------------------------

@@ -868,7 +868,7 @@ def _render_login_page() -> None:
     )
 
 
-def _render_guest_assignment() -> None:
+def _render_guest_assignment(*, api_online: bool) -> None:
     """Claim an exclusive guest for the session, or show why none is held.
 
     A session with no guest yet claims a random one nobody else currently
@@ -883,6 +883,11 @@ def _render_guest_assignment() -> None:
     claiming a fresh guest instead of stealing it back. If every seeded
     guest is claimed, this shows a capacity message instead and leaves
     `customer_id` unset, which the chat input is disabled on.
+
+    Args:
+        api_online: Whether `/v1/health` reported the API ready on this
+            rerun, which decides what an unloadable guest list is blamed on.
+
     """
     customer_id = st.session_state.customer_id
     if customer_id is not None:
@@ -891,7 +896,7 @@ def _render_guest_assignment() -> None:
 
     customers = _fetch_customers()
     if not customers:
-        st.warning("Could not load the guest list.")
+        st.warning(_guest_list_failure_message(api_online=api_online))
         return
 
     if customer_id is None:
@@ -917,6 +922,29 @@ def _render_guest_assignment() -> None:
 
     _persist_guest_identity(customer_id)
     st.caption(f"You're browsing as **{guest['first_name']} {guest['last_name']}**")
+
+
+def _guest_list_failure_message(*, api_online: bool) -> str:
+    """Explain to a visitor why no guest could be assigned.
+
+    While the API is still starting, the recovery poll reruns the page once
+    it is ready, so the visitor only has to wait. Once the API is ready, an
+    empty guest list means the booking database is unreachable, and nothing
+    retries on the visitor's behalf.
+
+    Args:
+        api_online: Whether `/v1/health` reported the API ready.
+
+    Returns:
+        str: Guest-facing copy for the sidebar warning.
+
+    """
+    if api_online:
+        return (
+            "The reservations database can't be reached right now. "
+            "Please reload the page in a few minutes."
+        )
+    return "The concierge is starting up. This page will refresh on its own."
 
 
 def _render_reservations() -> None:
@@ -981,14 +1009,16 @@ def _render_sidebar() -> None:
             st.button("Sign out", on_click=_handle_sign_out, use_container_width=True)
             st.divider()
 
-        _render_guest_assignment()
-        st.divider()
-
+        # Checked before the guest assignment, which words its failure by it.
         # Published to session state so _render_pending_resend() (rendered
         # later, in _render_chat()) can gate "Send again" on it without a
         # second /v1/health round trip of its own.
         online = _check_health()
         st.session_state.api_online = online
+
+        _render_guest_assignment(api_online=online)
+        st.divider()
+
         # This reports readiness (`/v1/health`: startup finished), not
         # whether the model provider, Redis, or Postgres are reachable right
         # now; a failure during a turn shows up in the chat's own failure

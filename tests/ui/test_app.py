@@ -57,6 +57,7 @@ from ui.app import (  # noqa: E402
     _confirm_proposal,
     _fetch_bookings,
     _guest_claim_registry,
+    _guest_list_failure_message,
     _GuestClaim,
     _handle_stream_event,
     _http_error_message,
@@ -123,6 +124,28 @@ class TestCheckHealth:
             side_effect=httpx2.TimeoutException("timeout"),
         ):
             assert _check_health() is False
+
+
+# ---------------------------------------------------------------------------
+# _guest_list_failure_message
+# ---------------------------------------------------------------------------
+
+
+class TestGuestListFailureMessage:
+    """An unloadable guest list is blamed on startup or on the database."""
+
+    def test_api_starting_says_the_page_refreshes_itself(self) -> None:
+        """While the API is down, the recovery poll will rerun the page."""
+        message = _guest_list_failure_message(api_online=False)
+        assert "starting up" in message
+        assert "refresh on its own" in message
+
+    def test_api_ready_blames_the_database_and_asks_for_a_reload(self) -> None:
+        """A ready API with no guests means Postgres is unreachable."""
+        message = _guest_list_failure_message(api_online=True)
+        assert "database" in message
+        assert "reload" in message
+        assert "starting up" not in message
 
 
 # ---------------------------------------------------------------------------

@@ -82,8 +82,8 @@ Once access is granted, the agent is at
 **[iellis02-blue-horizon.hf.space](https://iellis02-blue-horizon.hf.space)**. This exact
 URL must be used; Google login will not work from any other origin.
 
-If the Space has gone to sleep and returns a 500, restart it from
-[huggingface.co/spaces/iellis02/blue-horizon](https://huggingface.co/spaces/iellis02/blue-horizon).
+The first page load after a quiet stretch can take a few extra seconds while the
+database wakes up.
 
 ## Documentation
 

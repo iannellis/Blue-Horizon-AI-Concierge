@@ -97,6 +97,20 @@ against Development directly. Every dated one returns rooms there; availability 
 Development can differ, but the filters are what the label checks. `case_0220` is also
 in the smoke set, so CI sees a labeled turn that depends on the one before it.
 
+`case_0222` through `case_0224` cover the descending price sort and the upper and lower
+bounds added alongside it. A search returns only a few of its matches, so a sort cannot
+stand in for a range: the bounds have to be filters for the right rooms to come back.
+
+| Case | Request | Filters checked |
+|---|---|---|
+| `case_0222` | The most expensive suite for a stay | `room_types`, `sort_by` `"price_desc"`; either reading of "suites" |
+| `case_0223` | Rooms between $300 and $500 a night | `min_nightly_price` and `max_nightly_price` together |
+| `case_0224` | A room that sleeps three at most and is no more than 500 square feet | `max_occupancy`, `max_square_feet` |
+
+These were checked against `data/pandas/` the same way, and every one returns rooms
+there. Every room sleeps at least two, so `case_0224` asks for "three at most" rather
+than a room for one guest, which no room would match.
+
 Each case's opening turn carries an `expected_search` label, which
 `eval_booking_expected_search` compares with the arguments the model actually passed to
 `search_rooms`. The harness captures those arguments before Pydantic fills in defaults,

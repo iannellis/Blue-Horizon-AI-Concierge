@@ -208,9 +208,10 @@ Without the limit, one visitor could book every room of a type for weeks and lea
 other visitor a sold-out hotel until the nightly reset.
 
 The count covers the guest's bookings whose `booked_at` falls in the window and whose
-status is not `cancelled`. The window leaves out the seeded guests' loaded history,
-which was booked when the Parent branch was loaded, and lines up with the nightly
-reset. A cancelled booking does not count, since it released its nights.
+status is not `cancelled`. The window leaves out the seeded guests' loaded history:
+the loader stamps every pre-existing booking with a `booked_at` of midnight UTC on the
+first date `room_availability` covers, long before any booking the app makes. The window
+also lines up with the nightly reset. A cancelled booking does not count, since it released its nights.
 
 `commit_booking` and `modify_booking` enforce it inside their transactions, through
 `write_ops._require_room_night_allowance`, and raise `write_ops.BookingLimitError`, a

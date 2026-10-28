@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import logging
 import sys
 from pathlib import Path
@@ -288,6 +289,26 @@ def _availability_date_bounds(
     return dates.min(), dates.max() + pd.Timedelta(days=1)
 
 
+def _history_booked_at(df_availability: pd.DataFrame) -> dt.datetime:
+    """Return the `booked_at` to stamp on every loaded pre-existing booking.
+
+    Midnight UTC on the first date `room_availability` covers. The source
+    data records no booking time, and this is fixed by the data rather than
+    by when the load runs, so it is the same on every reload and always
+    falls outside the room-night limit's window.
+
+    Args:
+        df_availability: Prepared availability data (see
+            `prepare_room_availability_dataframe`), with a `date` column.
+
+    Returns:
+        dt.datetime: The timezone-aware `booked_at`.
+
+    """
+    min_date, _ = _availability_date_bounds(df_availability)
+    return dt.datetime.combine(min_date.date(), dt.time(), tzinfo=dt.UTC)
+
+
 def _clamp_booking_dates_to_availability(
     df_bookings: pd.DataFrame,
     df_availability: pd.DataFrame,
@@ -313,7 +334,9 @@ def _clamp_booking_dates_to_availability(
     out_of_range = (df_bookings["check_out"] <= min_date) | (
         df_bookings["check_in"] >= max_date
     )
-    dropped = int(out_of_range.sum())
+    # Series[bool].sum() resolves to a scalar at runtime; cast past the
+    # pandas-stubs overload imprecision, as in `_remap_bookings_to_new_customer_ids`.
+    dropped = int(cast("int", out_of_range.sum()))
     df_bookings = df_bookings.loc[~out_of_range].copy()
     # No pandas-stubs package is installed (pandas ships no bundled stubs for
     # this method either), so type checkers fall back to their own bundled
@@ -651,7 +674,7 @@ def copy_dataframe_into_table(
 
 
 def _insert_bookings_rows(
-    cur: psycopg.Cursor, customer_ids: Iterable[int],
+    cur: psycopg.Cursor, customer_ids: Iterable[int], *, booked_at: dt.datetime,
 ) -> list[int]:
     """Insert one `bookings` row per pre-existing booking, returning each new id.
 
@@ -663,6 +686,7 @@ def _insert_bookings_rows(
     Args:
         cur: Open cursor inside an active connection.
         customer_ids: One customer id per booking to insert, in order.
+        booked_at: `booked_at` stamped on every inserted booking.
 
     Returns:
         list[int]: The new `booking_id` values, in the same order as
@@ -675,9 +699,9 @@ def _insert_bookings_rows(
 
     """
     cur.executemany(
-        "INSERT INTO bookings (customer_id, status) VALUES (%s, 'confirmed') "
-        "RETURNING booking_id;",
-        [(customer_id,) for customer_id in customer_ids],
+        "INSERT INTO bookings (customer_id, status, booked_at) "
+        "VALUES (%s, 'confirmed', %s) RETURNING booking_id;",
+        [(customer_id, booked_at) for customer_id in customer_ids],
         returning=True,
     )
     # cur.results() walks the per-statement result sets executemany(returning=True)
@@ -730,8 +754,16 @@ def _insert_booking_rooms_rows(
     )
 
 
-def insert_bookings_data(conn: psycopg.Connection, df_bookings: pd.DataFrame) -> None:
+def insert_bookings_data(
+    conn: psycopg.Connection, df_bookings: pd.DataFrame, *, booked_at: dt.datetime,
+) -> None:
     """Insert pre-existing bookings into `bookings` and `booking_rooms`.
+
+    Every booking is stamped with the same `booked_at`, which the caller
+    sets before any booking the app itself can make. Left to the column's
+    ``now()`` default, the whole loaded history would read as booked at load
+    time, and for the next day would count toward each seeded guest's
+    room-night limit as if the guest had just booked it.
 
     Args:
         conn: Active database connection.
@@ -739,6 +771,7 @@ def insert_bookings_data(conn: psycopg.Connection, df_bookings: pd.DataFrame) ->
             `customer_id`, `room_id`, `check_in`, `check_out`, `total_amount`
             columns (see `prepare_accepted_bookings` and
             `_remap_and_filter_bookings_to_loaded_customers`).
+        booked_at: `booked_at` stamped on every inserted booking.
 
     """
     if df_bookings.empty:
@@ -746,7 +779,9 @@ def insert_bookings_data(conn: psycopg.Connection, df_bookings: pd.DataFrame) ->
         return
 
     with conn.cursor() as cur:
-        booking_ids = _insert_bookings_rows(cur, df_bookings["customer_id"].tolist())
+        booking_ids = _insert_bookings_rows(
+            cur, df_bookings["customer_id"].tolist(), booked_at=booked_at,
+        )
         df_bookings = df_bookings.copy()
         df_bookings["booking_id"] = booking_ids
         _set_confirmation_numbers(cur)
@@ -992,7 +1027,9 @@ def reload_sql_tables() -> None:
                 columns=CUSTOMERS_COLUMNS,
                 df=df_customers,
             )
-            insert_bookings_data(conn, df_bookings)
+            insert_bookings_data(
+                conn, df_bookings, booked_at=_history_booked_at(df_availability),
+            )
             reconcile_room_availability_status(conn)
             setup_maintenance_booking_guard(conn)
 

@@ -887,6 +887,23 @@ to a 221-case dataset. With stable names, a baseline left unregenerated after ca
 added is compared against the larger set without any sign in a file name. Regenerating
 the baseline is now a documented step when cases are added.
 
+### A reload counted the whole loaded history toward the room-night limit
+
+**Status:** fixed.
+
+The room-night limit counts bookings by `booked_at`, on the assumption that the seeded
+guests' loaded history predates the 24-hour window. That held only because the Parent
+branch had last been loaded months earlier. The loader never set `booked_at`, so every
+pre-existing booking took the column's `now()` default. The first reload after the
+limit shipped, for the move to 100 seeded guests, stamped all 14,617 at the moment of
+the load. For the next day each seeded guest started with their whole history counted,
+a median of 18 room-nights and as many as 46 of the 60 allowed.
+
+The loader now stamps every pre-existing booking with midnight UTC on the first date
+`room_availability` covers. The source data records no booking time, so any value is a
+stand-in. This one comes from the data rather than the clock, so it is the same on every
+reload and can never fall inside the window.
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

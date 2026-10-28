@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self, cast
 
@@ -14,6 +15,8 @@ from blue_horizon.load_data.booking_pgsql import (
     CUSTOMERS_COLUMNS,
     ROOM_AVAIL_COLUMNS,
     ROOMS_COLUMNS,
+    _history_booked_at,
+    _insert_bookings_rows,
     _remap_bookings_to_new_customer_ids,
     _select_non_overlapping_bookings,
     _select_richest_customer_ids,
@@ -244,6 +247,84 @@ class TestRemapBookingsToNewCustomerIds:
         )
 
         assert result["customer_id"].tolist() == [10, 11, 12]
+
+
+class _FakeBookingsCursor:
+    """Cursor stand-in recording `executemany` and returning one id per row."""
+
+    def __init__(self) -> None:
+        """Start with nothing executed."""
+        self.params: list[tuple[Any, ...]] = []
+
+    def executemany(
+        self, query: str, params: list[tuple[Any, ...]], *, returning: bool,
+    ) -> None:
+        """Record the per-row parameters.
+
+        Args:
+            query: SQL text; unused.
+            params: One parameter tuple per row, recorded.
+            returning: Whether rows are returned; unused.
+
+        """
+        _ = (query, returning)
+        self.params = params
+
+    def results(self) -> list[_FakeResult]:
+        """Return one result per executed row, each holding a new id.
+
+        Returns:
+            One fake result per row, in order.
+
+        """
+        return [_FakeResult(index + 1) for index in range(len(self.params))]
+
+
+class _FakeResult:
+    """One `INSERT ... RETURNING` result set holding a single id."""
+
+    def __init__(self, booking_id: int) -> None:
+        """Store the id to return.
+
+        Args:
+            booking_id: Id `fetchone` returns.
+
+        """
+        self.booking_id = booking_id
+
+    def fetchone(self) -> tuple[int]:
+        """Return the stored id as a one-column row.
+
+        Returns:
+            The row.
+
+        """
+        return (self.booking_id,)
+
+
+class TestHistoryBookedAt:
+    """Loaded bookings are stamped before any booking the app can make."""
+
+    def test_is_midnight_utc_on_the_first_availability_date(self) -> None:
+        """The stamp comes from the data, not from when the load runs."""
+        df_availability = pd.DataFrame(
+            {"date": ["2025-03-02", "2025-01-15", "2025-02-01"]},
+        )
+        assert _history_booked_at(df_availability) == dt.datetime(
+            2025, 1, 15, tzinfo=dt.UTC,
+        )
+
+    def test_every_inserted_booking_carries_the_stamp(self) -> None:
+        """No loaded booking falls back to the column's ``now()`` default."""
+        booked_at = dt.datetime(2025, 1, 15, tzinfo=dt.UTC)
+        cur = _FakeBookingsCursor()
+
+        booking_ids = _insert_bookings_rows(
+            cast("psycopg.Cursor[Any]", cur), [7, 8, 9], booked_at=booked_at,
+        )
+
+        assert booking_ids == [1, 2, 3]
+        assert cur.params == [(7, booked_at), (8, booked_at), (9, booked_at)]
 
 
 class _FakeCopy:

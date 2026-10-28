@@ -319,7 +319,7 @@ async def list_bookings(customer_id: int) -> dict[str, Any]:
             not be reached.
 
     Note:
-        Unauthenticated: any seeded `customer_id` (currently 1-15, see
+        Unauthenticated: any seeded `customer_id` (``1`` through
         `seeded_customer_count`) can be queried. Acceptable for a demo where
         guests are assigned automatically rather than real accounts, but
         real accounts would need this gated.

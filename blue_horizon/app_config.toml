@@ -169,7 +169,7 @@ data_path = "data/pandas"
 # Folder with the PostgreSQL ingestion pickles, relative to the repo root
 data_path = "data/pandas"
 # Customers remapped to the dense customer_id range [1, N] and loaded first
-seeded_customer_count = 15
+seeded_customer_count = 100
 
 [logging]
 # Root log level for the API process

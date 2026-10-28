@@ -148,10 +148,16 @@ prompt lives in the one folder named by that section's `folder`, relative to the
 **`[load_data.*].data_path`** is relative to the repository root, the directory that
 contains the `blue_horizon` package.
 
-**`[load_data.booking_pgsql].seeded_customer_count`** (default 15) sets how many source
+**`[load_data.booking_pgsql].seeded_customer_count`** (default 100) sets how many source
 customers get the dense low `customer_id` block that the UI's guest assignment and the
 eval and stress harnesses assume. It is the single source of truth that both
 `booking_pgsql.py` and `write_ops.list_customers` read, so the two cannot drift apart.
+It is also the most visitors the UI can serve at once, since each holds a guest until
+ten minutes after they go idle. At 100, a burst of about 400 visitors an hour fits
+before anyone sees the capacity message, which is more than `llm_concurrency` can serve
+without queueing. Every one of the 100 is loaded with three or four pre-existing
+bookings to demo against. Changing it takes a reload of the Parent branch, which
+renumbers the seeded block, then a reset of every branch from Parent.
 
 **`[orchestration.orchestration].unavailable_retry_after_s`** (default 5.0) is the
 `Retry-After` seconds returned with a `/v1/chat` (and `/v1/customers`, `/v1/bookings`)

@@ -1,9 +1,8 @@
 [server]
 headless = true
 port = 8501
-# Disable CORS and XSRF checks behind the HuggingFace Space proxy.
+# Off for the HuggingFace Space proxy; see docs/guides/deployment.md.
 enableCORS = false
-enableXsrfProtection = false
 
 [browser]
 # Visitors' browsers would otherwise send usage telemetry to Streamlit.

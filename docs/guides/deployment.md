@@ -25,10 +25,21 @@ README's YAML front matter, so the deploy job prepends that file to `README.md` 
 commit it pushes to the Space. Edit the YAML file to change them; the GitHub README never
 carries the block.
 
-`deploy/.streamlit/config.toml` disables Streamlit's CORS and XSRF checks. The Space
-serves the app through HuggingFace's own proxy, whose origin does not match the one
-Streamlit sees, and with the checks on, requests fail with origin-mismatch errors.
-It also turns off Streamlit's usage statistics, which visitors' browsers would
+`deploy/.streamlit/config.toml` disables Streamlit's CORS check. The Space serves the
+app through HuggingFace's own proxy, whose origin does not match the one Streamlit sees.
+For a WebSocket, Streamlit's CORS check is a server-side test of the `Origin` header, so
+with it off any page can open a session to the app. That session carries none of the
+visitor's credentials: Streamlit's login cookie is `SameSite=Lax`, so the browser leaves
+it off a handshake started from another site, and an anonymous session's id lives in the
+URL rather than in a cookie. Such a page gets nothing a visitor opening the Space
+directly would not.
+
+XSRF protection is left at Streamlit's default. Streamlit turns it on whenever
+`secrets.toml` has an `[auth]` section, which `deploy/generate_secrets.py` writes when
+OAuth is configured, whatever the config file says. It guards file uploads and the
+reading of the login cookie, and the app has no file uploader.
+
+The config also turns off Streamlit's usage statistics, which visitors' browsers would
 otherwise send to Streamlit; the [privacy policy](../privacy.md) says no trackers run.
 
 Optional Google OAuth can be enabled by setting `GOOGLE_CLIENT_ID`,

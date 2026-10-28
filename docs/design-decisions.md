@@ -923,6 +923,24 @@ there, but `cid` no longer is. One account in two tabs now shares one guest, as 
 already shared one turn allowance. A process restart empties the registry, so a visitor
 gets a new guest afterwards, where the URL used to restore the old one.
 
+### The XSRF setting was switched off for a reason that did not hold
+
+**Status:** fixed.
+
+The Space's Streamlit config set `enableXsrfProtection = false` alongside
+`enableCORS = false`, documented as needed behind the HuggingFace proxy. Streamlit turns
+XSRF protection on regardless whenever `secrets.toml` has an `[auth]` section, so with
+OAuth configured the setting was ignored and sign-in already worked with the check
+running. Without OAuth it protected nothing in use, since its token guards file uploads
+and the login cookie and the app has neither. The line is gone.
+
+`enableCORS = false` stays. For a WebSocket it disables Streamlit's server-side `Origin`
+check, so another site can open a session from a visitor's browser. The check exists to
+keep such a session from using the visitor's cookies, and none apply: the login cookie
+is `SameSite=Lax` and is not sent on a cross-site handshake, and the anonymous session
+id travels in the URL. Turning the check on would add a second layer behind `SameSite`
+at the risk of breaking the page behind HuggingFace's proxy.
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

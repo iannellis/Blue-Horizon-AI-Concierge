@@ -115,6 +115,11 @@ class InfoRedisConfig(FrozenModel):
         retry_max_retries: Retry count for transient Redis failures.
         retry_backoff_base_s: Base backoff (seconds) for Redis retries.
         retry_backoff_max_s: Maximum backoff (seconds) for Redis retries.
+        max_connections: Most connections the client's pool opens. Kept
+            below the Redis plan's client limit, which every process using
+            the same database shares.
+        pool_timeout_s: Seconds a command waits for a pooled connection to
+            be released when all of them are busy, before failing.
 
     """
 
@@ -124,6 +129,8 @@ class InfoRedisConfig(FrozenModel):
     retry_max_retries: int
     retry_backoff_base_s: float
     retry_backoff_max_s: float
+    max_connections: int = Field(ge=1)
+    pool_timeout_s: float = Field(gt=0)
 
 
 class InfoPromptsConfig(FrozenModel):

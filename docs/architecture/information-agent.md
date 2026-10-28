@@ -30,6 +30,12 @@ LlamaIndex. Retrieval is capped by `[info.retrieval].top_k` per source and
 `max_context_items` overall, so a question that parses into many sub-queries cannot grow
 the context without bound.
 
+Every retrieval goes through one Redis client per process, on a blocking connection
+pool capped at `[info.redis].max_connections`. When every connection is busy, a
+retrieval waits for one to be released rather than opening another, so parallel
+retrievals across concurrent turns stay under the Redis plan's client limit. See
+[Configuration](../guides/configuration.md).
+
 ## Why a workflow instead of an agent
 
 The information agent was originally built with LangChain's `create_agent`, giving the

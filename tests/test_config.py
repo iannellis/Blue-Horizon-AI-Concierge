@@ -98,6 +98,8 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
             "retry_max_retries": 2,
             "retry_backoff_base_s": 0.1,
             "retry_backoff_max_s": 1.0,
+            "max_connections": 15,
+            "pool_timeout_s": 5.0,
         },
         "prompts": {
             "folder": "system_prompts",
@@ -223,6 +225,7 @@ def test_load_packaged_app_config() -> None:
     assert cfg.chat.max_message_chars > 0
     assert cfg.chat.max_turns_per_hour > 0
     assert cfg.info.redis.health_check_interval_s > 0
+    assert cfg.info.redis.max_connections > 0
     assert (
         0
         < cfg.booking.agent.default_search_results

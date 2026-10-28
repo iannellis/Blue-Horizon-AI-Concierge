@@ -16,6 +16,7 @@ from llama_index.core import Settings, StorageContext, VectorStoreIndex
 from llama_index.core.retrievers import BaseRetriever, VectorIndexRetriever
 from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.vector_stores.redis import RedisVectorStore
+from redis.asyncio import BlockingConnectionPool
 from redis.asyncio import Redis as AsyncRedis
 from redis.backoff import ExponentialBackoff
 from redis.exceptions import AuthenticationError as RedisAuthenticationError
@@ -200,14 +201,8 @@ class InfoRagResources:
 
         self._init_llamaindex(config.embeddings)
 
-        retry = self._build_redis_retry(config.redis)
-        self.redis_async: AsyncRedis = AsyncRedis.from_url(
-            redis_url,
-            decode_responses=True,
-            socket_connect_timeout=config.redis.connect_timeout_s,
-            socket_timeout=config.redis.socket_timeout_s,
-            health_check_interval=config.redis.health_check_interval_s,
-            retry=retry,
+        self.redis_async: AsyncRedis = self._build_redis_client(
+            redis_url, config.redis,
         )
 
         self._index_schemas = build_information_index_schemas(
@@ -237,6 +232,35 @@ class InfoRagResources:
         )
         self.system_prompt: str | None = None
         self.parser_prompt: str | None = None
+
+    @staticmethod
+    def _build_redis_client(redis_url: str, config: InfoRedisConfig) -> AsyncRedis:
+        """Build the async Redis client on a bounded, blocking connection pool.
+
+        The pool opens at most `config.max_connections` connections. A
+        command that finds them all busy waits up to `config.pool_timeout_s`
+        for one to be released, rather than opening another, so a burst of
+        parallel retrievals cannot exceed the Redis plan's client limit.
+
+        Args:
+            redis_url: Redis connection URL.
+            config: Redis configuration section.
+
+        Returns:
+            AsyncRedis: Client that owns, and closes, its pool.
+
+        """
+        pool = BlockingConnectionPool.from_url(
+            redis_url,
+            max_connections=config.max_connections,
+            timeout=config.pool_timeout_s,
+            decode_responses=True,
+            socket_connect_timeout=config.connect_timeout_s,
+            socket_timeout=config.socket_timeout_s,
+            health_check_interval=config.health_check_interval_s,
+            retry=InfoRagResources._build_redis_retry(config),
+        )
+        return AsyncRedis.from_pool(pool)
 
     @staticmethod
     def _build_redis_retry(config: InfoRedisConfig) -> Retry:

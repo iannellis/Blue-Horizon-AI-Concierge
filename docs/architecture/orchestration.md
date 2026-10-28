@@ -51,7 +51,7 @@ bounds every stage:
 | `router_timeout_s` | 30 | Wall-clock cap on the router node |
 | `info_timeout_s` | 60 | Wall-clock cap on the information node |
 | `booking_timeout_s` | 60 | Wall-clock cap on the booking node |
-| `llm_concurrency` | 15 | Maximum concurrent pipeline executions |
+| `llm_concurrency` | 25 | Maximum concurrent pipeline executions |
 
 `llm_concurrency` is a semaphore, not a queue limit. It exists because the stress test
 drives 50 concurrent sessions against a single OpenAI account: without it, a traffic

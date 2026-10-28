@@ -22,7 +22,7 @@ info_timeout_s = 60
 # Wall-clock cap for the booking node (wraps the booking LLM call)
 booking_timeout_s = 60
 # Maximum concurrent LLM pipeline executions
-llm_concurrency = 15
+llm_concurrency = 25
 # Retry-After seconds on a 503 while not ready or the database is unreachable
 unavailable_retry_after_s = 5.0
 # Completed guest turns kept in a thread's history; older ones are dropped
@@ -96,6 +96,10 @@ retry_max_retries = 2
 retry_backoff_base_s = 0.1
 # Maximum backoff for Redis retries
 retry_backoff_max_s = 1.0
+# Most connections this process opens; the free tier allows 30 in total
+max_connections = 15
+# Seconds a command waits for a free pooled connection before failing
+pool_timeout_s = 5.0
 
 [info.prompts]
 # Folder (relative to blue_horizon package root) containing prompt files

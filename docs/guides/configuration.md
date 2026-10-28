@@ -22,9 +22,15 @@ Neon branch management (project ID, branch name, reset tuning) lives entirely in
 
 ## Notable settings
 
-**`[orchestration.orchestration].llm_concurrency`** (default 15) caps concurrent LLM
+**`[orchestration.orchestration].llm_concurrency`** (default 25) caps concurrent LLM
 pipeline executions. It prevents tokens-per-minute exhaustion under high concurrency,
 which otherwise fails every in-flight request at once rather than making a few wait.
+The value is sized against the OpenAI project's rate limits of 10M tokens and 10,000
+requests per minute. A turn makes three or four model calls of roughly 20k input tokens
+in total and takes about 5 seconds, so 25 concurrent turns come to about 6M tokens per
+minute, leaving room for longer turns and for the embedding calls that share the quota.
+The eval judge runs on Gemini outside this semaphore, so its rate limits do not bear on
+this value.
 
 **`[orchestration.orchestration].max_history_turns`** (default 10) is how many completed
 guest turns a thread's history keeps. The router and the chosen sub-agent are sent the
@@ -123,6 +129,17 @@ reads each index's schema from Redis and refuses to become ready on a mismatch.
 **`[info.retrieval].retriever_cache_max`** (default 64) bounds the per-process cache of
 amenity and service retrievers. One retriever is built per distinct filter combination,
 so without a bound the cache would grow with every new combination guests ask for.
+
+**`[info.redis].max_connections`** (default 15) caps the Redis client's connection pool,
+and **`[info.redis].pool_timeout_s`** (default 5) is how long a command waits for a
+connection when all of them are busy. The free Redis Cloud tier allows 30 clients in
+total, shared by the deployed API, any local eval run, the data loader, and Redis
+Insight. Without a cap, the pool opened a new connection whenever every existing one was
+busy, and each information turn runs three retrievals in parallel, so a burst of
+information turns could pass the limit and fail. A retrieval holds a connection for one
+round trip, so a command that waits for one waits milliseconds. Each process has its own
+pool, so the deployed API and a local eval run together can reach 30; avoid running the
+eval while the demo has traffic.
 
 **Prompt filenames** under each `[*.prompts]` section are bare names, never paths. Every
 prompt lives in the one folder named by that section's `folder`, relative to the

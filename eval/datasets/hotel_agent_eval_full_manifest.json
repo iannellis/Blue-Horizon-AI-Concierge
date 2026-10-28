@@ -1,18 +1,18 @@
 {
   "dataset_file": "eval/datasets/hotel_agent_eval_full.jsonl",
-  "num_cases": 224,
+  "num_cases": 225,
   "distribution": {
     "info_only": 70,
-    "rooms_only": 89,
+    "rooms_only": 90,
     "mixed": 65
   },
   "turn_counts": {
-    "total_turns": 556,
+    "total_turns": 557,
     "info_turns": 206,
-    "rooms_turns": 311,
+    "rooms_turns": 312,
     "refuse_turns": 39,
     "labeled_filter_turns": 40,
-    "labeled_search_turns": 22
+    "labeled_search_turns": 23
   },
   "refuse_coverage": {
     "cases_with_refuse_turns": 39,
@@ -232,6 +232,7 @@
       "sort_price_desc": ["case_0222"],
       "price_range": ["case_0223"],
       "max_occupancy_max_size": ["case_0224"],
+      "check_in_plus_night_count": ["case_0225"],
       "room_numbers": ["case_0219"],
       "multi_turn_refinement": ["case_0220", "case_0221"]
     }

@@ -111,6 +111,13 @@ These were checked against `data/pandas/` the same way, and every one returns ro
 there. Every room sleeps at least two, so `case_0224` asks for "three at most" rather
 than a room for one guest, which no room would match.
 
+`case_0225` asks for seven nights checking in February 1. Every earlier case states its
+check-out date; this one gives a night count, so the model has to work out the check-out
+itself. The label expects `check_in` `"2025-02-01"` and `check_out` `"2025-02-08"` with
+no clarifying question first. The length is stated exactly on purpose: a looser wording
+such as "the first week of February" leaves the stay length open, and asking about it
+would be the right response. It returns rooms in `data/pandas/`.
+
 Each case's opening turn carries an `expected_search` label, which
 `eval_booking_expected_search` compares with the arguments the model actually passed to
 `search_rooms`. The harness captures those arguments before Pydantic fills in defaults,

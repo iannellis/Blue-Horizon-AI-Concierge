@@ -60,5 +60,8 @@ def render_system_prompt(
         first_night=meta.first_night.isoformat(),
         last_night=meta.last_night.isoformat(),
         last_check_out=meta.last_check_out.isoformat(),
+        first_month_day=f"{meta.first_night:%B} {meta.first_night.day}",
+        first_year=meta.first_night.year,
+        last_year=meta.last_night.year,
         max_floor=meta.max_floor,
     )

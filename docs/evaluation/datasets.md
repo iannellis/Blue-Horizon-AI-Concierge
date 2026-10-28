@@ -142,9 +142,26 @@ is marked down there.
 
 ```bash
 python -m eval.create_langsmith_dataset \
-  --dataset-name "BlueHorizonEval_25" \
-  --cases-path eval/datasets/hotel_agent_eval_25.jsonl
+  --dataset-name "BlueHorizonEval_smoke" \
+  --cases-path eval/datasets/hotel_agent_eval_smoke.jsonl
 ```
+
+Datasets are named by role (`full`, `smoke`), not by case count, so adding cases keeps
+the same name everywhere. Add the new cases to the local JSONL, then append them to the
+hosted dataset with `--append`. It uploads every case in the file it is given and does not
+skip cases already hosted, so pass a file holding only the new cases:
+
+```bash
+python -m eval.create_langsmith_dataset \
+  --dataset-name "BlueHorizonEval_full" \
+  --cases-path new_cases.jsonl \
+  --append
+```
+
+LangSmith versions a dataset on every change and records which version each experiment
+ran against, so earlier experiments keep their results under the same name. Update
+`num_cases` in the manifest and regenerate the baseline, since nothing in a file name
+ties a baseline to a dataset size any more.
 
 !!! warning "Local JSONL and the hosted dataset drift"
     `run_experiment.py` reads examples from the **hosted LangSmith dataset**, not from

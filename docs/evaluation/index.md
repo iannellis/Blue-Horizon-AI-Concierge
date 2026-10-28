@@ -1,7 +1,7 @@
 # Evaluation results
 
 Metrics collected over the 221-case dataset,
-[`eval/datasets/hotel_agent_eval_221.jsonl`](https://github.com/iannellis/Blue-Horizon-AI-Concierge/blob/main/eval/datasets/hotel_agent_eval_221.jsonl).
+[`eval/datasets/hotel_agent_eval_full.jsonl`](https://github.com/iannellis/Blue-Horizon-AI-Concierge/blob/main/eval/datasets/hotel_agent_eval_full.jsonl).
 
 **Every figure below is the mean of three full runs** on 2026-10-16, with the observed
 range across those runs given alongside. All three ran the same agent models, prompts,
@@ -24,7 +24,7 @@ one subfolder per run.
 
 Every metric that requires a model judge or scorer - all three conversation-level scores
 plus the four RAG metrics - is graded by Gemini `gemini-3.5-flash-lite`, configured in
-[`eval/eval_config_221.toml`](https://github.com/iannellis/Blue-Horizon-AI-Concierge/blob/main/eval/eval_config_221.toml)
+[`eval/eval_config_full.toml`](https://github.com/iannellis/Blue-Horizon-AI-Concierge/blob/main/eval/eval_config_full.toml)
 as both `[judge].model` and `[ragas].llm_model`.
 
 **RAG answer relevancy** additionally embeds the question with the Gemini

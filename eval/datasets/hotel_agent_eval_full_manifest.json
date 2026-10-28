@@ -1,5 +1,5 @@
 {
-  "dataset_file": "eval/datasets/hotel_agent_eval_221.jsonl",
+  "dataset_file": "eval/datasets/hotel_agent_eval_full.jsonl",
   "num_cases": 221,
   "distribution": {
     "info_only": 70,

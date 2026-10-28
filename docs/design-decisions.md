@@ -869,6 +869,24 @@ session in the process. The tests now also execute the script twice in fresh mod
 Streamlit does, and check that a turn and a claim recorded in the first run hold in the
 second.
 
+### Naming datasets by case count forced a rename on every addition
+
+The eval datasets, their configs, baselines, the full-eval workflow, and the hosted
+LangSmith datasets were named by case count (`_206`, then `_221`; `_23`, then `_25`).
+Each batch of new cases renamed all of them and every reference in five documentation
+pages, and created a new hosted dataset. The smoke eval's artifact names were still
+`eval-logs-23` two renames later, because nothing caught a reference that was missed.
+
+They are now named by role: `full` and `smoke`. The case count lives only in the
+manifest's `num_cases` and in prose describing a specific run. LangSmith versions a
+dataset on every change, so appending cases to the same hosted dataset keeps each
+earlier experiment tied to the version it ran against.
+
+The old names did one useful thing implicitly: a baseline named `_221` could only belong
+to a 221-case dataset. With stable names, a baseline left unregenerated after cases are
+added is compared against the larger set without any sign in a file name. Regenerating
+the baseline is now a documented step when cases are added.
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

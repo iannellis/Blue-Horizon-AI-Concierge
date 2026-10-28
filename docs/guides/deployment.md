@@ -59,7 +59,7 @@ changes (detect changed paths)
    |      resets the Development Neon branch, then runs -m db_integration
    |
    +-- eval ...................... needs: db-integration-tests
-   |      resets the branch again, runs the 25-case smoke eval,
+   |      resets the branch again, runs the smoke eval,
    |      then ci_check against the pinned baseline
    |
    +-- deploy .................... needs: all three above passed or skipped
@@ -88,8 +88,8 @@ concluding the eval is fine.
 
 | Workflow | Trigger | Config | Baseline |
 |---|---|---|---|
-| `ci.yml` (smoke eval) | Push to `main` | `eval_config_25.toml` | `hotel_agent_eval_25_baseline.json` |
-| `eval_221.yml` (full eval) | Manual | `eval_config_221.toml` | `hotel_agent_eval_221_baseline.json` |
+| `ci.yml` (smoke eval) | Push to `main` | `eval_config_smoke.toml` | `hotel_agent_eval_smoke_baseline.json` |
+| `eval_full.yml` (full eval) | Manual | `eval_config_full.toml` | `hotel_agent_eval_full_baseline.json` |
 | `stress.yml` | Manual | `stress_config.toml` | None |
 | `docs.yml` | Push to `main` touching `docs/` or `mkdocs.yml` | None | None |
 

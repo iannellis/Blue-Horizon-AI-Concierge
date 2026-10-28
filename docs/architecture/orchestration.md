@@ -178,6 +178,22 @@ state. A `thread_id` is additionally bound to whichever `customer_id` first used
 the API rejects a later request that replays the same `thread_id` under a different
 guest with `409 Conflict`.
 
+### Memory use
+
+`MemorySaver` keeps every checkpoint a thread has written, not only the latest. The
+`finalize` trim shortens the newest checkpoint, but earlier ones, including that turn's
+tool results, stay in memory. Memory therefore grows with every turn and is released
+only when the process restarts. A measured stand-in for a booking turn with four
+searches costs about 100 KB once the history window is full.
+
+The growth is bounded rather than leaked. At most `seeded_customer_count` visitors hold
+a guest at once, and each signed-in visitor may send `[chat].max_turns_per_hour` turns,
+so with the defaults (100 guests, 10 turns) the ceiling is about 1,000 turns an hour, or
+roughly 2.4 GB a day. The Space restart at the end of the nightly reset workflow
+(`.github/workflows/nightly-reset.yml`) clears it, well inside the Space's 16 GB. A host
+without that restart, or with much less memory, would need `checkpointer.delete_thread()`
+when a guest claim expires, or a checkpointer that keeps only the latest checkpoint.
+
 ## Streaming
 
 The manager translates LangGraph's internal event stream into the coarse, user-facing

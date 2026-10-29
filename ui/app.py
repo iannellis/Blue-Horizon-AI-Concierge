@@ -11,7 +11,8 @@ Environment variables:
         Defaults to ``http://localhost:8000``.
     GOOGLE_CLIENT_ID: When set, enables Google OAuth authentication.
         Set alongside ``GOOGLE_CLIENT_SECRET`` as HuggingFace Space secrets.
-        Access is controlled via Google Cloud Console's OAuth test users list.
+        While the OAuth consent screen is in testing mode, only the test users
+        listed in Google Cloud Console can sign in.
     AXIOM_API_KEY, AXIOM_DATASET: When both are set, log records are also
         shipped to that Axiom dataset, as the API's are.
 """

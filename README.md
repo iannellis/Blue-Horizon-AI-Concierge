@@ -6,7 +6,7 @@ that the language model can propose a reservation but never commit one.**
 [**Live demo**](#live-demo) · [**Documentation**](#documentation) · [**Results**](#results)
 
 Built with [LangGraph](https://github.com/langchain-ai/langgraph),
-[FastAPI](https://fastapi.dev), [Streamlit](https://streamlit.io), PostgreSQL, and Redis.
+[FastAPI](https://fastapi.tiangolo.com), [Streamlit](https://streamlit.io), PostgreSQL, and Redis.
 
 ---
 
@@ -36,9 +36,9 @@ the server-side commit. The application, not the model, authors the confirmation
 places: two PostgreSQL roles (`bh_agent_ro` has `SELECT` on two tables and nothing
 else), a search tool that runs fixed queries and never accepts SQL from the model, the
 propose/confirm split itself, and a startup check that refuses to boot if a trial write
-through the read-only connection succeeds. Double
-booking is prevented by a GiST exclusion constraint that makes overlapping reservations
-impossible to insert, not by a check that runs afterward.
+through the read-only connection succeeds. Double booking is prevented by a GiST
+exclusion constraint that makes overlapping reservations impossible to insert, not by a
+check that runs afterward.
 
 **A workflow where an agent would be worse.** The information agent was originally built
 with LangChain's `create_agent`. Its RAG tools apply user constraints as filters, so a
@@ -48,14 +48,14 @@ replacing the agent with a fixed LangGraph DAG removed the model's opportunity t
 misinterpret emptiness at all.
 [The full story](https://iannellis.github.io/Blue-Horizon-AI-Concierge/design-decisions/#the-information-agent-is-a-workflow-not-an-agent).
 
-**Measured, with CI that can fail on it.** A 221-case multi-turn evaluation suite scores
+**Measured, with CI that can fail on it.** A 225-case multi-turn evaluation suite scores
 routing, grounding, injection resistance, RAG quality, and booking outcomes, with pinned
 baselines a smoke eval checks on every push. A concurrency stress test drives 50
 simultaneous sessions deliberately fighting over the same 10 rooms.
 
 ## Results
 
-Mean of three full runs over the 221-case dataset:
+Mean of three full runs over the dataset's first 221 cases, the current baseline:
 
 | | |
 |---|---|
@@ -75,15 +75,35 @@ Full metric tables, per-run ranges, methodology, and what grades what:
 
 ## Live demo
 
-A deployed instance runs on HuggingFace Spaces, gated by Google OAuth. Recruiters and
-hiring managers can request access to be added to the allowed-users list.
+A deployed instance runs on HuggingFace Spaces at
+**[iellis02-blue-horizon.hf.space](https://iellis02-blue-horizon.hf.space)**. Use that
+exact URL; Google sign-in does not work from any other origin.
 
-Once access is granted, the agent is at
-**[iellis02-blue-horizon.hf.space](https://iellis02-blue-horizon.hf.space)**. This exact
-URL must be used; Google login will not work from any other origin.
+Sign-in is limited to an allowlist of Google accounts. Recruiters and hiring managers
+can request access by messaging the author on
+[LinkedIn](https://www.linkedin.com/in/iannellis/) with the Google account to add.
 
-The first page load after a quiet stretch can take a few extra seconds while the
-database wakes up.
+Once signed in, you browse as one of the hotel's fictional guests, with their existing
+reservations in the sidebar. A few things to know:
+
+- **The room calendar covers January 4, 2025 to January 3, 2026.** Ask for dates in that
+  range; the hotel has no rooms outside it.
+- **Bookings are real writes to the demo database,** which is reset every night, so book
+  and cancel freely.
+- **Messages per hour and room-nights per guest are capped,** to keep a public demo
+  affordable and to stop one visitor booking out the hotel.
+- **The first page load after a quiet stretch can take a few extra seconds** while the
+  database wakes up.
+
+Some things to try:
+
+- *What spa treatments do you offer?*
+- *Do you offer late check-out?*
+- *Find me an ocean-view suite from March 14 to March 17, 2025.*
+- *What's the cheapest room with a king bed for June 3 to June 6, 2025?*, then *book
+  that one*
+- *Show my reservations*, then *move the first one a day later*
+- *Write me a poem about Paris*, which the concierge declines
 
 ## Documentation
 

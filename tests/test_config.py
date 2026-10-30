@@ -125,6 +125,7 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
             "default_search_results": EXPECTED_DEFAULT_SEARCH_RESULTS,
             "max_search_results": EXPECTED_MAX_SEARCH_RESULTS,
             "max_search_calls_per_turn": EXPECTED_MAX_SEARCH_CALLS,
+            "max_model_calls_per_turn": 8,
             "max_search_room_numbers": 10,
         },
         "db": {
@@ -201,6 +202,15 @@ def test_default_search_results_cannot_exceed_maximum() -> None:
     booking = cast("dict[str, dict[str, object]]", config["booking"])
     booking["agent"]["default_search_results"] = EXPECTED_MAX_SEARCH_RESULTS + 1
     with pytest.raises(ValidationError, match="cannot exceed max_search_results"):
+        AppConfig.model_validate(config)
+
+
+def test_model_call_cap_must_exceed_search_cap() -> None:
+    """A model-call cap at the search cap leaves no call for the reply."""
+    config = copy.deepcopy(SAMPLE_APP_CONFIG)
+    booking = cast("dict[str, dict[str, object]]", config["booking"])
+    booking["agent"]["max_model_calls_per_turn"] = EXPECTED_MAX_SEARCH_CALLS
+    with pytest.raises(ValidationError, match="must exceed max_search_calls"):
         AppConfig.model_validate(config)
 
 

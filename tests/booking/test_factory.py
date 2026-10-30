@@ -19,12 +19,17 @@ broken tool schema.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
+from langchain.agents.middleware.model_call_limit import ModelCallLimitExceededError
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.prebuilt import ToolNode
 
+from blue_horizon.agents.booking import factory
 from blue_horizon.agents.booking.factory import build_booking_agent
 from blue_horizon.agents.booking.search import build_search_args_model
 from blue_horizon.config import BookingSqlConfig
@@ -36,6 +41,10 @@ from tests.booking._search_fixtures import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator, Sequence
+
+    from langchain_core.language_models import LanguageModelInput
+    from langchain_core.runnables import Runnable
     from langgraph.graph.state import CompiledStateGraph
     from pydantic import BaseModel
 
@@ -73,6 +82,7 @@ _BOOKING_CONFIG_DICT: dict[str, Any] = {
         "default_search_results": 4,
         "max_search_results": 15,
         "max_search_calls_per_turn": 4,
+        "max_model_calls_per_turn": 8,
         "max_search_room_numbers": 10,
     },
     "db": {
@@ -284,3 +294,70 @@ def test_every_tool_has_a_non_empty_description(
     tools = _tools_by_name(_build_graph(booking_config))
     for name, tool_obj in tools.items():
         assert tool_obj.description, f"{name} has no description"
+
+
+class _LoopingChatModel(GenericFakeChatModel):
+    """Fake model that answers every call with another tool call.
+
+    `GenericFakeChatModel` has no `bind_tools`, which `create_agent` calls, so
+    this subclass returns itself unchanged.
+
+    """
+
+    def bind_tools(
+        self,
+        tools: Sequence[Any],
+        **kwargs: Any,  # noqa: ANN401, ARG002
+    ) -> Runnable[LanguageModelInput, AIMessage]:
+        """Accept the agent's tools without changing the model.
+
+        Args:
+            tools: The tools the agent binds. Ignored.
+            **kwargs: Binding options. Ignored.
+
+        Returns:
+            This model.
+
+        """
+        del tools
+        return self
+
+
+def _endless_search_calls() -> Iterator[AIMessage]:
+    """Yield `search_rooms` calls with arguments the tool rejects, forever.
+
+    Yields:
+        An assistant message holding one invalid `search_rooms` call.
+
+    """
+    for index in itertools.count():
+        yield AIMessage(
+            content="",
+            tool_calls=[{
+                "id": f"call-{index}",
+                "name": "search_rooms",
+                "args": {"check_in": "2026-01-03", "check_out": "2026-01-06"},
+            }],
+        )
+
+
+def test_model_call_cap_fails_a_looping_turn(
+    booking_config: BookingSqlConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A model that never stops calling tools fails at the model-call cap.
+
+    The search cap alone does not stop it: refused searches return a result
+    and the model is called again.
+
+    Args:
+        booking_config: Parsed booking configuration fixture.
+        monkeypatch: Pytest fixture used to substitute the chat model.
+
+    """
+    model = _LoopingChatModel(messages=_endless_search_calls())
+    monkeypatch.setattr(factory, "build_chat_model", lambda _cfg: model)
+    graph = _build_graph(booking_config)
+    with pytest.raises(ModelCallLimitExceededError) as exc_info:
+        asyncio.run(graph.ainvoke({"messages": [HumanMessage("Find me a room")]}))
+    assert exc_info.value.run_count == booking_config.agent.max_model_calls_per_turn

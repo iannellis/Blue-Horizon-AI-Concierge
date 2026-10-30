@@ -74,6 +74,15 @@ exception, so the model can correct itself or ask the guest. A
 `[booking.agent].max_search_calls_per_turn` calls per guest turn; later calls are
 refused and the model must answer with what it has.
 
+That cap leaves the agent's loop open: a refused search returns a result, and
+`list_my_bookings` and the `propose_*` tools have no cap of their own, so a model that
+keeps calling tools is called again each time. A `ModelCallLimitMiddleware` closes it at
+`[booking.agent].max_model_calls_per_turn` model calls per turn, with
+`exit_behavior="error"`. The `"end"` behavior was not used because it writes a canned
+limit message as the agent's reply, which would reach the guest as an ordinary answer.
+The raised `ModelCallLimitExceededError` instead fails the turn as `internal` (see
+[Orchestration](orchestration.md#failed-turns)).
+
 The grant in layer 1 is still the guarantee that search cannot write. The fixed query
 and the read-only transaction each search runs in are what the model can actually
 reach.

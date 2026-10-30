@@ -19,7 +19,11 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Required, TypedDict
 
 from langchain.agents import create_agent
-from langchain.agents.middleware import ToolCallLimitMiddleware
+from langchain.agents.middleware import (
+    AgentMiddleware,
+    ModelCallLimitMiddleware,
+    ToolCallLimitMiddleware,
+)
 from langchain_core.messages import HumanMessage, ToolMessage
 
 # Kept out of the TYPE_CHECKING block despite TC002: `@tool` resolves its
@@ -367,6 +371,25 @@ def build_booking_agent(
         )
         return {"proposal_id": proposal.proposal_id, "status": "proposed"}
 
+    # Typed as a list of `AgentMiddleware[Any, Any]` because the two
+    # middlewares carry different state types, which pyright cannot unify.
+    middleware: list[AgentMiddleware[Any, Any]] = [
+        # Bounds a turn's search cost in code, not only in the prompt. Calls
+        # past the limit get an error result and the model must answer.
+        ToolCallLimitMiddleware(
+            tool_name=_SEARCH_TOOL_NAME,
+            run_limit=config.agent.max_search_calls_per_turn,
+            exit_behavior="continue",
+        ),
+        # Bounds the whole loop, which the search cap does not: refused
+        # searches and the other tools each cost another model call. "error"
+        # fails the turn; "end" would send the guest a canned limit message
+        # as if it were the reply.
+        ModelCallLimitMiddleware(
+            run_limit=config.agent.max_model_calls_per_turn,
+            exit_behavior="error",
+        ),
+    ]
     return create_agent(
         model=llm,
         tools=[
@@ -377,15 +400,7 @@ def build_booking_agent(
             propose_modification,
         ],
         system_prompt=system_prompt,
-        # Bounds a turn's search cost in code, not only in the prompt. Calls
-        # past the limit get an error result and the model must answer.
-        middleware=[
-            ToolCallLimitMiddleware(
-                tool_name=_SEARCH_TOOL_NAME,
-                run_limit=config.agent.max_search_calls_per_turn,
-                exit_behavior="continue",
-            ),
-        ],
+        middleware=middleware,
     )
 
 

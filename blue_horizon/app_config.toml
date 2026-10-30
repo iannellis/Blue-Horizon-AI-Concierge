@@ -133,6 +133,8 @@ default_search_results = 4
 max_search_results = 15
 # Most searches the model may run in one guest turn
 max_search_calls_per_turn = 4
+# Most model calls in one guest turn; a turn that needs more fails as internal
+max_model_calls_per_turn = 8
 # Most room numbers one search may name
 max_search_room_numbers = 10
 

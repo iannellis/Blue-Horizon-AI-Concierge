@@ -70,6 +70,15 @@ one guest turn, enforced by LangChain's `ToolCallLimitMiddleware` rather than by
 prompt. A call past the limit gets an error result and the model has to answer with what
 it already found. Together with `max_search_results`, it bounds what one guest message can cost.
 
+**`[booking.agent].max_model_calls_per_turn`** (default 8) caps the booking agent's
+model calls in one guest turn, counting every tool round and the final reply. It is
+enforced by LangChain's `ModelCallLimitMiddleware`, and a turn that reaches it fails
+with the `internal` code rather than answering. The search cap does not bound the loop
+on its own: a refused search, or a call to any other tool, still costs another model
+call. It is set below what `booking_timeout_s` allows at medium reasoning effort, so a
+looping model is reported as a defect rather than as a timeout. It must exceed
+`max_search_calls_per_turn`, since each search takes one call and the reply another.
+
 **`[booking.agent].max_search_room_numbers`** (default 10) caps how many room numbers
 one search may name, so a search by room number stays within the same bound.
 

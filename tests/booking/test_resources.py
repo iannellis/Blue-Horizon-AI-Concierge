@@ -53,6 +53,7 @@ _BOOKING_CONFIG_DICT: dict[str, Any] = {
         "default_search_results": 4,
         "max_search_results": 15,
         "max_search_calls_per_turn": 4,
+        "max_model_calls_per_turn": 8,
         "max_search_room_numbers": 10,
     },
     "prompts": {

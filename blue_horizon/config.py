@@ -194,6 +194,9 @@ class BookingAgentConfig(FrozenModel):
             larger `limit` is clamped to this, and the result says so.
         max_search_calls_per_turn: Maximum `search_rooms` calls in one guest
             turn; further calls are refused and the model must answer.
+        max_model_calls_per_turn: Maximum model calls in one guest turn,
+            counting every tool round and the final reply. A turn that would
+            exceed it fails rather than answering.
         max_search_room_numbers: Maximum room numbers one search may name.
 
     """
@@ -201,22 +204,31 @@ class BookingAgentConfig(FrozenModel):
     default_search_results: int = Field(ge=1)
     max_search_results: int = Field(ge=1)
     max_search_calls_per_turn: int = Field(ge=1)
+    max_model_calls_per_turn: int = Field(ge=2)
     max_search_room_numbers: int = Field(ge=1)
 
     @model_validator(mode="after")
-    def _default_within_max(self) -> Self:
-        """Reject a default result count above the maximum.
+    def _limits_consistent(self) -> Self:
+        """Reject a default above its maximum, or a model cap below the search cap.
+
+        Every search takes one model call and the reply takes one more, so a
+        model-call cap at or below the search cap would fail a turn that
+        stayed within its searches.
 
         Returns:
             BookingAgentConfig: This config, unchanged.
 
         Raises:
             ValueError: If `default_search_results` exceeds
-                `max_search_results`.
+                `max_search_results`, or `max_model_calls_per_turn` does not
+                exceed `max_search_calls_per_turn`.
 
         """
         if self.default_search_results > self.max_search_results:
             msg = "default_search_results cannot exceed max_search_results."
+            raise ValueError(msg)
+        if self.max_model_calls_per_turn <= self.max_search_calls_per_turn:
+            msg = "max_model_calls_per_turn must exceed max_search_calls_per_turn."
             raise ValueError(msg)
         return self
 

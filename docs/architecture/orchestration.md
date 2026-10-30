@@ -78,7 +78,7 @@ the graph state instead of writing a reply:
 | Router timeout | `timeout` |
 | Router exception, or the router choosing the `error` step | `internal` |
 | Sub-agent timeout (`info_timeout_s`, `booking_timeout_s`) | `timeout` |
-| Sub-agent exception | `internal` |
+| Sub-agent exception, including the booking agent reaching `[booking.agent].max_model_calls_per_turn` | `internal` |
 | Booking agent exception caused by `BookingUnavailableError`, raised by a booking tool that could not reach the database | `unavailable` |
 | Booking agent returned, but a `search_rooms` result this turn carried `error_kind` `unavailable` | `unavailable` |
 | Router or sub-agent exception whose cause chain holds an `openai.APIError` with `type` or `code` `insufficient_quota` | `quota` |

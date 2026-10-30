@@ -1002,6 +1002,30 @@ shows no Send again button. The log records one warning line with OpenAI's `code
 `quota_code` attribute, which an Axiom monitor can alert on. See
 [Orchestration](architecture/orchestration.md#failed-turns).
 
+### A looping booking agent looked like a slow provider
+
+**Status:** fixed.
+
+Removing `run_sql` bounded what one search returns, and `ToolCallLimitMiddleware` caps
+searches per turn. Neither bounds the agent's loop. A search past the cap is refused
+with a result, not stopped, and `list_my_bookings` and the `propose_*` tools have no cap
+at all, so a model retrying a proposal that keeps failing is called again every time.
+The only stop was `booking_timeout_s`. That bounded the cost, but the turn was reported
+as `timeout`, the same code a slow provider produces, so a looping model was never seen
+as a defect.
+
+LangGraph's `recursion_limit` was considered and not used. It counts graph steps rather
+than model calls, and its default of 10007 is far beyond anything the timeout allows.
+
+**`ModelCallLimitMiddleware` now caps the booking agent at
+`[booking.agent].max_model_calls_per_turn` (8) model calls per turn.** The busiest
+legitimate turn is about seven: four searches, a bookings lookup, a proposal, and the
+reply. At medium reasoning effort, 8 should come before the 60-second timeout, so a
+loop fails as `internal` with a traceback at ERROR. `exit_behavior="error"` rather than
+`"end"`, because `"end"` writes a canned limit message as the agent's reply and the
+guest would read it as an answer. See
+[Booking agent](architecture/booking-agent.md).
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

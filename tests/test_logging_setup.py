@@ -11,11 +11,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Annotated, Any, TypedDict
 from unittest.mock import MagicMock
 
 import pytest
+from langchain_core.messages import AIMessage, AnyMessage
+from langchain_core.tools import tool
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.message import add_messages
+from langgraph.prebuilt import ToolNode
 from opentelemetry.sdk._logs.export import LogRecordExporter, LogRecordExportResult
 
 from blue_horizon import logging_setup
@@ -30,6 +34,7 @@ from blue_horizon.logging_setup import (
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Sequence
 
+    from langgraph.graph.state import CompiledStateGraph
     from opentelemetry.sdk._logs import ReadableLogRecord
 
 _THREAD_ID = "thread-1"
@@ -237,6 +242,119 @@ class TestLogContext:
                 return await compiled.ainvoke({})
 
         assert asyncio.run(_run())["fields"] == (_THREAD_ID, _CUSTOMER_ID)
+
+    def test_context_reaches_every_step_of_a_streamed_turn(self) -> None:
+        """Each kind of step the agents run sees the bound values.
+
+        Driven the way the API's streaming path drives a turn: through
+        `astream_events`, from inside a task that binds the context. The
+        graph has one of each step shape the agents use, so a LangGraph
+        upgrade that stopped copying the context into any of them fails here.
+        """
+        seen: dict[str, tuple[object, object]] = {}
+        compiled = _turn_shaped_graph(seen)
+
+        async def _drain() -> None:
+            with log_context(thread_id=_THREAD_ID, customer_id=_CUSTOMER_ID):
+                async for _ in compiled.astream_events(
+                    {"messages": []}, version="v2",
+                ):
+                    pass
+
+        async def _run() -> None:
+            await asyncio.create_task(_drain())
+
+        asyncio.run(_run())
+
+        assert set(seen) == {
+            "sync node",
+            "gathered 0",
+            "gathered 1",
+            "subgraph node",
+            "async tool",
+        }
+        assert set(seen.values()) == {(_THREAD_ID, _CUSTOMER_ID)}
+
+
+class _TurnState(TypedDict, total=False):
+    """State of the graph `_turn_shaped_graph` builds."""
+
+    messages: Annotated[list[AnyMessage], add_messages]
+
+
+def _turn_shaped_graph(
+    seen: dict[str, tuple[object, object]],
+) -> CompiledStateGraph[Any, Any, Any, Any]:
+    """Build a graph with one of each step shape a real turn runs.
+
+    A sync node and a node fanning out with `asyncio.gather` run in parallel,
+    as the router's neighbours and the information agent's retrievers do. A
+    dispatch node then invokes a subgraph, as the router invokes a sub-agent,
+    and asks for an async tool, which `ToolNode` runs, as the booking agent's
+    tools are run.
+
+    Args:
+        seen: Filled with each step's `(thread_id, customer_id)`, keyed by
+            step.
+
+    Returns:
+        CompiledStateGraph: The compiled graph.
+
+    """
+
+    @tool
+    async def echo(value: int) -> int:
+        """Return `value` unchanged.
+
+        Args:
+            value: Any integer.
+
+        """
+        seen["async tool"] = _context_fields()
+        return value
+
+    def subgraph_node(state: _TurnState) -> dict[str, Any]:
+        _ = state
+        seen["subgraph node"] = _context_fields()
+        return {}
+
+    subgraph = StateGraph(_TurnState)
+    subgraph.add_node("node", subgraph_node)
+    subgraph.add_edge(START, "node")
+    subgraph.add_edge("node", END)
+    compiled_subgraph = subgraph.compile()
+
+    def sync_node(state: _TurnState) -> dict[str, Any]:
+        _ = state
+        seen["sync node"] = _context_fields()
+        return {}
+
+    async def gather_node(state: _TurnState) -> dict[str, Any]:
+        _ = state
+
+        async def _retrieve(index: int) -> None:
+            seen[f"gathered {index}"] = _context_fields()
+
+        await asyncio.gather(*(asyncio.create_task(_retrieve(i)) for i in range(2)))
+        return {}
+
+    async def dispatch_node(state: _TurnState) -> dict[str, Any]:
+        _ = state
+        await compiled_subgraph.ainvoke({})
+        call = {"name": "echo", "args": {"value": 1}, "id": "call-1"}
+        return {"messages": [AIMessage(content="", tool_calls=[call])]}
+
+    graph = StateGraph(_TurnState)
+    graph.add_node("sync", sync_node)
+    graph.add_node("gather", gather_node)
+    graph.add_node("dispatch", dispatch_node)
+    graph.add_node("tools", ToolNode([echo]))
+    graph.add_edge(START, "sync")
+    graph.add_edge(START, "gather")
+    graph.add_edge(["sync", "gather"], "dispatch")
+    graph.add_edge("dispatch", "tools")
+    graph.add_edge("tools", END)
+    return graph.compile()
 
 
 @pytest.mark.usefixtures("restore_logging")

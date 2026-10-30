@@ -26,8 +26,10 @@ refuse route's p50 latency is roughly a quarter of the other two.
 ### The info/booking boundary is the hard part
 
 Most of the router prompt's length exists to handle cases that look like one route and
-belong to the other. A question about how many floors the hotel has reads like a rooms
-query but is an FAQ lookup. A question about modifying a reservation *without penalty*
+belong to the other. A question about how many floors the hotel has reads like general
+hotel information but is a booking question: no FAQ entry covers it, and the floor range
+comes from the `rooms` table, which the booking agent's prompt and `search_rooms` schema
+are built from. A question about modifying a reservation *without penalty*
 is a policy question, not a modification request. A question about whether a chartered
 yacht includes crew is a service-details lookup, not a request for the assistant to act
 as crew. A request to list every room matching some criteria is a room search, not a

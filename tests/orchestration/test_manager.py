@@ -822,6 +822,40 @@ class TestTurnFinishedLog:
         assert cast("list[object]", seen[0].get("callbacks"))[0] is caller_callback
 
 
+class TestTraceMetadata:
+    """Each turn's run names its guest in metadata, so a trace can be filtered."""
+
+    def test_stream_names_customer(self) -> None:
+        """The stream path puts `customer_id` on the run's metadata."""
+        agent = _mock_agent([])
+        manager = _make_manager(agent=agent)
+
+        asyncio.run(_run_stream(manager))
+
+        config = agent.astream_events.call_args.kwargs["config"]
+        assert config["metadata"] == {"customer_id": 1}
+
+    def test_ainvoke_keeps_caller_metadata_but_not_its_customer(self) -> None:
+        """Caller metadata survives, but cannot misattribute the turn's guest."""
+        agent = MagicMock()
+        agent.ainvoke = AsyncMock(
+            return_value={"messages": [AIMessage(content="Reply.")], "route": "info"},
+        )
+        manager = _make_manager(agent=agent)
+
+        asyncio.run(
+            manager.ainvoke(
+                thread_id="t1",
+                user_text="hi",
+                customer_id=1,
+                metadata={"experiment": "smoke", "customer_id": 2},
+            ),
+        )
+
+        config = agent.ainvoke.call_args.kwargs["config"]
+        assert config["metadata"] == {"experiment": "smoke", "customer_id": 1}
+
+
 def _reporting_usage(agent: MagicMock) -> MagicMock:
     """Make a mock graph's `astream_events` report one model call's tokens.
 

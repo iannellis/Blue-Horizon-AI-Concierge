@@ -335,7 +335,10 @@ async def list_bookings(customer_id: int) -> dict[str, Any]:
             headers={"Retry-After": str(_chat_retry_after_s())},
         ) from exc
     try:
-        bookings = await write_ops.list_bookings(write_pool, customer_id=customer_id)
+        with log_context(customer_id=customer_id):
+            bookings = await write_ops.list_bookings(
+                write_pool, customer_id=customer_id,
+            )
     except write_ops.BookingUnavailableError as exc:
         raise _database_unreachable(exc) from exc
     return {"bookings": [write_ops.serialize_booking(b) for b in bookings]}
@@ -576,31 +579,33 @@ async def confirm_booking(payload: ProposalActionPayload) -> dict[str, Any]:
             again is safe.
 
     """
-    resources = orchestrator.get_booking_resources()
-    try:
-        outcome = await resources.proposals.confirm(
-            proposal_id=payload.proposal_id,
-            customer_id=payload.customer_id,
-            write_pool=resources.get_write_pool(),
-        )
-    except proposals_module.ProposalNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except proposals_module.ProposalOwnershipError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
-    except write_ops.BookingUnavailableError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=str(exc),
-            headers={"Retry-After": str(_CONFIRM_RETRY_AFTER_S)},
-        ) from exc
-    except write_ops.BookingWriteError as exc:
-        await _record_refusal(resources.proposals, payload.proposal_id, exc)
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # Outside a chat turn, so nothing has bound the guest to the log yet.
+    with log_context(customer_id=payload.customer_id):
+        resources = orchestrator.get_booking_resources()
+        try:
+            outcome = await resources.proposals.confirm(
+                proposal_id=payload.proposal_id,
+                customer_id=payload.customer_id,
+                write_pool=resources.get_write_pool(),
+            )
+        except proposals_module.ProposalNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except proposals_module.ProposalOwnershipError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except write_ops.BookingUnavailableError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=str(exc),
+                headers={"Retry-After": str(_CONFIRM_RETRY_AFTER_S)},
+            ) from exc
+        except write_ops.BookingWriteError as exc:
+            await _record_refusal(resources.proposals, payload.proposal_id, exc)
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    message = receipt_message(outcome)
-    await orchestrator.append_assistant_message(
-        thread_id=outcome.proposal.thread_id, text=message,
-    )
+        message = receipt_message(outcome)
+        await orchestrator.append_assistant_message(
+            thread_id=outcome.proposal.thread_id, text=message,
+        )
     return {
         "status": "confirmed",
         "already_confirmed": outcome.already_confirmed,
@@ -649,19 +654,20 @@ async def dismiss_booking(payload: ProposalActionPayload) -> dict[str, Any]:
             used; 403 if it belongs to a different guest.
 
     """
-    resources = orchestrator.get_booking_resources()
-    try:
-        proposal = resources.proposals.dismiss(
-            proposal_id=payload.proposal_id, customer_id=payload.customer_id,
-        )
-    except proposals_module.ProposalNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except proposals_module.ProposalOwnershipError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    with log_context(customer_id=payload.customer_id):
+        resources = orchestrator.get_booking_resources()
+        try:
+            proposal = resources.proposals.dismiss(
+                proposal_id=payload.proposal_id, customer_id=payload.customer_id,
+            )
+        except proposals_module.ProposalNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except proposals_module.ProposalOwnershipError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
 
-    await orchestrator.append_assistant_message(
-        thread_id=proposal.thread_id, text="No changes were made.",
-    )
+        await orchestrator.append_assistant_message(
+            thread_id=proposal.thread_id, text="No changes were made.",
+        )
     return {"status": "dismissed"}
 
 

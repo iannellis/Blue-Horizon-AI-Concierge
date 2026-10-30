@@ -961,6 +961,23 @@ is `SameSite=Lax` and is not sent on a cross-site handshake, and the anonymous s
 id travels in the URL. Turning the check on would add a second layer behind `SameSite`
 at the risk of breaking the page behind HuggingFace's proxy.
 
+### Traces and booking actions did not say which guest they belonged to
+
+**Status:** fixed.
+
+LangSmith traces of concurrent turns could not be told apart by guest. LangGraph copies
+`thread_id` from `configurable` into a run's metadata, but the installed
+`langchain_core` (1.6) does not copy other `configurable` values, so `customer_id`
+reached the tools and never the trace. The confirm, dismiss, and bookings endpoints had a
+similar gap in the log. They run outside any chat turn, so nothing bound `log_context`
+for them, and in Axiom their lines named the guest only inside the message text, not as
+the `customer_id` attribute a query filters on.
+
+**The manager now puts `customer_id` in each turn's run metadata, and the three
+endpoints bind it to the log.** The server-resolved value is applied after any metadata
+a caller passes, so an eval harness or a future caller cannot attribute a turn to the
+wrong guest. See [Architecture](architecture/index.md#logging).
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

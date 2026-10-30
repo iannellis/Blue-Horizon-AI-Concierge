@@ -292,7 +292,8 @@ class OrchestrationManager:
                 to attach to the run.
             tags: Optional LangSmith tags associated with the run.
             metadata: Optional additional metadata to persist with the run (also used
-                by LangSmith tracing).
+                by LangSmith tracing). Its `customer_id` key, if any, is
+                replaced by the `customer_id` argument.
 
         Returns:
             Final state from the orchestration agent. ``turn_error`` is set
@@ -323,11 +324,11 @@ class OrchestrationManager:
         config: RunnableConfig = {
             "configurable": {"thread_id": thread_id, "customer_id": customer_id},
             "callbacks": [*(callbacks or []), usage],
+            # Applied last, so a caller's metadata cannot misattribute the run.
+            "metadata": {**(metadata or {}), **_trace_metadata(customer_id)},
         }
         if tags is not None:
             config["tags"] = tags
-        if metadata is not None:
-            config["metadata"] = metadata
 
         started = time.perf_counter()
         async with self._llm_semaphore:
@@ -409,6 +410,7 @@ class OrchestrationManager:
         config: RunnableConfig = {
             "configurable": {"thread_id": thread_id, "customer_id": customer_id},
             "callbacks": [usage],
+            "metadata": _trace_metadata(customer_id),
         }
 
         emitted_stages: set[str] = set()
@@ -615,6 +617,24 @@ class OrchestrationManager:
                         logger.info("Orchestration agent ready")
 
         await self._stop_event.wait()
+
+
+def _trace_metadata(customer_id: int) -> dict[str, Any]:
+    """Name the guest on a turn's run, for LangSmith to record.
+
+    LangGraph copies `thread_id` from `configurable` into the run's metadata
+    itself, but not `customer_id`, so without this a trace names its
+    conversation and never its guest. Metadata reaches tracers only, never
+    the model, so this does not expose `customer_id` to it.
+
+    Args:
+        customer_id: Server-resolved guest identity for the turn.
+
+    Returns:
+        dict[str, Any]: Metadata entries to merge into the run's config.
+
+    """
+    return {"customer_id": customer_id}
 
 
 def _log_turn_finished(

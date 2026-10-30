@@ -126,7 +126,16 @@ level in `[logging]` (see [Configuration](../guides/configuration.md)). Every li
 carries a timestamp, level, logger name, and the conversation's `thread_id` and
 `customer_id`. The API binds those two values when a chat turn starts, and every task
 LangGraph runs for the turn inherits them, so a line logged inside a node or tool names
-its guest and conversation. A line logged outside any turn shows `-` for both.
+its guest and conversation. The confirm, dismiss, and bookings endpoints run outside any
+turn, so each binds the requesting `customer_id` itself; they show `-` for `thread_id`,
+and the proposal lines they log name the thread in their text. A line logged outside
+any request, such as one at startup, shows `-` for both.
+
+When LangSmith tracing is on, each turn's run carries `thread_id` and `customer_id` in
+its metadata, inherited by every child run, so traces can be filtered by guest.
+LangGraph copies `thread_id` there from `configurable` on its own; the manager adds
+`customer_id`, overriding any value a caller passed. Metadata goes to tracers only and
+never to the model.
 
 The container log is lost whenever the Space restarts, so when `AXIOM_API_KEY` and
 `AXIOM_DATASET` are set, the API also ships every record to that Axiom dataset over

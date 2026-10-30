@@ -1712,7 +1712,7 @@ def main() -> None:
     )
     st.title("Blue Horizon Concierge 🌅")
     st.subheader("AI concierge to help with room bookings and answer questions about "
-                 "the hotel and its services/amenities")
+                 "the hotel's policies/services/amenities")
 
     if _AUTH_ENABLED and not st.user.is_logged_in:
         _render_login_page()

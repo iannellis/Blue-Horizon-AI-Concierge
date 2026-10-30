@@ -1491,13 +1491,17 @@ def _render_chat() -> None:
         _render_turn_limit_note(reset_at)
         _render_turn_limit_poll()
 
-    st.caption(_DEMO_NOTICE)
     placeholder = "Ask about the hotel, or get help searching or booking rooms..."
-    if prompt := st.chat_input(
-        placeholder,
-        max_chars=_chat_limits().max_message_chars,
-        disabled=st.session_state.customer_id is None or reset_at is not None,
-    ):
+    # Inside st.bottom, the notice stays pinned under the input instead of
+    # scrolling away with the conversation.
+    with st.bottom:
+        prompt = st.chat_input(
+            placeholder,
+            max_chars=_chat_limits().max_message_chars,
+            disabled=st.session_state.customer_id is None or reset_at is not None,
+        )
+        st.caption(_DEMO_NOTICE)
+    if prompt:
         # Checked again here, not only above: another tab of the same
         # signed-in visitor may have taken the last turn since this render.
         if not _reserve_turn(_visitor_key()):

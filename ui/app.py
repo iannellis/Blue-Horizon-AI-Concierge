@@ -100,6 +100,11 @@ _GUEST_HOLD_NOTICE: str = (
     "another visitor, and you to a different guest. The demo also resets "
     "every night, which clears all reservations."
 )
+_DEMO_NOTICE: str = (
+    "Blue Horizon is a fictional hotel, and this is a demo. Please do not "
+    "enter any real personal or financial information, such as addresses, "
+    "phone numbers, or card details."
+)
 
 
 # ============================
@@ -1486,6 +1491,7 @@ def _render_chat() -> None:
         _render_turn_limit_note(reset_at)
         _render_turn_limit_poll()
 
+    st.caption(_DEMO_NOTICE)
     placeholder = "Ask about the hotel, or get help searching or booking rooms..."
     if prompt := st.chat_input(
         placeholder,

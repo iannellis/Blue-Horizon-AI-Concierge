@@ -245,7 +245,7 @@ decides.
 ## Guest identity
 
 Guests are identified without a real login, since this is a demo. A session with no
-guest yet claims a random one that nobody else currently holds, tracked in an in-memory
+guest yet claims one that nobody else currently holds, tracked in an in-memory
 claim registry guarded by a lock. One in-memory dict is sufficient because the whole
 Space runs as one Streamlit process, so every browser session already lives on a thread
 of that same process. The dict and its lock are created by an `st.cache_resource`
@@ -260,10 +260,20 @@ visitor already holds. Nothing about the guest is put in the URL, so a shared li
 not carry the sender's guest with it. Without auth the session id is kept in the `sid`
 URL parameter, since nothing else survives a refresh.
 
-A claim's activity timestamp refreshes on every rerun of its session, so a closed or
-ten-minutes-idle tab ages out and returns its guest to the pool. Signing out releases
-the claim immediately. If every seeded guest is claimed, the session sees a capacity
-message.
+A visitor holding no claim is given a preferred guest when it is free, and a random free
+one otherwise. The preference is a hash of the visitor's key, so it needs no stored
+state: when the nightly Space restart empties the registry, the visitor's next session
+lands on the same guest again unless someone else holds it.
+
+A claim's activity timestamp refreshes on every full rerun of its session, so a closed or
+ten-minutes-idle tab ages out and returns its guest to the pool. The 30-second health
+poll is a fragment and reruns only itself, so an open tab nobody touches ages out too.
+An expired claim stays with its session unless another visitor takes the guest first:
+the session's next rerun recreates it. Signing out releases the claim immediately. If
+every seeded guest is claimed, the session sees a capacity message. The sidebar says
+under the guest's name that the guest may be reassigned after ten minutes without
+activity, and that the nightly reset clears reservations, since neither event is
+otherwise announced.
 
 There is deliberately no manual guest dropdown: letting someone hand-pick an
 already-claimed guest would defeat the point of exclusive assignment. See

@@ -923,6 +923,26 @@ there, but `cid` no longer is. One account in two tabs now shares one guest, as 
 already shared one turn allowance. A process restart empties the registry, so a visitor
 gets a new guest afterwards, where the URL used to restore the old one.
 
+### The guest changed overnight without a word
+
+**Status:** fixed.
+
+A tab left open overnight still showed the previous day's guest, and a refresh quietly
+showed a different one. The 10-minute claim TTL was not the cause. The nightly workflow
+restarts the Space, which ends every Streamlit session and empties the claim registry,
+so the next session found no claim for its visitor and drew a random guest. Nothing
+recorded that a guest had been lost, so nothing could say so. The stale tab simply had
+not reconnected yet: Streamlit's frontend reruns the script on reconnect when the page
+has an auto-rerun fragment, which is why a restart watched live looks like a refresh.
+
+Remembering lapsed claims in the registry was rejected, since the restart that caused
+this wipes that memory too, and a browser cookie is unreliable inside HuggingFace's
+iframe. A visitor's first pick is now a hash of their visitor key, so after a restart
+they land on the same guest unless someone else holds it. The sidebar also says that the
+guest may be reassigned after 10 minutes without activity and that the demo resets every
+night, which clears reservations. Even the same guest comes back without the previous
+day's bookings, so stating it up front is the only honest notice for the reset.
+
 ### The XSRF setting was switched off for a reason that did not hold
 
 **Status:** fixed.

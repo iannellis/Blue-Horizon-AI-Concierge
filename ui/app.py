@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import dataclasses
 import functools
+import hashlib
 import json
 import logging
 import math
@@ -88,6 +89,14 @@ _TURN_LIMIT_POLL_INTERVAL_S: int = 30
 # covers both an idle-but-open tab and one that was simply closed, since a
 # closed tab produces no further reruns to refresh the claim either way.
 _GUEST_CLAIM_TTL_S: float = 600.0
+# Shown under the guest's name. The nightly reset also clears every booking,
+# so even a visitor given the same guest back finds its reservations gone.
+_GUEST_HOLD_NOTICE: str = (
+    "This guest is held for you while you're active. After "
+    f"{_GUEST_CLAIM_TTL_S / 60:g} minutes without activity, it may be given to "
+    "another visitor, and you to a different guest. The demo also resets "
+    "every night, which clears all reservations."
+)
 
 
 # ============================
@@ -525,13 +534,18 @@ def _guest_claim_registry() -> _GuestClaimRegistry:
 
 
 def _try_claim_guest(holder: str, candidate_ids: list[int]) -> int | None:
-    """Find a session's guest: the one its visitor holds, or a random free one.
+    """Find a session's guest: the one its visitor holds, or a new claim.
 
     A session starts with no guest, including after a hard refresh, so the
     visitor's existing claim is returned first if there is one. That is how
     a refresh, or a second tab, keeps the same guest. The lookup and the
     new claim happen under one lock, so two tabs loading at once cannot
     each claim a different guest.
+
+    A visitor holding no claim gets their preferred guest when it is free,
+    and a random free one otherwise. The preference is derived from the
+    visitor's key alone, so a visitor whose claim was lost to a process
+    restart, which empties the registry, lands on the same guest again.
 
     Sweeps out any claims that have gone stale first, so a guest whose
     previous visitor vanished without a clean release comes back into
@@ -563,7 +577,8 @@ def _try_claim_guest(holder: str, candidate_ids: list[int]) -> int | None:
         available = [cid for cid in candidate_ids if cid not in registry.claims]
         if not available:
             return None
-        chosen = secrets.choice(available)
+        preferred = _preferred_guest(holder, candidate_ids)
+        chosen = preferred if preferred in available else secrets.choice(available)
         registry.claims[chosen] = _GuestClaim(
             holder=holder,
             last_seen=datetime.now(UTC),
@@ -584,6 +599,29 @@ def _sweep_expired_claims_locked(claims: dict[int, _GuestClaim]) -> None:
     expired = [cid for cid, claim in claims.items() if claim.last_seen < cutoff]
     for cid in expired:
         del claims[cid]
+
+
+def _preferred_guest(holder: str, candidate_ids: list[int]) -> int:
+    """Pick the guest a visitor is given whenever it is free.
+
+    Hashes the visitor's key rather than remembering a past assignment, so
+    the answer needs no stored state and survives a process restart. The
+    ids are sorted first, so the order the API lists guests in does not
+    change the pick.
+
+    Args:
+        holder: `_visitor_key()` of the visitor asking for a guest.
+        candidate_ids: All seeded guest ids to choose among. Must not be
+            empty.
+
+    Returns:
+        int: One of `candidate_ids`, the same one on every call with the
+        same arguments.
+
+    """
+    digest = hashlib.sha256(holder.encode()).digest()
+    ordered = sorted(candidate_ids)
+    return ordered[int.from_bytes(digest[:8]) % len(ordered)]
 
 
 def _touch_claim(customer_id: int, holder: str) -> int | None:
@@ -920,6 +958,7 @@ def _render_guest_assignment(*, api_online: bool) -> None:
 
     _persist_session_id()
     st.caption(f"You're browsing as **{guest['first_name']} {guest['last_name']}**")
+    st.caption(_GUEST_HOLD_NOTICE)
 
 
 def _guest_list_failure_message(*, api_online: bool) -> str:

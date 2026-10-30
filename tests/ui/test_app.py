@@ -12,8 +12,8 @@ Not covered here: `st.dialog`-decorated flows, session-state-driven widgets
 `_render_guest_assignment` itself), and button click handling -- these need
 a full Streamlit AppTest harness to exercise meaningfully, which is out of
 scope for this module. The guest claim registry it calls into
-(`_try_claim_guest`, `_touch_claim`, `_release_claim`) is process state
-guarded by a lock, with no widget dependency, so it is covered here
+(`_try_claim_guest`, `_preferred_guest`, `_touch_claim`, `_release_claim`)
+is process state guarded by a lock, with no widget dependency, so it is covered here
 directly, as is the hourly turn limit registry (`_reserve_turn`,
 `_turn_limit_reset_at`) built the same way. Both are also checked across
 two executions of the script, since Streamlit runs it in a fresh module on
@@ -66,6 +66,7 @@ from ui.app import (  # noqa: E402
     _not_from_export_thread,
     _parse_sse_line,
     _persist_session_id,
+    _preferred_guest,
     _release_claim,
     _render_book_summary,
     _render_cancel_summary,
@@ -910,6 +911,28 @@ class TestGuestClaimRegistry:
         """No candidate is left unclaimed → None, not a collision."""
         _try_claim_guest("session-a", [1])
         assert _try_claim_guest("session-b", [1]) is None
+
+    def test_visitor_without_a_claim_gets_their_preferred_guest(self) -> None:
+        """A visitor whose claim was lost, e.g. to a restart, lands on it again."""
+        preferred = _preferred_guest("user:a@example.com", [1, 2, 3, 4, 5])
+        assert _try_claim_guest("user:a@example.com", [1, 2, 3, 4, 5]) == preferred
+        _guest_claim_registry().claims.clear()
+        assert _try_claim_guest("user:a@example.com", [1, 2, 3, 4, 5]) == preferred
+
+    def test_preferred_guest_held_by_another_falls_back_to_a_free_one(self) -> None:
+        """Someone else holding the preferred guest is not displaced."""
+        preferred = _preferred_guest("user:a@example.com", [1, 2, 3])
+        _try_claim_guest("session-b", [preferred])
+        customer_id = _try_claim_guest("user:a@example.com", [1, 2, 3])
+        assert customer_id in {1, 2, 3} - {preferred}
+        assert _guest_claim_registry().claims[preferred].holder == "session-b"
+
+    def test_preferred_guest_ignores_the_order_guests_are_listed_in(self) -> None:
+        """The API listing guests in a new order does not move the preference."""
+        assert _preferred_guest("session-a", [3, 1, 2]) == _preferred_guest(
+            "session-a",
+            [1, 2, 3],
+        )
 
     def test_expired_claim_is_swept_and_reclaimable(self) -> None:
         """A claim idle past the TTL is dropped and its guest reassignable."""

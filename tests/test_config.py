@@ -33,6 +33,7 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
             "reasoning_effort": "low",
             "timeout_s": 15.0,
             "max_retries": 2,
+            "max_output_tokens": 8000,
         },
         "orchestration": {
             "init_retry_base_s": 2.0,
@@ -93,6 +94,7 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
             "reasoning_effort": "medium",
             "timeout_s": 20.0,
             "max_retries": 2,
+            "max_output_tokens": 8000,
         },
         "redis": {
             "connect_timeout_s": 2.0,
@@ -116,6 +118,7 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
             "reasoning_effort": "low",
             "timeout_s": 20.0,
             "max_retries": 2,
+            "max_output_tokens": 8000,
         },
         "prompts": {
             "folder": "system_prompts",

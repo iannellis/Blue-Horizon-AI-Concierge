@@ -1026,6 +1026,24 @@ loop fails as `internal` with a traceback at ERROR. `exit_behavior="error"` rath
 guest would read it as an answer. See
 [Booking agent](architecture/booking-agent.md).
 
+### A timed-out model call could still be billed in full
+
+**Status:** fixed.
+
+No model client capped its output, so a response's length was up to the model, reasoning
+tokens included. The per-call `timeout_s` looked like a bound but is not one for cost.
+It only makes the client stop waiting on a non-streaming request, and there is no
+guarantee the provider stops generating or billing. With `max_retries = 2`, a model
+stuck in a degenerate loop could be billed for three full-length responses per call,
+and the booking agent makes up to eight calls a turn. The typed search tool did not
+help here: it bounds what a tool returns to the model, not what the model writes.
+
+**Each `llm` section now sets `max_output_tokens`:** 1000 for the router, which runs
+with no reasoning and returns one route, and 8000 for the information and booking
+agents, leaving room for medium-effort reasoning. It is the last place a turn's cost
+was bounded only by the provider's budget limit. See
+[Configuration](guides/configuration.md).
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

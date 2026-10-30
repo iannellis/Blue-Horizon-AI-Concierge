@@ -58,6 +58,11 @@ drives 50 concurrent sessions against a single OpenAI account: without it, a tra
 spike exhausts the tokens-per-minute quota and every in-flight request fails together
 rather than a few waiting their turn.
 
+The timeouts bound how long a guest waits, not what a turn costs. Each model client also
+caps the tokens one response may generate, with `max_output_tokens` in the router's,
+information agent's, and booking agent's `llm` sections. See
+[Configuration](../guides/configuration.md).
+
 Initialization uses `tenacity` with exponential backoff between `init_retry_base_s` and
 `init_retry_max_s`, so a cold Redis or a suspended Neon compute delays startup instead
 of failing it. A pending wait is not cut short when a dependency comes back, so

@@ -96,6 +96,8 @@ class InfoLlmConfig(FrozenModel):
         timeout_s: Client-side request timeout in seconds.
         max_retries: Retry budget for transient LLM failures.
         reasoning_effort: Reasoning effort hint (e.g., low, medium, high).
+        max_output_tokens: Most tokens one response may generate, reasoning
+            tokens included.
 
     """
 
@@ -103,6 +105,7 @@ class InfoLlmConfig(FrozenModel):
     timeout_s: float
     max_retries: int
     reasoning_effort: str
+    max_output_tokens: int = Field(ge=1)
 
 
 class InfoRedisConfig(FrozenModel):
@@ -175,6 +178,8 @@ class BookingLlmConfig(FrozenModel):
         reasoning_effort: Reasoning effort hint metadata.
         timeout_s: Timeout in seconds for LLM requests.
         max_retries: Retry count for transient LLM failures.
+        max_output_tokens: Most tokens one response may generate, reasoning
+            tokens included.
 
     """
 
@@ -182,6 +187,7 @@ class BookingLlmConfig(FrozenModel):
     reasoning_effort: str
     timeout_s: float
     max_retries: int
+    max_output_tokens: int = Field(ge=1)
 
 
 class BookingAgentConfig(FrozenModel):
@@ -415,6 +421,7 @@ class OrchestrationLlmConfig(FrozenModel):
         reasoning_effort: Reasoning effort hint.
         timeout_s: Network timeout for router LLM calls.
         max_retries: Retry budget for transient router failures.
+        max_output_tokens: Most tokens one router response may generate.
 
     """
 
@@ -422,6 +429,7 @@ class OrchestrationLlmConfig(FrozenModel):
     reasoning_effort: str
     timeout_s: float
     max_retries: int
+    max_output_tokens: int = Field(ge=1)
 
 
 class OrchestrationRuntimeConfig(FrozenModel):

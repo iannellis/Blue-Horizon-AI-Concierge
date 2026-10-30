@@ -32,6 +32,15 @@ minute, leaving room for longer turns and for the embedding calls that share the
 The eval judge runs on Gemini outside this semaphore, so its rate limits do not bear on
 this value.
 
+**`max_output_tokens`** in `[orchestration.llm]` (default 1000), `[info.llm]`, and
+`[booking.llm]` (default 8000 each) caps the tokens one model response may generate,
+reasoning tokens included. It is sent as the Responses API's `max_output_tokens`. The
+`timeout_s` beside it does not bound cost: it stops the client waiting, not the provider
+generating, and each of the `max_retries` asks for another full response. The router
+gets less because it runs with no reasoning and returns one route. A response that
+reaches the cap comes back cut short, so keep the info and booking values well above
+what a medium-effort answer needs.
+
 **`[orchestration.orchestration].max_history_turns`** (default 10) is how many completed
 guest turns a thread's history keeps. The router and the chosen sub-agent are sent the
 whole history on every turn, so without a cap each message in a long conversation costs

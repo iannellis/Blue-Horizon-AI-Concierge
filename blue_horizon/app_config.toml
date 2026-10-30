@@ -10,6 +10,8 @@ reasoning_effort = "none"
 timeout_s = 15.0
 # Retry count for transient provider/network errors
 max_retries = 2
+# Most tokens one router response may generate
+max_output_tokens = 1000
 
 [orchestration.orchestration]
 # Initialization retry policy for dependency startup
@@ -84,6 +86,8 @@ reasoning_effort = "medium"
 timeout_s = 20.0
 # Max retries for chat requests
 max_retries = 2
+# Most tokens one response may generate, reasoning tokens included
+max_output_tokens = 8000
 
 [info.redis]
 # Redis connection timeout
@@ -119,6 +123,8 @@ reasoning_effort = "medium"
 timeout_s = 20.0
 # Max retries for LLM requests
 max_retries = 2
+# Most tokens one response may generate, reasoning tokens included
+max_output_tokens = 8000
 
 [booking.prompts]
 # Folder (relative to blue_horizon package root) containing prompt files

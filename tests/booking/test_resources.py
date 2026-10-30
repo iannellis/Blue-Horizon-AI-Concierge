@@ -48,6 +48,7 @@ _BOOKING_CONFIG_DICT: dict[str, Any] = {
         "reasoning_effort": "low",
         "timeout_s": 20.0,
         "max_retries": 2,
+        "max_output_tokens": 8000,
     },
     "agent": {
         "default_search_results": 4,

@@ -1537,14 +1537,19 @@ def _configure_logging() -> None:
     The shipping handler is recognized by the library's class: a class
     defined in this module would be a new class on every rerun. Records are
     shipped only when both ``AXIOM_API_KEY`` and ``AXIOM_DATASET`` are set.
+    The API's ``quiet_loggers`` are held at ``WARNING`` here too, or the
+    health poll alone would log a line every
+    `_HEALTH_POLL_ONLINE_INTERVAL_S` seconds per open tab.
 
     Raises:
-        OSError: If shipping is configured and `_APP_CONFIG_PATH` cannot be
-            read.
-        KeyError: If that file has no ``[logging.axiom]`` section.
+        OSError: If `_APP_CONFIG_PATH` cannot be read.
+        KeyError: If that file has no ``[logging]`` section, or shipping is
+            configured and it has no ``[logging.axiom]`` section.
 
     """
     logging.basicConfig(level=logging.INFO, format=_LOG_FORMAT)
+    for name in _logging_config()["quiet_loggers"]:
+        logging.getLogger(name).setLevel(logging.WARNING)
     api_key = os.getenv("AXIOM_API_KEY")
     dataset = os.getenv("AXIOM_DATASET")
     root = logging.getLogger()
@@ -1556,6 +1561,24 @@ def _configure_logging() -> None:
         config = _axiom_config()
         exporter = _axiom_exporter(config, api_key, dataset)
         root.addHandler(_shipping_handler(config, exporter))
+
+
+@functools.cache
+def _logging_config() -> dict[str, Any]:
+    """Read the API's ``[logging]`` settings from its config file, once.
+
+    Cached because `_configure_logging` runs on every Streamlit rerun.
+
+    Returns:
+        dict[str, Any]: The ``[logging]`` table, its ``axiom`` table included.
+
+    Raises:
+        OSError: If `_APP_CONFIG_PATH` cannot be read.
+        KeyError: If the file has no ``[logging]`` section.
+
+    """
+    data = tomllib.loads(_APP_CONFIG_PATH.read_text(encoding="utf-8"))
+    return data["logging"]
 
 
 def _axiom_config() -> dict[str, Any]:
@@ -1570,8 +1593,7 @@ def _axiom_config() -> dict[str, Any]:
         KeyError: If the file has no ``[logging.axiom]`` section.
 
     """
-    data = tomllib.loads(_APP_CONFIG_PATH.read_text(encoding="utf-8"))
-    return data["logging"]["axiom"]
+    return _logging_config()["axiom"]
 
 
 def _axiom_exporter(

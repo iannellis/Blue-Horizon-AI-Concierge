@@ -1321,6 +1321,17 @@ class TestLogShipping:
         _configure_logging()
         assert not _shipping_handlers()
 
+    @pytest.mark.usefixtures("restore_root_logger")
+    def test_quiets_the_http_client_request_lines(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The UI's own HTTP client logs a line per request only at WARNING."""
+        monkeypatch.delenv("AXIOM_API_KEY", raising=False)
+        client_logger = logging.getLogger("httpx2")
+        monkeypatch.setattr(client_logger, "level", logging.NOTSET)
+        _configure_logging()
+        assert client_logger.getEffectiveLevel() == logging.WARNING
+
     def test_reads_the_same_settings_the_api_types(self) -> None:
         """The file's keys are exactly the API's, so a rename cannot go unnoticed."""
         config = _axiom_config()

@@ -185,7 +185,9 @@ the guest's message.
 
 The UI logs at `INFO` under the `ui.app` logger: failed or timed-out chat requests,
 failures to reach the API, and unexpected confirm statuses. Each line names the
-`thread_id` and `customer_id` it concerns, where it has them.
+`thread_id` and `customer_id` it concerns, where it has them. It holds the API's
+`quiet_loggers` at `WARNING`, so its own requests to the API, including the health
+poll, are not logged one line each.
 
 Given the same two variables, the UI ships its records to the same dataset in the same
 way, with `service.name` set to `blue-horizon-ui`, so a query can filter by process.

@@ -174,8 +174,10 @@ seeded_customer_count = 100
 [logging]
 # Root log level for the API process
 level = "INFO"
-# Loggers kept at WARNING, since at INFO they log every outbound HTTP request
-quiet_loggers = ["httpx", "httpcore", "openai"]
+# Loggers kept at WARNING, since at INFO they log every outbound HTTP request.
+# Also read directly by ui/app.py. The openai SDK and the UI send through httpx2,
+# which logs under its own names, not httpx's
+quiet_loggers = ["httpx", "httpcore", "httpx2", "httpcore2", "openai"]
 
 [logging.axiom]
 # Also read directly by ui/app.py, so renaming a key here breaks the UI

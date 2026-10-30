@@ -190,15 +190,19 @@ the log is designed to be audited at; see
 [Architecture](../architecture/index.md#logging) for what it records. `WARNING` keeps
 only refusals and failures.
 
-**`[logging].quiet_loggers`** (default `httpx`, `httpcore`, `openai`) are held at
-`WARNING` whatever `level` is. At `INFO` they log every request to the model provider,
-which would outnumber the application's own lines several times over.
+**`[logging].quiet_loggers`** (default `httpx`, `httpcore`, `httpx2`, `httpcore2`,
+`openai`) are held at `WARNING` whatever `level` is. At `INFO` they log every request to
+the model provider, which would outnumber the application's own lines several times
+over. The `openai` SDK sends through `httpx2`, which logs under its own names rather
+than `httpx`'s. The UI holds the same loggers at `WARNING`, since its `httpx2` calls to
+the API, the health poll among them, would otherwise log one line each.
 
 **`[logging.axiom]`** tunes log shipping, which is switched on by the `AXIOM_API_KEY` and
 `AXIOM_DATASET` environment variables, not by this section. Both the API and the UI
 use it. The UI reads it straight from the TOML file, since it imports no `blue_horizon`
 code, so renaming a key breaks the UI's shipping even though the API's typed config
-would still load. `[logging].level` and `quiet_loggers` apply to the API only.
+would still load. `[logging].level` applies to the API only; `quiet_loggers` applies to
+both.
 
 - `otlp_endpoint` is Axiom's OTLP logs URL for the organization's edge region,
   `us-east-1` here. An organization in another region needs that region's domain.

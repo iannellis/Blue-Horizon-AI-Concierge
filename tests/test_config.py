@@ -58,6 +58,9 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
                 "Sorry - the booking system could not be reached. "
                 "You can send it again."
             ),
+            "quota_exhausted": (
+                "Sorry - this demo has reached its usage limit for now."
+            ),
             "unavailable": (
                 "Sorry - the system isn't available at the moment. "
                 "Please try again shortly."

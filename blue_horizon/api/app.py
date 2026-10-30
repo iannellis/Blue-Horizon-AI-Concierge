@@ -528,13 +528,15 @@ def _failed_turn_response(turn_error: str) -> JSONResponse:
 
     Args:
         turn_error: The orchestrator's failure code, `"timeout"`,
-            `"unavailable"`, or `"internal"`.
+            `"unavailable"`, `"quota"`, or `"internal"`.
 
     Returns:
-        JSONResponse: 504 for `"timeout"`, 502 for `"internal"`, and 503 with
+        JSONResponse: 504 for `"timeout"`, 502 for `"internal"`, 503 with
         a `Retry-After` header for `"unavailable"`, a database outage the
-        guest can wait out. The body is ``{"code": str, "message": str}``
-        matching the SSE `error` event, plus ``retry_after_s`` on a 503.
+        guest can wait out, and 503 without one for `"quota"`, a spent model
+        budget that only an operator can lift. The body is
+        ``{"code": str, "message": str}`` matching the SSE `error` event,
+        plus ``retry_after_s`` on the `"unavailable"` 503.
 
     """
     body: dict[str, Any] = {
@@ -551,6 +553,8 @@ def _failed_turn_response(turn_error: str) -> JSONResponse:
             status_code=503,
             headers={"Retry-After": str(retry_after_s)},
         )
+    if turn_error == "quota":
+        return JSONResponse(body, status_code=503)
     status_code = 504 if turn_error == "timeout" else 502
     return JSONResponse(body, status_code=status_code)
 

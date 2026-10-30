@@ -14,6 +14,8 @@ import logging
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
+import httpx
+import openai
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import MemorySaver
 from psycopg_pool import PoolTimeout
@@ -47,6 +49,7 @@ class _FakeRouter:
         self.step: RouteStep = "info"
         self.fail = False
         self.hang = False
+        self.raise_exc: Exception | None = None
 
     async def ainvoke(self, _messages: object) -> RouteDecision:
         """Return a routing decision, or misbehave as configured.
@@ -60,10 +63,13 @@ class _FakeRouter:
         Raises:
             ConnectionError: When `fail` is set, standing in for an
                 unreachable model provider.
+            Exception: `raise_exc`, raised as is, when that is set.
 
         """
         if self.hang:
             await asyncio.sleep(_HANG_S)
+        if self.raise_exc is not None:
+            raise self.raise_exc
         if self.fail:
             msg = "network unreachable"
             raise ConnectionError(msg)
@@ -211,6 +217,39 @@ def _booking_unavailable() -> BookingUnavailableError:
     return error
 
 
+def _openai_rate_limit(body: dict[str, str]) -> openai.RateLimitError:
+    """Build the 429 the OpenAI SDK raises, carrying a given error body.
+
+    Args:
+        body: The `error` object of the response, with `type` and `code`.
+
+    Returns:
+        openai.RateLimitError: The error, with `type` and `code` parsed from
+        `body` as the SDK parses them.
+
+    """
+    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+    response = httpx.Response(429, request=request)
+    return openai.RateLimitError(
+        "You exceeded your quota.", response=response, body=body,
+    )
+
+
+def _quota_exhausted() -> RuntimeError:
+    """Build a wrapped OpenAI error for a project whose budget is spent.
+
+    Returns:
+        RuntimeError: Raised from the SDK's 429, as a client layer that
+        re-raises would leave it.
+
+    """
+    error = RuntimeError("model call failed")
+    error.__cause__ = _openai_rate_limit(
+        {"type": "insufficient_quota", "code": "project_spend_limit_exceeded"},
+    )
+    return error
+
+
 class TestFailureLogging:
     """A network failure logs one line; any other failure keeps its traceback."""
 
@@ -261,6 +300,22 @@ class TestFailureLogging:
         assert records[0].exc_info is None
         assert "couldn't get a connection" in records[0].getMessage()
 
+    def test_quota_exhausted_logs_one_line(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A spent model budget logs one warning naming the limit's code."""
+        router = _FakeRouter()
+        router.raise_exc = _quota_exhausted()
+        graph = _build_graph(router, _FakeSubAgent())
+        with caplog.at_level(logging.WARNING, logger=_FACTORY_LOGGER):
+            _run_turn(graph, "Hello")
+        records = _failure_records(caplog)
+        assert len(records) == 1
+        assert records[0].levelno == logging.WARNING
+        assert records[0].exc_info is None
+        assert "project_spend_limit_exceeded" in records[0].getMessage()
+
     def test_other_failure_keeps_traceback(
         self,
         caplog: pytest.LogCaptureFixture,
@@ -308,6 +363,35 @@ class TestFailedTurn:
         state = _run_turn(graph, "Tell me about your concert hall.")
         assert state["turn_error"] == "internal"
         assert _contents(state) == []
+
+    def test_router_quota_exhausted_records_quota(self) -> None:
+        """A router refused for a spent budget records `quota`."""
+        router = _FakeRouter()
+        router.raise_exc = _quota_exhausted()
+        graph = _build_graph(router, _FakeSubAgent())
+        state = _run_turn(graph, "Hello")
+        assert state["turn_error"] == "quota"
+        assert _contents(state) == []
+
+    def test_sub_agent_quota_exhausted_records_quota(self) -> None:
+        """A sub-agent refused under the older `code`-only body records `quota`."""
+        sub_agent = _FakeSubAgent()
+        sub_agent.raise_exc = _openai_rate_limit(
+            {"type": "requests", "code": "insufficient_quota"},
+        )
+        graph = _build_graph(_FakeRouter(), sub_agent)
+        state = _run_turn(graph, "Hello")
+        assert state["turn_error"] == "quota"
+
+    def test_ordinary_rate_limit_records_internal(self) -> None:
+        """A transient 429 is not a spent budget, so it stays `internal`."""
+        sub_agent = _FakeSubAgent()
+        sub_agent.raise_exc = _openai_rate_limit(
+            {"type": "requests", "code": "rate_limit_exceeded"},
+        )
+        graph = _build_graph(_FakeRouter(), sub_agent)
+        state = _run_turn(graph, "Hello")
+        assert state["turn_error"] == "internal"
 
     def test_router_timeout_records_timeout(self) -> None:
         """A router past its timeout records `timeout`."""

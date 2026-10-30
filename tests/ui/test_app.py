@@ -384,6 +384,18 @@ class TestHandleStreamEvent:
             ok=False, text="Something broke.", proposal=None,
         )
 
+    def test_quota_error_event_is_not_resendable(self) -> None:
+        """A spent model budget ends the turn without offering Send again."""
+        status = MagicMock()
+        _pending, result = _handle_stream_event(
+            {"type": "error", "message": "Usage limit.", "code": "quota"},
+            status,
+            None,
+        )
+        assert result == ChatTurnResult(
+            ok=False, text="Usage limit.", proposal=None, resendable=False,
+        )
+
 
 # ---------------------------------------------------------------------------
 # _http_error_message

@@ -6,6 +6,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
+import openai
 from langchain_core.exceptions import ModelConnectionError, ModelTimeoutError
 from langchain_core.messages import (
     AIMessage,
@@ -41,6 +42,12 @@ logger = logging.getLogger(__name__)
 # covers a failed DNS lookup or refused connect at the root of any client
 # library's chain, including embeddings and Redis calls inside a sub-agent.
 _NETWORK_ERRORS = (ModelConnectionError, ModelTimeoutError, OSError)
+
+# Marks an OpenAI 429 that no retry will cure: a project or organization
+# spend limit, or an exhausted prepaid balance. Current responses carry it as
+# `type` with a `code` naming which limit, which is logged rather than
+# matched. Older responses carried it as `code`.
+_QUOTA_ERROR_MARKER = "insufficient_quota"
 
 
 def build_orchestration_agent(  # noqa: C901, PLR0915
@@ -323,15 +330,18 @@ def _record_turn_failure(source: str, exc: BaseException) -> TurnErrorCode:
     through several layers of client library, each chaining the last, so its
     traceback runs to well over a hundred lines and says nothing the root
     cause does not. Both are logged as one warning line naming the root
-    cause. Anything else is a genuine defect and keeps its full traceback.
+    cause. A model call refused because the OpenAI budget or credit is spent
+    records ``"quota"``, also as one warning line, since a resend would fail
+    the same way and the guest must not be invited to make one. Anything
+    else is a genuine defect and keeps its full traceback.
 
     Args:
         source: What failed, such as ``"Router"`` or ``"info agent"``.
         exc: The exception the node caught.
 
     Returns:
-        ``"unavailable"`` for a booking database outage, otherwise
-        ``"internal"``.
+        ``"unavailable"`` for a booking database outage, ``"quota"`` for a
+        spent model budget, otherwise ``"internal"``.
 
     """
     chain = _cause_chain(exc)
@@ -343,6 +353,15 @@ def _record_turn_failure(source: str, exc: BaseException) -> TurnErrorCode:
             chain[-1],
         )
         return "unavailable"
+    quota_error = _quota_error(chain)
+    if quota_error is not None:
+        logger.warning(
+            "%s failed: model quota exhausted: code=%s",
+            source,
+            quota_error.code,
+            extra={"quota_code": quota_error.code},
+        )
+        return "quota"
     if any(isinstance(link, _NETWORK_ERRORS) for link in chain):
         logger.warning(
             "%s failed: network unreachable: %r (root cause: %r)",
@@ -372,6 +391,31 @@ def _cause_chain(exc: BaseException) -> list[BaseException]:
         chain.append(current)
         current = current.__cause__ or current.__context__
     return chain
+
+
+def _quota_error(chain: Sequence[BaseException]) -> openai.APIError | None:
+    """Find the OpenAI error, if any, that reports a spent budget or credit.
+
+    Matches `openai.APIError` rather than `RateLimitError` alone because
+    `langchain_openai` re-raises its own subclass, and LlamaIndex embedding
+    calls raise the SDK's class directly. Both keep `type` and `code` from
+    the body.
+
+    Args:
+        chain: An exception followed by each exception it was raised from.
+
+    Returns:
+        The first link whose `type` or `code` is ``"insufficient_quota"``,
+        or ``None``.
+
+    """
+    for link in chain:
+        if isinstance(link, openai.APIError) and _QUOTA_ERROR_MARKER in (
+            link.type,
+            link.code,
+        ):
+            return link
+    return None
 
 
 def _group_turns(

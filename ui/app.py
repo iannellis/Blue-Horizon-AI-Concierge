@@ -80,6 +80,9 @@ _HTTP_FORBIDDEN: int = 403
 _HTTP_NOT_FOUND: int = 404
 _HTTP_CONFLICT: int = 409
 _HTTP_SERVICE_UNAVAILABLE: int = 503
+# The `error` event code for a spent model budget. A resend fails the same
+# way until an operator raises the limit, so no "Send again" is offered.
+_QUOTA_ERROR_CODE = "quota"
 _HEALTH_POLL_ONLINE_INTERVAL_S: int = 30
 _HEALTH_POLL_OFFLINE_INTERVAL_S: int = 5
 # How often a visitor at the hourly turn limit is checked for having a turn
@@ -1123,12 +1126,15 @@ class ChatTurnResult:
             on failure. Never raw exception text either way.
         proposal: A pending proposal dict, if the turn created one. Always
             `None` when `ok` is False.
+        resendable: Whether a failed turn may be offered "Send again". False
+            only for a spent model budget, where a resend cannot succeed.
 
     """
 
     ok: bool
     text: str
     proposal: dict[str, Any] | None
+    resendable: bool = True
 
 
 def _handle_stream_event(
@@ -1157,7 +1163,12 @@ def _handle_stream_event(
     elif event_type == "error":
         status.update(label="Error", state="error")
         message = str(event.get("message", "Something went wrong."))
-        return pending_proposal, ChatTurnResult(ok=False, text=message, proposal=None)
+        return pending_proposal, ChatTurnResult(
+            ok=False,
+            text=message,
+            proposal=None,
+            resendable=event.get("code") != _QUOTA_ERROR_CODE,
+        )
     elif event_type == "done":
         status.update(label="Done", state="complete")
         response_text = str(event.get("response", "No response received."))
@@ -1400,7 +1411,8 @@ def _submit_chat_message(prompt: str) -> None:
     pending proposal. On failure, the guest's own message (already in
     history by the time this is called) is left standing alone -- nothing
     is fabricated to look like an assistant reply -- and the text plus
-    failure copy are stashed for `_render_pending_resend` instead.
+    failure copy are stashed for `_render_pending_resend` instead. A failure
+    that is not resendable stashes only the copy, so no "Send again" appears.
 
     Must be called inside a ``st.chat_message("assistant")`` context so a
     successful reply renders inside the assistant bubble.
@@ -1421,7 +1433,7 @@ def _submit_chat_message(prompt: str) -> None:
         st.session_state.pending_resend = None
         st.session_state.pending_resend_message = None
     else:
-        st.session_state.pending_resend = prompt
+        st.session_state.pending_resend = prompt if result.resendable else None
         st.session_state.pending_resend_message = result.text
 
 
@@ -1434,11 +1446,16 @@ def _render_pending_resend() -> None:
     sentence. "Send again" replays the exact same text and stays disabled
     until `_render_sidebar` observes the API healthy again, wiring the
     already-existing recovery poll to this control for the first time.
+    A failure with copy but no stashed text, such as a spent model budget,
+    shows the copy alone.
     """
+    message = st.session_state.pending_resend_message
+    if message is None:
+        return
+    st.warning(message)
     prompt = st.session_state.pending_resend
     if prompt is None:
         return
-    st.warning(st.session_state.pending_resend_message)
     online = st.session_state.api_online
     limited = _turn_limit_reset_at(_visitor_key()) is not None
     if st.button(

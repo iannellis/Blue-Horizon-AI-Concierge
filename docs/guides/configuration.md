@@ -179,6 +179,13 @@ JSON `503` body carries it too), names the cause, and invites a resend without a
 the guest to wait or retry on a schedule. See
 [Orchestration](../architecture/orchestration.md#failed-turns).
 
+**`[orchestration.messages].quota_exhausted`** replaces `.error` when OpenAI refuses a
+turn because the project's budget or prepaid credit is spent. It is delivered the same
+way (a JSON `503` body without `Retry-After` carries it too). Unlike `.error` and
+`.database_unavailable`, it must not invite a resend: nothing the guest does helps until
+an operator raises the limit, and the UI shows it without a Send again button. See
+[Orchestration](../architecture/orchestration.md#failed-turns).
+
 **`[orchestration.messages].failed`** is shown while readiness is `FAILED`: the last
 startup attempt was classified permanent. Unlike `.unavailable` (shown for `STARTING`,
 carrying no retry instruction because recovery is expected on its own), this string must

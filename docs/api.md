@@ -94,6 +94,7 @@ and any exception mid-stream, including a `thread_id`/`customer_id` mismatch:
 ```
 
 `message` is `[orchestration.messages].database_unavailable` for `unavailable`,
+`[orchestration.messages].quota_exhausted` for `quota`,
 `[orchestration.messages].error` for the other failed-turn codes, or a mismatch-specific
 string. It is never
 written into the conversation history: the failed turn is dropped from the thread
@@ -107,6 +108,7 @@ reachable codes are:
 | `timeout` | The router or a sub-agent exceeded its wall-clock cap |
 | `internal` | Any other failure, including an unreachable model provider or a turn with no reply |
 | `unavailable` | A booking tool (`search_rooms`, `list_my_bookings`, or a `propose_*` tool) could not reach the database; any reply the model wrote is discarded |
+| `quota` | OpenAI refused a model call with `insufficient_quota`: the project's budget or the prepaid credit is spent. Every turn fails the same way until an operator raises the limit |
 | `thread_mismatch` | The `thread_id` is bound to a different `customer_id` |
 
 `unavailable` here means the database, not readiness. A readiness `"failed"` is not
@@ -115,8 +117,9 @@ before a stream ever starts.
 
 The non-streaming JSON response carries the same `proposal` field when a proposal is
 pending after the turn. A turn that did not complete returns `504` (`timeout`), `503` with
-`Retry-After` (`unavailable`), or `502` (anything else) instead of `200`, with a body of
-`{"code": ..., "message": ...}`, plus `retry_after_s` on a `503`. Nothing
+`Retry-After` (`unavailable`), `503` without `Retry-After` (`quota`), or `502` (anything
+else) instead of `200`, with a body of `{"code": ..., "message": ...}`, plus
+`retry_after_s` on the `unavailable` `503`. Nothing
 is committed before the JSON branch knows the outcome, so it can use a real status.
 
 ## The propose/confirm contract
@@ -174,7 +177,7 @@ identically is what this API is deliberately designed to avoid:
 | `/v1/chat` `503` | Yes, after `retry_after_s` | Nothing ran; the init loop keeps retrying regardless of `status` |
 | `/v1/chat` `422` | No, not with the same text | The message is over `[chat].max_message_chars`; nothing ran |
 | `/v1/customers`, `/v1/bookings` `503` | Yes, after `Retry-After` | The startup window, or an unreachable database. Both are idempotent reads |
-| Mid-stream `error` event, or JSON `502`/`503`/`504` | Yes for `timeout`, `internal`, and `unavailable`; no for `thread_mismatch` | The failed turn is dropped from history and its proposal invalidated, so resending the same text is safe. The system never resends on its own: the guest decides |
+| Mid-stream `error` event, or JSON `502`/`503`/`504` | Yes for `timeout`, `internal`, and `unavailable`; no for `quota` and `thread_mismatch` | The failed turn is dropped from history and its proposal invalidated, so resending the same text is safe. The system never resends on its own: the guest decides. A `quota` resend is safe but cannot succeed, so the UI offers no Send again |
 | Confirm `503` | Yes - the proposal is still pending | Nothing was decided; see the table above |
 | Confirm `409` | No | The proposal is retired; a client should let the guest start a new request, not retry the same one |
 | Confirm `404` / `403` | No | Terminal for this proposal id |

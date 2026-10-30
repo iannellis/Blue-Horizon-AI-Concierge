@@ -471,6 +471,10 @@ class MessagesConfig(FrozenModel):
         database_unavailable: Replaces `error` for a booking turn that failed
             because a booking tool could not reach the database. Names the cause
             and, like `error`, invites a resend without promising it helps.
+        quota_exhausted: Replaces `error` for a turn that failed because the
+            model provider refused it: the project's budget or prepaid credit
+            is spent. A resend fails the same way until an operator raises
+            the limit, so this string must not invite one.
         unavailable: Message shown while readiness is `STARTING`: the system
             is initializing and expected to recover on its own, so this
             carries no retry instruction.
@@ -484,6 +488,7 @@ class MessagesConfig(FrozenModel):
     refusal: str
     error: str
     database_unavailable: str
+    quota_exhausted: str
     unavailable: str
     failed: str
 

@@ -978,6 +978,30 @@ endpoints bind it to the log.** The server-resolved value is applied after any m
 a caller passes, so an eval harness or a future caller cannot attribute a turn to the
 wrong guest. See [Architecture](architecture/index.md#logging).
 
+### A spent model budget told the guest to send the message again
+
+**Status:** fixed.
+
+The demo runs on an OpenAI project with a hard spend limit. Once that limit is reached,
+OpenAI answers every model call with a 429 whose `type` is `insufficient_quota`, and no
+retry clears it until the limit is raised or the month resets. The router is the first
+model call of every turn, so every turn failed there. The failure was classified as
+`internal`: the guest saw "You can send it again" above a Send again button that could
+never succeed, `/v1/health` kept reporting `ok`, and the only signal was a full traceback
+at ERROR on every turn.
+
+A daily turn cap that switched the demo off before the money ran out was considered and
+rejected. It would cut off a burst of genuine visitors on an arbitrary number, while the
+spend limit already stops the bill.
+
+**A spent budget is now its own failed-turn code, `quota`.** It is matched on the error
+body's `type` or `code` rather than on `RateLimitError`, because an ordinary 429 clears
+on its own and keeps the `internal` path. The guest sees
+`[orchestration.messages].quota_exhausted`, which does not invite a resend, and the UI
+shows no Send again button. The log records one warning line with OpenAI's `code` as a
+`quota_code` attribute, which an Axiom monitor can alert on. See
+[Orchestration](architecture/orchestration.md#failed-turns).
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

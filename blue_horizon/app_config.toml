@@ -48,6 +48,8 @@ refusal = "I'm sorry, I cannot help with that query. I can only provide informat
 error = "Sorry - that request could not be completed. You can send it again."
 # Shown when a booking turn fails because the database was unreachable
 database_unavailable = "Sorry - the booking system could not be reached, so that request could not be completed. You can send it again."
+# Shown when the model provider refuses a turn because the budget is spent; never invites a resend
+quota_exhausted = "Sorry - this demo has reached its usage limit for now, so the concierge cannot reply. Please check back later."
 # Shown while readiness is STARTING
 unavailable = "The system is starting up and should be ready again shortly. No action is needed on your part."
 # Shown while readiness is FAILED

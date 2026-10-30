@@ -69,7 +69,8 @@ on the first failed attempt only, then one line per retry.
 
 A turn fails when the router or a sub-agent exceeds its timeout above, raises, or the
 turn ends without a reply, or when the booking agent could not reach its database. Every
-failure site records a `turn_error` of `"timeout"`, `"unavailable"`, or `"internal"` in
+failure site records a `turn_error` of `"timeout"`, `"unavailable"`, `"quota"`, or
+`"internal"` in
 the graph state instead of writing a reply:
 
 | Site | Records |
@@ -80,6 +81,7 @@ the graph state instead of writing a reply:
 | Sub-agent exception | `internal` |
 | Booking agent exception caused by `BookingUnavailableError`, raised by a booking tool that could not reach the database | `unavailable` |
 | Booking agent returned, but a `search_rooms` result this turn carried `error_kind` `unavailable` | `unavailable` |
+| Router or sub-agent exception whose cause chain holds an `openai.APIError` with `type` or `code` `insufficient_quota` | `quota` |
 | No final assistant message for the turn | `internal`, set by `finalize` |
 
 `finalize` then removes the failed turn from history entirely. The manager reads
@@ -87,7 +89,17 @@ the graph state instead of writing a reply:
 invalidates any proposal the turn created. The router clears `turn_error` at the start
 of every turn, so a failure still held in the checkpoint from an earlier turn is never
 reported again. The event's message is `[orchestration.messages].database_unavailable`
-for `unavailable` and `[orchestration.messages].error` for the other codes.
+for `unavailable`, `[orchestration.messages].quota_exhausted` for `quota`, and
+`[orchestration.messages].error` for the other codes.
+
+`quota` means OpenAI refused the call because the project's spend limit or the prepaid
+credit is used up. It is matched on the error body, not the `RateLimitError` class
+alone, because an ordinary 429 clears on its own and stays `internal`. The router is
+the first model call of every turn, so in practice it is the router that records
+`quota`. It is logged as one warning line carrying OpenAI's `code` (for example
+`project_spend_limit_exceeded`) as the `quota_code` attribute, which is what an Axiom
+monitor should alert on. The UI shows the copy without a Send again button, since a
+resend fails the same way until the limit is raised.
 
 The two `unavailable` rows cover the two ways a booking tool reports an outage.
 `list_my_bookings` and the `propose_*` tools raise `BookingUnavailableError`, which

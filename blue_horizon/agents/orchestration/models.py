@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from blue_horizon.config import MessagesConfig
 
 type RouteStep = Literal["info", "booking", "refuse", "error"]
-type TurnErrorCode = Literal["timeout", "internal", "unavailable"]
+type TurnErrorCode = Literal["timeout", "internal", "unavailable", "quota"]
 
 
 class RouteDecision(BaseModel):
@@ -42,7 +42,9 @@ class ConversationState(MessagesState, total=False):
         turn_error: Why the current turn failed, or ``None`` if it has not.
             ``"timeout"`` when the router or a sub-agent exceeded its
             wall-clock cap, ``"unavailable"`` when the booking agent could not
-            reach its database, ``"internal"`` for any other failure, including a
+            reach its database, ``"quota"`` when the model provider refused
+            the request because the project's budget or credit is spent,
+            ``"internal"`` for any other failure, including a
             turn that produced no reply. The router resets it at the start of
             every turn, so a value from an earlier turn never leaks forward.
             A failed turn is reported to the client as an ``error`` event, not
@@ -78,10 +80,13 @@ def turn_error_message(messages: MessagesConfig, turn_error: str) -> str:
         turn_error: The failed turn's code.
 
     Returns:
-        ``messages.database_unavailable`` for ``"unavailable"``, otherwise
+        ``messages.database_unavailable`` for ``"unavailable"``,
+        ``messages.quota_exhausted`` for ``"quota"``, otherwise
         ``messages.error``.
 
     """
     if turn_error == "unavailable":
         return messages.database_unavailable
+    if turn_error == "quota":
+        return messages.quota_exhausted
     return messages.error

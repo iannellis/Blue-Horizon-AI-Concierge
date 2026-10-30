@@ -333,6 +333,29 @@ class TestChatFailedTurn:
         )
         assert body["retry_after_s"] > 0
 
+    def test_json_branch_quota_returns_503_without_retry_after(
+        self, client: TestClient, mock_orchestrator: MagicMock,
+    ) -> None:
+        """A spent model budget is a 503 with no promise of when to retry."""
+        mock_orchestrator.is_ready = True
+        mock_orchestrator.ainvoke = AsyncMock(
+            return_value={"messages": [], "turn_error": "quota"},
+        )
+
+        response = client.post(
+            "/v1/chat",
+            json={"thread_id": "t1", "customer_id": 1, "text": "hi"},
+        )
+
+        assert response.status_code == _HTTP_SERVICE_UNAVAILABLE
+        assert "retry-after" not in response.headers
+        body = response.json()
+        assert body["code"] == "quota"
+        assert body["message"] == (
+            app_module.load_app_config().orchestration.messages.quota_exhausted
+        )
+        assert "retry_after_s" not in body
+
     def test_sse_branch_forwards_error_event_without_done(
         self, client: TestClient, mock_orchestrator: MagicMock,
     ) -> None:

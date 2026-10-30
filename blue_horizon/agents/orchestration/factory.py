@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import openai
 from langchain_core.exceptions import ModelConnectionError, ModelTimeoutError
@@ -48,6 +48,12 @@ _NETWORK_ERRORS = (ModelConnectionError, ModelTimeoutError, OSError)
 # `type` with a `code` naming which limit, which is logged rather than
 # matched. Older responses carried it as `code`.
 _QUOTA_ERROR_MARKER = "insufficient_quota"
+
+# Replaces a flagged guest message in history, so neither the router nor a
+# sub-agent reads the flagged text on a later turn.
+_WITHHELD_MESSAGE = "[Message withheld: flagged by moderation]"
+
+type _AfterModeration = Literal["router", "refuse", "error"]
 
 
 def build_orchestration_agent(  # noqa: C901, PLR0915
@@ -134,6 +140,46 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
         _node.__name__ = _node.__qualname__ = f"{agent_name}_node"
         return _node
 
+    async def moderate_message_node(state: ConversationState) -> dict[str, Any]:
+        """Check the guest's message before any model reads it.
+
+        This is the first node of every turn, so it also clears
+        ``turn_error`` and ``flagged``: an earlier turn's values, still held
+        in the checkpoint, must not be reported again.
+
+        Args:
+            state: Current conversation state, ending with the guest's
+                message.
+
+        Returns:
+            State patch with ``turn_error`` and ``flagged`` reset. A flagged
+            message also sets ``flagged`` to ``"message"``, routes the turn
+            to ``refuse``, and replaces the message in history with a
+            placeholder carrying the same id. A failed check sets
+            ``turn_error`` and the ``error`` route instead.
+
+        """
+        guest_message = state["messages"][-1]
+        try:
+            flagged = await resources.moderator.flagged(
+                guest_message.text,
+                source="guest message",
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "route": "error",
+                "turn_error": _record_turn_failure("Message moderation", exc),
+                "flagged": None,
+            }
+        if not flagged:
+            return {"turn_error": None, "flagged": None}
+        return {
+            "messages": [HumanMessage(content=_WITHHELD_MESSAGE, id=guest_message.id)],
+            "route": "refuse",
+            "turn_error": None,
+            "flagged": "message",
+        }
+
     async def router_node(state: ConversationState) -> dict[str, Any]:
         """Route the conversation to the appropriate sub-agent.
 
@@ -141,10 +187,8 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
             state: Current conversation state.
 
         Returns:
-            State patch containing the chosen route and this turn's reset
-            ``turn_error``. The router is the first node of every turn, so
-            clearing ``turn_error`` here keeps an earlier turn's failure,
-            still held in the checkpoint, from being reported again.
+            State patch containing the chosen route, or the ``error`` route
+            and a ``turn_error`` if the router failed.
 
         """
         messages = state["messages"]
@@ -166,7 +210,7 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
 
         step = cast("RouteStep", getattr(decision, "step", "error"))
         logger.info("Router decision: %s", step)
-        return {"route": step, "turn_error": None}
+        return {"route": step}
 
     info_node = _make_dispatch_node(
         "info",
@@ -179,6 +223,42 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
         cfg.orchestration.booking_timeout_s,
         failure_check=_booking_turn_failure,
     )
+
+    async def moderate_reply_node(state: ConversationState) -> dict[str, Any]:
+        """Check a sub-agent's reply before the guest sees it.
+
+        Args:
+            state: Current conversation state, after a sub-agent ran.
+
+        Returns:
+            An empty patch when the turn already failed, produced no reply
+            text, or passed the check. A flagged reply is replaced in
+            history with the configured refusal, and ``flagged`` is set to
+            ``"reply"`` so the manager invalidates any proposal the turn
+            made. A failed check sets ``turn_error``.
+
+        """
+        if state.get("turn_error") is not None:
+            return {}
+        replies = _turn_replies(state["messages"])
+        text = "\n".join(reply.text for reply in replies)
+        if not text.strip():
+            # `finalize` records a turn with no reply as failed.
+            return {}
+        try:
+            flagged = await resources.moderator.flagged(text, source="reply")
+        except Exception as exc:  # noqa: BLE001
+            return {"turn_error": _record_turn_failure("Reply moderation", exc)}
+        if not flagged:
+            return {}
+        return {
+            "messages": [
+                # `add_messages` gave every message in the state an id.
+                *(RemoveMessage(id=cast("str", reply.id)) for reply in replies),
+                AIMessage(content=[{"type": "text", "text": cfg.messages.refusal}]),
+            ],
+            "flagged": "reply",
+        }
 
     def refuse_node(state: ConversationState) -> dict[str, Any]:  # noqa: ARG001
         """Return an out-of-scope refusal response.
@@ -200,7 +280,8 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
     def error_node(state: ConversationState) -> dict[str, Any]:
         """Mark the turn failed without writing a reply.
 
-        Reached when the router failed, or chose the ``error`` step itself.
+        Reached when the message moderation check or the router failed, or
+        the router chose the ``error`` step itself.
         No apology is written into history: the client is told about the
         failure through an ``error`` event instead (see `finalize_node`).
 
@@ -243,9 +324,11 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
 
         Returns:
             State patch that clears the messages channel and replaces it with
-            the pruned history, plus ``turn_error`` when this turn failed. The
-            manager reads that value from this node's own output to choose
-            between an ``error`` and a ``done`` event.
+            the pruned history, plus ``turn_error`` when this turn failed and
+            ``flagged`` when moderation flagged it. The manager reads both
+            from this node's own output: ``turn_error`` to choose between an
+            ``error`` and a ``done`` event, and ``flagged`` for its turn log
+            and to invalidate the proposal of a flagged reply.
 
         """
         turns = _group_turns(
@@ -266,17 +349,27 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
         }
         if turn_error is not None:
             patch["turn_error"] = turn_error
+        flagged = state.get("flagged")
+        if flagged is not None:
+            patch["flagged"] = flagged
         return patch
 
     graph = StateGraph(ConversationState)
+    graph.add_node("moderate_message", moderate_message_node)
     graph.add_node("router", router_node)
     graph.add_node("info", info_node)
     graph.add_node("booking", booking_node)
+    graph.add_node("moderate_reply", moderate_reply_node)
     graph.add_node("refuse", refuse_node)
     graph.add_node("error", error_node)
     graph.add_node("finalize", finalize_node)
 
-    graph.add_edge(START, "router")
+    graph.add_edge(START, "moderate_message")
+    graph.add_conditional_edges(
+        "moderate_message",
+        _after_message_moderation,
+        {"router": "router", "refuse": "refuse", "error": "error"},
+    )
     graph.add_conditional_edges(
         "router",
         _route_from_state,
@@ -288,8 +381,9 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
         },
     )
 
-    graph.add_edge("info", "finalize")
-    graph.add_edge("booking", "finalize")
+    graph.add_edge("info", "moderate_reply")
+    graph.add_edge("booking", "moderate_reply")
+    graph.add_edge("moderate_reply", "finalize")
     graph.add_edge("refuse", "finalize")
     graph.add_edge("error", "finalize")
     graph.add_edge("finalize", END)
@@ -318,6 +412,24 @@ def _booking_turn_failure(result: dict[str, Any]) -> TurnErrorCode | None:
         return None
     logger.warning("booking agent could not reach the database; reply discarded")
     return "unavailable"
+
+
+def _after_message_moderation(state: ConversationState) -> _AfterModeration:
+    """Select the node after the message moderation check.
+
+    Args:
+        state: Current conversation state.
+
+    Returns:
+        ``"error"`` if the check failed, ``"refuse"`` if it flagged the
+        message, otherwise ``"router"``.
+
+    """
+    if state.get("turn_error") is not None:
+        return "error"
+    if state.get("flagged") is not None:
+        return "refuse"
+    return "router"
 
 
 def _record_turn_failure(source: str, exc: BaseException) -> TurnErrorCode:
@@ -416,6 +528,21 @@ def _quota_error(chain: Sequence[BaseException]) -> openai.APIError | None:
         ):
             return link
     return None
+
+
+def _turn_replies(messages: Sequence[BaseMessage]) -> list[AIMessage]:
+    """Return the current turn's replies, without tool-calling messages.
+
+    Args:
+        messages: Conversation history, ending with the current turn.
+
+    Returns:
+        The AIMessages after the last HumanMessage that carry no tool calls,
+        in order. Empty if there is no HumanMessage.
+
+    """
+    turns = _group_turns(filter_messages(messages, exclude_tool_calls=True))
+    return turns[-1][1] if turns else []
 
 
 def _group_turns(

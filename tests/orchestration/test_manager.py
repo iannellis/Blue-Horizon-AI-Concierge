@@ -704,6 +704,66 @@ class TestFailedTurn:
         assert proposals.invalidate_thread.call_count == 2  # noqa: PLR2004
 
 
+class TestFlaggedTurn:
+    """A flagged reply cannot leave a proposal behind; both flags are logged."""
+
+    def test_stream_flagged_reply_invalidates_proposal(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """The refusal is the reply, and no proposal event follows it."""
+        agent = MagicMock()
+        agent.astream_events.return_value = _async_events([
+            {
+                "event": "on_chain_end",
+                "metadata": {"langgraph_node": "finalize"},
+                "data": {
+                    "output": {
+                        "messages": [AIMessage(content="No.")],
+                        "flagged": "reply",
+                    },
+                },
+            },
+        ])
+        manager = _make_manager(agent=agent)
+        proposals = cast("MagicMock", manager.get_booking_resources().proposals)
+        proposals.get_pending_for_thread.side_effect = (
+            lambda _thread_id: (
+                None if proposals.invalidate_thread.call_count > 1 else MagicMock()
+            )
+        )
+
+        with caplog.at_level(logging.INFO, logger=_MANAGER_LOGGER):
+            events = asyncio.run(_run_stream(manager))
+
+        assert events == [{"type": "done", "response": "No."}]
+        assert proposals.invalidate_thread.call_count == 2  # noqa: PLR2004
+        assert _turn_finished_record(caplog).__dict__["outcome"] == "flagged_reply"
+
+    def test_ainvoke_flagged_message_reports_refuse_route(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A flagged message logs its outcome and keeps no proposal to discard."""
+        agent = MagicMock()
+        agent.ainvoke = AsyncMock(
+            return_value={
+                "messages": [AIMessage(content="No.")],
+                "route": "refuse",
+                "flagged": "message",
+            },
+        )
+        manager = _make_manager(agent=agent)
+        proposals = cast("MagicMock", manager.get_booking_resources().proposals)
+
+        with caplog.at_level(logging.INFO, logger=_MANAGER_LOGGER):
+            asyncio.run(manager.ainvoke(thread_id="t1", user_text="hi", customer_id=1))
+
+        record = _turn_finished_record(caplog)
+        assert record.__dict__["route"] == "refuse"
+        assert record.__dict__["outcome"] == "flagged_message"
+        # Only the invalidation every turn makes as it starts.
+        assert proposals.invalidate_thread.call_count == 1
+
+
 # ---------------------------------------------------------------------------
 # Turn finished line
 #

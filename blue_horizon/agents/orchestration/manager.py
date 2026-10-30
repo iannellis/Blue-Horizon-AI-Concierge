@@ -342,14 +342,12 @@ class OrchestrationManager:
             )
         _log_turn_finished(
             route=result.get("route", "error"),
-            outcome=result.get("turn_error") or "ok",
+            outcome=_turn_outcome(result),
             started=started,
             admitted=admitted,
             usage=usage,
         )
-        if result.get("turn_error") is not None:
-            # The turn is reported as failed, so nothing it proposed may
-            # remain confirmable.
+        if _turn_discards_proposal(result):
             self.get_booking_resources().proposals.invalidate_thread(thread_id)
         return result
 
@@ -433,9 +431,14 @@ class OrchestrationManager:
                         emitted_stages.add(stage_key)
                         yield {"type": "stage", "label": label}
 
-                elif event_type == "on_chain_end" and event.get("name") == "router":
+                elif event_type == "on_chain_end" and event.get("name") in {
+                    "moderate_message",
+                    "router",
+                }:
                     # Matched on the event's own name: the router's model call
-                    # carries the same `langgraph_node` metadata.
+                    # carries the same `langgraph_node` metadata. A turn whose
+                    # message moderation flagged or failed never reaches the
+                    # router, and takes its route from the check instead.
                     router_output = cast(
                         "dict[str, Any]", event["data"].get("output") or {},
                     )
@@ -451,16 +454,18 @@ class OrchestrationManager:
                         "dict[str, Any]", event["data"].get("output"),
                     )
 
-        turn_error = (finalize_output or {}).get("turn_error")
+        final = finalize_output or {}
+        turn_error = final.get("turn_error")
         _log_turn_finished(
             route=route,
-            outcome=turn_error or "ok",
+            outcome=_turn_outcome(final),
             started=started,
             admitted=admitted,
             usage=usage,
         )
-        if turn_error is not None:
+        if _turn_discards_proposal(final):
             booking_resources.proposals.invalidate_thread(thread_id)
+        if turn_error is not None:
             yield {
                 "type": "error",
                 "code": turn_error,
@@ -637,6 +642,26 @@ def _trace_metadata(customer_id: int) -> dict[str, Any]:
     return {"customer_id": customer_id}
 
 
+def _turn_outcome(result: dict[str, Any]) -> str:
+    """Name how a finished turn ended, for the turn log.
+
+    Args:
+        result: The turn's final state, or the ``finalize`` node's output.
+
+    Returns:
+        The turn's ``turn_error`` code if it failed, ``"flagged_message"``
+        or ``"flagged_reply"`` if moderation flagged it, otherwise ``"ok"``.
+
+    """
+    turn_error = result.get("turn_error")
+    if turn_error is not None:
+        return turn_error
+    flagged = result.get("flagged")
+    if flagged is not None:
+        return f"flagged_{flagged}"
+    return "ok"
+
+
 def _log_turn_finished(
     *,
     route: str,
@@ -652,7 +677,7 @@ def _log_turn_finished(
 
     Args:
         route: The router's decision, or ``"error"`` if it made none.
-        outcome: ``"ok"``, or the turn's ``turn_error`` code.
+        outcome: How the turn ended, from `_turn_outcome`.
         started: `time.perf_counter` reading when the turn asked for the LLM
             semaphore.
         admitted: `time.perf_counter` reading when the semaphore let it run.
@@ -672,3 +697,20 @@ def _log_turn_finished(
     }
     names = " ".join(f"{key}={value}" for key, value in fields.items())
     logger.info("Turn finished: %s", names, extra=fields)
+
+
+def _turn_discards_proposal(result: dict[str, Any]) -> bool:
+    """Return whether a finished turn's proposal must stop being confirmable.
+
+    A failed turn is reported as failed, and a flagged reply is replaced
+    with the refusal, so in neither case did the guest read the reply that
+    made the proposal.
+
+    Args:
+        result: The turn's final state, or the ``finalize`` node's output.
+
+    Returns:
+        True if the turn failed or its reply was flagged.
+
+    """
+    return result.get("turn_error") is not None or result.get("flagged") == "reply"

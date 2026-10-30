@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
 type RouteStep = Literal["info", "booking", "refuse", "error"]
 type TurnErrorCode = Literal["timeout", "internal", "unavailable", "quota"]
+type FlaggedText = Literal["message", "reply"]
 
 
 class RouteDecision(BaseModel):
@@ -45,15 +46,21 @@ class ConversationState(MessagesState, total=False):
             reach its database, ``"quota"`` when the model provider refused
             the request because the project's budget or credit is spent,
             ``"internal"`` for any other failure, including a
-            turn that produced no reply. The router resets it at the start of
-            every turn, so a value from an earlier turn never leaks forward.
+            turn that produced no reply. The first node of every turn
+            resets it, so a value from an earlier turn never leaks forward.
             A failed turn is reported to the client as an ``error`` event, not
             as an apology written into history.
+        flagged: Which text of the current turn the moderation check
+            flagged, or ``None`` if neither was. ``"message"`` when the
+            guest's message was flagged and the turn was refused before the
+            router ran, ``"reply"`` when a sub-agent's reply was flagged and
+            replaced with the refusal. Reset at the start of every turn.
 
     """
 
     route: RouteStep
     turn_error: TurnErrorCode | None
+    flagged: FlaggedText | None
 
 
 def _route_from_state(state: ConversationState) -> RouteStep:

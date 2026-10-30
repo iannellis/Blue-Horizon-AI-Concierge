@@ -50,6 +50,7 @@ class _FakeRouter:
         self.fail = False
         self.hang = False
         self.raise_exc: Exception | None = None
+        self.calls = 0
 
     async def ainvoke(self, _messages: object) -> RouteDecision:
         """Return a routing decision, or misbehave as configured.
@@ -70,6 +71,7 @@ class _FakeRouter:
             await asyncio.sleep(_HANG_S)
         if self.raise_exc is not None:
             raise self.raise_exc
+        self.calls += 1
         if self.fail:
             msg = "network unreachable"
             raise ConnectionError(msg)
@@ -120,12 +122,46 @@ class _FakeSubAgent:
         return {"messages": [*self.tool_results, AIMessage(content=self.reply)]}
 
 
-def _build_graph(router: _FakeRouter, sub_agent: _FakeSubAgent) -> CompiledStateGraph:
+class _FakeModerator:
+    """Moderator stub that flags chosen texts, or fails, and records each check."""
+
+    def __init__(self) -> None:
+        """Start as a moderator that flags nothing."""
+        self.flag_sources: set[str] = set()
+        self.raise_exc: Exception | None = None
+        self.checked: list[tuple[str, str]] = []
+
+    async def flagged(self, text: str, *, source: str) -> bool:
+        """Record the check and return the configured verdict.
+
+        Args:
+            text: The text being checked.
+            source: What the text is, as the graph names it.
+
+        Returns:
+            bool: Whether `source` is in `flag_sources`.
+
+        Raises:
+            Exception: `raise_exc`, raised as is, when that is set.
+
+        """
+        self.checked.append((source, text))
+        if self.raise_exc is not None:
+            raise self.raise_exc
+        return source in self.flag_sources
+
+
+def _build_graph(
+    router: _FakeRouter,
+    sub_agent: _FakeSubAgent,
+    moderator: _FakeModerator | None = None,
+) -> CompiledStateGraph:
     """Compile the real orchestration graph around fake resources.
 
     Args:
         router: Router stub.
         sub_agent: Stub used for both the info and booking sub-agents.
+        moderator: Moderation stub; one that flags nothing when omitted.
 
     Returns:
         CompiledStateGraph: The graph under test, with its own checkpointer.
@@ -143,6 +179,7 @@ def _build_graph(router: _FakeRouter, sub_agent: _FakeSubAgent) -> CompiledState
     resources = SimpleNamespace(
         config=config,
         router=router,
+        moderator=moderator or _FakeModerator(),
         get_system_prompt=lambda: "Route the message.",
         get_info_agent=lambda: sub_agent,
         get_booking_agent=lambda: sub_agent,
@@ -493,6 +530,71 @@ class TestFailedTurn:
             "Tell me about your concert hall.",
             "Here you go.",
         ]
+
+
+class TestModeration:
+    """Moderation checks every guest message and every reply."""
+
+    def test_clean_turn_checks_message_and_reply(self) -> None:
+        """An unflagged turn is checked twice and answered normally."""
+        moderator = _FakeModerator()
+        graph = _build_graph(_FakeRouter(), _FakeSubAgent(), moderator)
+        state = _run_turn(graph, "What time is breakfast?")
+        assert moderator.checked == [
+            ("guest message", "What time is breakfast?"),
+            ("reply", "Here you go."),
+        ]
+        assert state.get("flagged") is None
+        assert _contents(state) == ["What time is breakfast?", "Here you go."]
+
+    def test_flagged_message_is_refused_before_the_router(self) -> None:
+        """A flagged message never reaches a model and is withheld from history."""
+        router = _FakeRouter()
+        moderator = _FakeModerator()
+        moderator.flag_sources = {"guest message"}
+        graph = _build_graph(router, _FakeSubAgent(), moderator)
+        state = _run_turn(graph, "something harmful")
+        assert router.calls == 0
+        assert state["flagged"] == "message"
+        assert state.get("turn_error") is None
+        assert _contents(state) == [
+            "[Message withheld: flagged by moderation]",
+            [{"type": "text", "text": "No."}],
+        ]
+
+    def test_flagged_reply_is_replaced_with_the_refusal(self) -> None:
+        """A flagged reply never reaches the guest or the history."""
+        moderator = _FakeModerator()
+        moderator.flag_sources = {"reply"}
+        graph = _build_graph(_FakeRouter(), _FakeSubAgent(), moderator)
+        state = _run_turn(graph, "Tell me a story.")
+        assert state["flagged"] == "reply"
+        assert _contents(state) == [
+            "Tell me a story.",
+            [{"type": "text", "text": "No."}],
+        ]
+
+    def test_failed_check_fails_the_turn(self) -> None:
+        """A moderation outage fails the turn rather than skipping the check."""
+        router = _FakeRouter()
+        moderator = _FakeModerator()
+        moderator.raise_exc = ConnectionError("network unreachable")
+        graph = _build_graph(router, _FakeSubAgent(), moderator)
+        state = _run_turn(graph, "Hello")
+        assert router.calls == 0
+        assert state["turn_error"] == "internal"
+        assert _contents(state) == []
+
+    def test_next_turn_clears_an_earlier_flag(self) -> None:
+        """A flag held in the checkpoint is not reported on the next turn."""
+        moderator = _FakeModerator()
+        moderator.flag_sources = {"guest message"}
+        graph = _build_graph(_FakeRouter(), _FakeSubAgent(), moderator)
+        _run_turn(graph, "something harmful")
+        moderator.flag_sources = set()
+        state = _run_turn(graph, "What time is breakfast?")
+        assert state.get("flagged") is None
+        assert _contents(state)[-1] == "Here you go."
 
 
 class TestHistoryTrim:

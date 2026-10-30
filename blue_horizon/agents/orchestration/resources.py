@@ -13,6 +13,7 @@ from blue_horizon.agents.booking import BookingSqlResources, build_booking_agent
 from blue_horizon.agents.exceptions import ConfigurationError, OperationalError
 from blue_horizon.agents.information import InfoRagResources, build_info_agent
 from blue_horizon.agents.orchestration.models import RouteDecision
+from blue_horizon.agents.orchestration.moderation import Moderator
 from blue_horizon.agents.prompt_utils import load_packaged_text, prompt_resource_path
 from blue_horizon.config import load_app_config
 
@@ -37,6 +38,7 @@ class OrchestrationResources:
         - Load orchestration configuration.
         - Resolve and load the orchestration system prompt.
         - Construct and hold the router LLM runnable.
+        - Construct and hold the moderation client.
         - Construct and hold sub-resources (InfoRagResources, BookingSqlResources).
         - Build and hold the compiled sub-agents for info + rooms.
         - Provide a process-lifetime MemorySaver checkpointer for message history.
@@ -65,6 +67,7 @@ class OrchestrationResources:
     _booking_agent: CompiledStateGraph | None
 
     router: Runnable[list[BaseMessage], RouteDecision]
+    moderator: Moderator
     checkpointer: MemorySaver
 
     def __init__(
@@ -77,7 +80,7 @@ class OrchestrationResources:
 
         This constructor performs only lightweight work: it reads the orchestration
         TOML, resolves the orchestration prompt path, constructs resource objects,
-        and builds the router runnable.
+        and builds the router runnable and the moderation client.
 
         Heavy work (connectivity checks, agent compilation) occurs in startup_check().
 
@@ -129,6 +132,7 @@ class OrchestrationResources:
             "Runnable[list[BaseMessage], RouteDecision]",
             llm.with_structured_output(RouteDecision, method="function_calling"),
         )
+        self.moderator = Moderator(self.config.moderation)
 
         self.checkpointer = MemorySaver()
 
@@ -181,6 +185,7 @@ class OrchestrationResources:
         """
         await self.booking_resources.aclose()
         await self.info_resources.aclose()
+        await self.moderator.aclose()
 
     def reset_runtime_state(self) -> None:
         """Clear runtime fields after a failed initialization attempt.

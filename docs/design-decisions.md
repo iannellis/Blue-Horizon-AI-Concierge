@@ -1044,6 +1044,34 @@ agents, leaving room for medium-effort reasoning. It is the last place a turn's 
 was bounded only by the provider's budget limit. See
 [Configuration](guides/configuration.md).
 
+### Whether a harmful message was refused depended on the router alone
+
+**Status:** fixed.
+
+The router decides whether a message is in scope, and it was the only thing that
+decided whether a harmful one was refused. It is a model following a prompt, so a
+jailbreak written well enough could talk it into routing a harmful request to an agent,
+and a public demo will be tried that way and screenshotted. Nothing checked what the
+agents said back.
+
+**Every guest message and every reply now goes through OpenAI's moderation endpoint,**
+a separate classifier with no instructions to argue with. A flagged message is refused
+before the router runs and is withheld from history. A flagged reply is replaced with
+the refusal, and any proposal it made is invalidated. A failed check fails the turn,
+because letting text through unchecked whenever the endpoint is down would make the
+check easy to route around.
+
+LangChain's `OpenAIModerationMiddleware` was considered and not used. It is middleware
+for `create_agent`, which only the booking agent uses: the router is a structured-output
+call and the information agent is a fixed DAG, so it could check neither the message
+before the router reads it nor an information reply. It also rechecks the guest message
+before each of the booking agent's model calls, up to eight times per turn. The checks
+are two graph nodes instead, one at each end of the turn.
+
+A message flagged for self-harm gets the same generic refusal as any other, which is a
+poor reply to a guest in distress. See
+[Orchestration](architecture/orchestration.md#moderation).
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

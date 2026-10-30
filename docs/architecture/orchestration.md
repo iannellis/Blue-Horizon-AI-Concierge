@@ -40,6 +40,33 @@ accuracy is measured on every eval run precisely because this boundary is where
 regressions show up first. See
 [Design Goals and Decisions](../design-decisions.md#routing-rules-are-earned-not-designed).
 
+## Moderation
+
+Every guest message and every reply passes through OpenAI's moderation endpoint
+(`[orchestration.moderation].model`, `omni-moderation-latest` by default), a classifier
+separate from the router. Without it, whether a harmful message was refused depended
+only on the router model's judgement, which a jailbreak can argue with.
+
+- `moderate_message` is the first node of every turn. A flagged message skips the
+  router and goes straight to `refuse`, so no model reads it. In history it is replaced
+  with the placeholder `[Message withheld: flagged by moderation]`, so later turns do not
+  send it either.
+- `moderate_reply` runs after the information or booking agent, on the text of the
+  turn's replies. A flagged reply is replaced with `[orchestration.messages].refusal`
+  before `finalize`, and the manager invalidates any proposal the turn made, since the
+  guest never read the reply that described it.
+- Both set `flagged` (`"message"` or `"reply"`) in the state. The manager's turn log
+  reports it as the outcome `flagged_message` or `flagged_reply`. The moderator logs one
+  warning line naming the flagged categories, also attached as the
+  `moderation_categories` attribute, and never the text.
+
+A moderation call that fails fails the turn, recorded like a router failure (see
+[Failed turns](#failed-turns)), rather than letting the text through unchecked. A
+refusal or a failed turn is not checked, since its copy comes from config.
+
+Moderation catches harmful content such as violence, harassment, or sexual content. It
+does not catch an off-topic request or a prompt injection, which stay the router's job.
+
 ## Concurrency and timeouts
 
 `[orchestration.orchestration]` in
@@ -73,7 +100,8 @@ on the first failed attempt only, then one line per retry.
 ## Failed turns
 
 A turn fails when the router or a sub-agent exceeds its timeout above, raises, or the
-turn ends without a reply, or when the booking agent could not reach its database. Every
+turn ends without a reply, when a moderation check fails, or when the booking agent
+could not reach its database. Every
 failure site records a `turn_error` of `"timeout"`, `"unavailable"`, `"quota"`, or
 `"internal"` in
 the graph state instead of writing a reply:
@@ -86,14 +114,15 @@ the graph state instead of writing a reply:
 | Sub-agent exception, including the booking agent reaching `[booking.agent].max_model_calls_per_turn` | `internal` |
 | Booking agent exception caused by `BookingUnavailableError`, raised by a booking tool that could not reach the database | `unavailable` |
 | Booking agent returned, but a `search_rooms` result this turn carried `error_kind` `unavailable` | `unavailable` |
-| Router or sub-agent exception whose cause chain holds an `openai.APIError` with `type` or `code` `insufficient_quota` | `quota` |
+| Router, sub-agent, or moderation exception whose cause chain holds an `openai.APIError` with `type` or `code` `insufficient_quota` | `quota` |
+| Moderation check exception, on the message or the reply | `internal` |
 | No final assistant message for the turn | `internal`, set by `finalize` |
 
 `finalize` then removes the failed turn from history entirely. The manager reads
 `turn_error` from `finalize`'s own output, emits an `error` event instead of `done`, and
-invalidates any proposal the turn created. The router clears `turn_error` at the start
-of every turn, so a failure still held in the checkpoint from an earlier turn is never
-reported again. The event's message is `[orchestration.messages].database_unavailable`
+invalidates any proposal the turn created. `moderate_message` clears `turn_error` at the
+start of every turn, so a failure still held in the checkpoint from an earlier turn is
+never reported again. The event's message is `[orchestration.messages].database_unavailable`
 for `unavailable`, `[orchestration.messages].quota_exhausted` for `quota`, and
 `[orchestration.messages].error` for the other codes.
 
@@ -101,7 +130,7 @@ for `unavailable`, `[orchestration.messages].quota_exhausted` for `quota`, and
 credit is used up. It is matched on the error body, not the `RateLimitError` class
 alone, because an ordinary 429 clears on its own and stays `internal`. The router is
 the first model call of every turn, so in practice it is the router that records
-`quota`. It is logged as one warning line carrying OpenAI's `code` (for example
+`quota`, unless the moderation endpoint reports it first. It is logged as one warning line carrying OpenAI's `code` (for example
 `project_spend_limit_exceeded`) as the `quota_code` attribute, which is what an Axiom
 monitor should alert on. The UI shows the copy without a Send again button, since a
 resend fails the same way until the limit is raised.

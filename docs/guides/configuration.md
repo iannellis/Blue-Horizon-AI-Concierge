@@ -7,7 +7,7 @@ The file is structured into sections that map to the Pydantic models in
 
 | Section | Controls |
 |---------|----------|
-| `[orchestration]` | Router LLM, timeouts, retry backoff, concurrency limit, history length |
+| `[orchestration]` | Router LLM, moderation model, timeouts, retry backoff, concurrency limit, history length |
 | `[chat]` | The longest message a guest may send, and how many messages one visitor may send per hour |
 | `[info]` | Information agent LLM, embeddings model, Redis tuning, retrieval `top_k` |
 | `[booking]` | Booking agent LLM, search bounds, DB pool settings |
@@ -40,6 +40,13 @@ generating, and each of the `max_retries` asks for another full response. The ro
 gets less because it runs with no reasoning and returns one route. A response that
 reaches the cap comes back cut short, so keep the info and booking values well above
 what a medium-effort answer needs.
+
+**`[orchestration.moderation]`** sets the OpenAI moderation model (default
+`omni-moderation-latest`) that checks every guest message before the router and every
+reply before the guest sees it, with its own `timeout_s` (default 10) and `max_retries`
+(default 2). The endpoint is free, but each check adds a request to the turn, two per
+answered turn. A check that fails after its retries fails the turn rather than skipping
+moderation. See [Orchestration](../architecture/orchestration.md#moderation).
 
 **`[orchestration.orchestration].max_history_turns`** (default 10) is how many completed
 guest turns a thread's history keeps. The router and the chosen sub-agent are sent the

@@ -42,6 +42,11 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
             "info_timeout_s": 60,
             "booking_timeout_s": 60,
         },
+        "moderation": {
+            "model": "omni-moderation-latest",
+            "timeout_s": 10.0,
+            "max_retries": 2,
+        },
         "prompts": {
             "folder": "system_prompts",
             "orchestration_prompt_filename": "orchestration_prompt.txt",

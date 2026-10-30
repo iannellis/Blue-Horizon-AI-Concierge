@@ -467,6 +467,21 @@ class OrchestrationRuntimeConfig(FrozenModel):
     max_history_turns: PositiveInt = 10
 
 
+class OrchestrationModerationConfig(FrozenModel):
+    """Settings for the moderation check on every guest message and reply.
+
+    Attributes:
+        model: OpenAI moderation model identifier.
+        timeout_s: Network timeout for one moderation request.
+        max_retries: Retry budget for transient moderation failures.
+
+    """
+
+    model: str
+    timeout_s: Annotated[float, Field(gt=0)]
+    max_retries: NonNegInt
+
+
 class OrchestrationPromptsConfig(FrozenModel):
     """Prompt template location for orchestration.
 
@@ -519,6 +534,7 @@ class OrchestrationConfig(FrozenModel):
     Attributes:
         llm: Router LLM settings.
         orchestration: Runtime retry/timeouts.
+        moderation: Moderation check settings.
         prompts: Prompt file metadata.
         messages: Configured user-facing strings.
 
@@ -526,6 +542,7 @@ class OrchestrationConfig(FrozenModel):
 
     llm: OrchestrationLlmConfig
     orchestration: OrchestrationRuntimeConfig
+    moderation: OrchestrationModerationConfig
     prompts: OrchestrationPromptsConfig
     messages: MessagesConfig
 

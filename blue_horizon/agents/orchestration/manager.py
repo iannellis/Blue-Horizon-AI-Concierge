@@ -650,7 +650,9 @@ def _turn_outcome(result: dict[str, Any]) -> str:
 
     Returns:
         The turn's ``turn_error`` code if it failed, ``"flagged_message"``
-        or ``"flagged_reply"`` if moderation flagged it, otherwise ``"ok"``.
+        or ``"flagged_reply"`` if moderation flagged it, ``"partial"`` if
+        one of its parts failed while another was answered, otherwise
+        ``"ok"``.
 
     """
     turn_error = result.get("turn_error")
@@ -659,6 +661,8 @@ def _turn_outcome(result: dict[str, Any]) -> str:
     flagged = result.get("flagged")
     if flagged is not None:
         return f"flagged_{flagged}"
+    if result.get("failed_parts"):
+        return "partial"
     return "ok"
 
 
@@ -676,7 +680,8 @@ def _log_turn_finished(
     them as attributes that can be filtered and aggregated, not only as text.
 
     Args:
-        route: The router's decision, or ``"error"`` if it made none.
+        route: The router's decision, such as ``"info"`` or
+            ``"booking+info"``, or ``"error"`` if it made none.
         outcome: How the turn ended, from `_turn_outcome`.
         started: `time.perf_counter` reading when the turn asked for the LLM
             semaphore.
@@ -702,15 +707,21 @@ def _log_turn_finished(
 def _turn_discards_proposal(result: dict[str, Any]) -> bool:
     """Return whether a finished turn's proposal must stop being confirmable.
 
-    A failed turn is reported as failed, and a flagged reply is replaced
-    with the refusal, so in neither case did the guest read the reply that
-    made the proposal.
+    A failed turn is reported as failed, a flagged reply is replaced with
+    the refusal, and a failed booking part is answered with failure copy
+    while the turn's other part is answered normally, so in none of these
+    did the guest read the reply that made the proposal.
 
     Args:
         result: The turn's final state, or the ``finalize`` node's output.
 
     Returns:
-        True if the turn failed or its reply was flagged.
+        True if the turn failed, its reply was flagged, or its booking part
+        failed.
 
     """
-    return result.get("turn_error") is not None or result.get("flagged") == "reply"
+    return (
+        result.get("turn_error") is not None
+        or result.get("flagged") == "reply"
+        or "booking" in (result.get("failed_parts") or [])
+    )

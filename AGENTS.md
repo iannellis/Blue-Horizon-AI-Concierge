@@ -16,7 +16,7 @@ other tools support imports.
 ## What this project is
 
 An AI hotel concierge. A router LLM classifies each guest message and dispatches it to
-one of two sub-agents: an **information agent** (RAG over three Redis vector indices)
+one or both of two sub-agents: an **information agent** (RAG over three Redis vector indices)
 and a **booking agent** (a typed, read-only room search against PostgreSQL on Neon,
 plus proposals the guest confirms). Anything outside those two jobs is refused.
 

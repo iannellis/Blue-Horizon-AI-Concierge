@@ -764,6 +764,57 @@ class TestFlaggedTurn:
         assert proposals.invalidate_thread.call_count == 1
 
 
+class TestPartiallyFailedTurn:
+    """A turn with one failed part is answered, and logged as partial."""
+
+    @staticmethod
+    def _run_partial(
+        failed_parts: list[str], caplog: pytest.LogCaptureFixture,
+    ) -> MagicMock:
+        """Run a non-streaming turn whose given parts failed.
+
+        Args:
+            failed_parts: The steps whose part failed.
+            caplog: Pytest log capture fixture.
+
+        Returns:
+            MagicMock: The proposal store, to count invalidations on.
+
+        """
+        agent = MagicMock()
+        agent.ainvoke = AsyncMock(
+            return_value={
+                "messages": [AIMessage(content="Partly answered.")],
+                "route": "booking+info",
+                "failed_parts": failed_parts,
+            },
+        )
+        manager = _make_manager(agent=agent)
+        proposals = cast("MagicMock", manager.get_booking_resources().proposals)
+        with caplog.at_level(logging.INFO, logger=_MANAGER_LOGGER):
+            asyncio.run(manager.ainvoke(thread_id="t1", user_text="hi", customer_id=1))
+        return proposals
+
+    def test_failed_booking_part_invalidates_proposal(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """The guest never read the booking reply, so its proposal goes too."""
+        proposals = self._run_partial(["booking"], caplog)
+        record = _turn_finished_record(caplog)
+        assert record.__dict__["route"] == "booking+info"
+        assert record.__dict__["outcome"] == "partial"
+        assert proposals.invalidate_thread.call_count == 2  # noqa: PLR2004
+
+    def test_failed_info_part_keeps_proposal(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """The booking reply was read, so its proposal stays confirmable."""
+        proposals = self._run_partial(["info"], caplog)
+        assert _turn_finished_record(caplog).__dict__["outcome"] == "partial"
+        # Only the invalidation every turn makes as it starts.
+        assert proposals.invalidate_thread.call_count == 1
+
+
 # ---------------------------------------------------------------------------
 # Turn finished line
 #

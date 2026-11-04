@@ -17,13 +17,16 @@ from langchain_core.messages import (
 )
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
+from langgraph.types import Send
 
 from blue_horizon.agents.booking import database_unavailable_this_turn
 from blue_horizon.agents.booking.write_ops import BookingUnavailableError
 from blue_horizon.agents.orchestration.models import (
     ConversationState,
-    RouteStep,
-    _route_from_state,
+    PartInput,
+    PartReply,
+    RoutePart,
+    turn_error_message,
 )
 
 if TYPE_CHECKING:
@@ -33,7 +36,11 @@ if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
     from langgraph.graph.state import CompiledStateGraph
 
-    from blue_horizon.agents.orchestration.models import TurnErrorCode
+    from blue_horizon.agents.orchestration.models import (
+        PartStep,
+        RouteDecision,
+        TurnErrorCode,
+    )
     from blue_horizon.agents.orchestration.resources import OrchestrationResources
 
 logger = logging.getLogger(__name__)
@@ -52,6 +59,16 @@ _QUOTA_ERROR_MARKER = "insufficient_quota"
 # Replaces a flagged guest message in history, so neither the router nor a
 # sub-agent reads the flagged text on a later turn.
 _WITHHELD_MESSAGE = "[Message withheld: flagged by moderation]"
+
+# When every part of a turn failed, the turn reports the first of these codes
+# any part recorded. `quota` comes first because its copy must never invite a
+# resend that would fail the same way.
+_TURN_ERROR_PRIORITY: tuple[TurnErrorCode, ...] = (
+    "quota",
+    "unavailable",
+    "timeout",
+    "internal",
+)
 
 type _AfterModeration = Literal["router", "refuse", "error"]
 
@@ -76,16 +93,16 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
     """
     cfg = resources.config
 
-    def _make_dispatch_node(
-        agent_name: str,
+    def _make_part_node(
+        step: PartStep,
         get_agent: Callable[[], CompiledStateGraph],
         timeout_s: float,
         failure_check: Callable[[dict[str, Any]], TurnErrorCode | None] | None = None,
     ) -> Callable[..., Awaitable[dict[str, Any]]]:
-        """Create a dispatch node for a sub-agent.
+        """Create the node that answers one part of a turn with a sub-agent.
 
         Args:
-            agent_name: Human-readable name for logging.
+            step: The sub-agent's step name, also used for logging.
             get_agent: Callable returning the compiled sub-agent.
             timeout_s: Wall-clock timeout in seconds.
             failure_check: Optional inspection of the sub-agent's completed
@@ -93,70 +110,79 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
                 discarded even though the sub-agent returned normally.
 
         Returns:
-            Async node function suitable for LangGraph.
+            Async node function suitable for LangGraph, called through a
+            `Send` from the fan-out with a `PartInput`.
 
         """
 
-        async def _node(
-            state: ConversationState,
-            config: RunnableConfig,
-        ) -> dict[str, Any]:
-            """Dispatch a request to a sub-agent with a timeout.
+        async def _node(part: PartInput, config: RunnableConfig) -> dict[str, Any]:
+            """Answer one part with a sub-agent, under a timeout.
+
+            A failure is recorded on the part rather than on the turn, since
+            whether the turn failed depends on the turn's other parts. See
+            ``join_node``.
 
             Args:
-                state: Current conversation state.
+                part: The part's messages and position.
                 config: LangGraph runnable config.
 
             Returns:
-                State patch from the sub-agent, or a ``turn_error`` on failure,
-                including one ``failure_check`` reports. A failure writes no
-                message: see `finalize_node` for why.
+                State patch adding this part's `PartReply` to
+                ``part_replies``, carrying the sub-agent's replies or, on
+                failure, the ``turn_error`` it recorded. A sub-agent that
+                returned no reply records ``"internal"``.
 
             """
-            logger.info("Dispatching to %s agent", agent_name)
+            logger.info("Dispatching to %s agent", step)
+            replies: list[AIMessage] = []
+            turn_error: TurnErrorCode | None = None
             try:
                 result = await asyncio.wait_for(
-                    get_agent().ainvoke(state, config=config),
+                    get_agent().ainvoke({"messages": part["messages"]}, config=config),
                     timeout=timeout_s,
                 )
             except TimeoutError:
-                logger.warning(
-                    "%s agent timed out after %s s",
-                    agent_name,
-                    timeout_s,
-                )
-                return {"turn_error": "timeout"}
+                logger.warning("%s agent timed out after %s s", step, timeout_s)
+                turn_error = "timeout"
             except Exception as exc:  # noqa: BLE001
-                return {
-                    "turn_error": _record_turn_failure(f"{agent_name} agent", exc),
-                }
-            patch = cast("dict[str, Any]", result)
-            if failure_check is not None:
-                turn_error = failure_check(patch)
-                if turn_error is not None:
-                    return {"turn_error": turn_error}
-            return patch
+                turn_error = _record_turn_failure(f"{step} agent", exc)
+            else:
+                patch = cast("dict[str, Any]", result)
+                if failure_check is not None:
+                    turn_error = failure_check(patch)
+                if turn_error is None:
+                    replies = _new_replies(patch.get("messages", []))
+                    if not replies:
+                        logger.warning("%s agent returned no reply", step)
+                        turn_error = "internal"
+            reply = PartReply(
+                index=part["index"],
+                step=step,
+                replies=replies,
+                turn_error=turn_error,
+            )
+            return {"part_replies": [reply]}
 
-        _node.__name__ = _node.__qualname__ = f"{agent_name}_node"
+        _node.__name__ = _node.__qualname__ = f"{step}_node"
         return _node
 
     async def moderate_message_node(state: ConversationState) -> dict[str, Any]:
         """Check the guest's message before any model reads it.
 
         This is the first node of every turn, so it also clears
-        ``turn_error`` and ``flagged``: an earlier turn's values, still held
-        in the checkpoint, must not be reported again.
+        ``turn_error``, ``flagged``, and ``failed_parts``: an earlier turn's
+        values, still held in the checkpoint, must not be reported again.
 
         Args:
             state: Current conversation state, ending with the guest's
                 message.
 
         Returns:
-            State patch with ``turn_error`` and ``flagged`` reset. A flagged
-            message also sets ``flagged`` to ``"message"``, routes the turn
-            to ``refuse``, and replaces the message in history with a
-            placeholder carrying the same id. A failed check sets
-            ``turn_error`` and the ``error`` route instead.
+            State patch with ``turn_error``, ``flagged``, and ``failed_parts``
+            reset. A flagged message also sets ``flagged`` to ``"message"``,
+            routes the turn to ``refuse``, and replaces the message in
+            history with a placeholder carrying the same id. A failed check
+            sets ``turn_error`` and the ``error`` route instead.
 
         """
         guest_message = state["messages"][-1]
@@ -170,34 +196,41 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
                 "route": "error",
                 "turn_error": _record_turn_failure("Message moderation", exc),
                 "flagged": None,
+                "failed_parts": [],
             }
         if not flagged:
-            return {"turn_error": None, "flagged": None}
+            return {"turn_error": None, "flagged": None, "failed_parts": []}
         return {
             "messages": [HumanMessage(content=_WITHHELD_MESSAGE, id=guest_message.id)],
             "route": "refuse",
             "turn_error": None,
             "flagged": "message",
+            "failed_parts": [],
         }
 
     async def router_node(state: ConversationState) -> dict[str, Any]:
-        """Route the conversation to the appropriate sub-agent.
+        """Split the guest's message into parts, one per sub-agent.
 
         Args:
             state: Current conversation state.
 
         Returns:
-            State patch containing the chosen route, or the ``error`` route
-            and a ``turn_error`` if the router failed.
+            State patch with the route and the parts, and ``part_replies``
+            cleared for the fan-out. The route is ``"refuse"`` when every
+            part was a refusal, and ``"error"``, with a ``turn_error``, when
+            the router failed or returned no parts.
 
         """
         messages = state["messages"]
 
         try:
             system_msg = SystemMessage(content=resources.get_system_prompt())
-            decision = await asyncio.wait_for(
-                resources.router.ainvoke([system_msg, *messages]),
-                timeout=cfg.orchestration.router_timeout_s,
+            decision = cast(
+                "RouteDecision",
+                await asyncio.wait_for(
+                    resources.router.ainvoke([system_msg, *messages]),
+                    timeout=cfg.orchestration.router_timeout_s,
+                ),
             )
         except TimeoutError:
             logger.warning(
@@ -208,27 +241,70 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
         except Exception as exc:  # noqa: BLE001
             return {"route": "error", "turn_error": _record_turn_failure("Router", exc)}
 
-        step = cast("RouteStep", getattr(decision, "step", "error"))
-        logger.info("Router decision: %s", step)
-        return {"route": step}
+        if not decision.parts:
+            logger.warning("Router returned no parts")
+            return {"route": "error", "turn_error": "internal"}
+        parts = _usable_parts(decision.parts)
+        route = "+".join(part.step for part in parts) or "refuse"
+        logger.info("Router decision: %s", route)
+        return {"route": route, "parts": parts, "part_replies": None}
 
-    info_node = _make_dispatch_node(
+    info_node = _make_part_node(
         "info",
         resources.get_info_agent,
         cfg.orchestration.info_timeout_s,
     )
-    booking_node = _make_dispatch_node(
+    booking_node = _make_part_node(
         "booking",
         resources.get_booking_agent,
         cfg.orchestration.booking_timeout_s,
         failure_check=_booking_turn_failure,
     )
 
-    async def moderate_reply_node(state: ConversationState) -> dict[str, Any]:
-        """Check a sub-agent's reply before the guest sees it.
+    def join_node(state: ConversationState) -> dict[str, Any]:
+        """Combine the parts' replies into the turn's reply.
+
+        A single part's replies are kept as the sub-agent wrote them. Several
+        parts' replies are joined into one message, in the order the guest
+        asked, with no model call: a model rewriting them could misdescribe
+        a proposal the guest is about to confirm. A part that failed is
+        answered in place with the guest-facing copy for its ``turn_error``.
 
         Args:
-            state: Current conversation state, after a sub-agent ran.
+            state: Current conversation state, after every part ran.
+
+        Returns:
+            State patch with the turn's reply and ``failed_parts`` naming any
+            part that failed. When every part failed, no reply and a
+            ``turn_error`` instead, chosen by `_combined_turn_error`.
+
+        """
+        part_replies = sorted(state.get("part_replies", []), key=lambda r: r["index"])
+        failed = [reply for reply in part_replies if reply["turn_error"] is not None]
+        if len(failed) == len(part_replies):
+            logger.info("Every part of the turn failed")
+            return {"turn_error": _combined_turn_error(failed)}
+        if len(part_replies) == 1:
+            return {"messages": part_replies[0]["replies"]}
+
+        sections: list[str] = []
+        for reply in part_replies:
+            if reply["turn_error"] is None:
+                sections.extend(message.text for message in reply["replies"])
+            else:
+                logger.info("The %s part of the turn failed", reply["step"])
+                sections.append(turn_error_message(cfg.messages, reply["turn_error"]))
+        joined = AIMessage(content=[{"type": "text", "text": "\n\n".join(sections)}])
+        return {
+            "messages": [joined],
+            "failed_parts": [reply["step"] for reply in failed],
+        }
+
+    async def moderate_reply_node(state: ConversationState) -> dict[str, Any]:
+        """Check the turn's reply before the guest sees it.
+
+        Args:
+            state: Current conversation state, after the join.
 
         Returns:
             An empty patch when the turn already failed, produced no reply
@@ -281,7 +357,7 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
         """Mark the turn failed without writing a reply.
 
         Reached when the message moderation check or the router failed, or
-        the router chose the ``error`` step itself.
+        the router returned no parts.
         No apology is written into history: the client is told about the
         failure through an ``error`` event instead (see `finalize_node`).
 
@@ -324,11 +400,13 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
 
         Returns:
             State patch that clears the messages channel and replaces it with
-            the pruned history, plus ``turn_error`` when this turn failed and
-            ``flagged`` when moderation flagged it. The manager reads both
-            from this node's own output: ``turn_error`` to choose between an
-            ``error`` and a ``done`` event, and ``flagged`` for its turn log
-            and to invalidate the proposal of a flagged reply.
+            the pruned history, and clears ``part_replies``, plus
+            ``turn_error`` when this turn failed, ``flagged`` when moderation
+            flagged it, and ``failed_parts`` when one of its parts failed.
+            The manager reads all three from this node's own output:
+            ``turn_error`` to choose between an ``error`` and a ``done``
+            event, and ``flagged`` and ``failed_parts`` for its turn log and
+            to invalidate a proposal the guest never read about.
 
         """
         turns = _group_turns(
@@ -346,12 +424,16 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
 
         patch: dict[str, Any] = {
             "messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES), *kept],
+            "part_replies": None,
         }
         if turn_error is not None:
             patch["turn_error"] = turn_error
         flagged = state.get("flagged")
         if flagged is not None:
             patch["flagged"] = flagged
+        failed_parts = state.get("failed_parts")
+        if failed_parts:
+            patch["failed_parts"] = failed_parts
         return patch
 
     graph = StateGraph(ConversationState)
@@ -359,6 +441,7 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
     graph.add_node("router", router_node)
     graph.add_node("info", info_node)
     graph.add_node("booking", booking_node)
+    graph.add_node("join", join_node)
     graph.add_node("moderate_reply", moderate_reply_node)
     graph.add_node("refuse", refuse_node)
     graph.add_node("error", error_node)
@@ -372,17 +455,13 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
     )
     graph.add_conditional_edges(
         "router",
-        _route_from_state,
-        {
-            "info": "info",
-            "booking": "booking",
-            "refuse": "refuse",
-            "error": "error",
-        },
+        _fan_out,
+        ["info", "booking", "refuse", "error"],
     )
 
-    graph.add_edge("info", "moderate_reply")
-    graph.add_edge("booking", "moderate_reply")
+    graph.add_edge("info", "join")
+    graph.add_edge("booking", "join")
+    graph.add_edge("join", "moderate_reply")
     graph.add_edge("moderate_reply", "finalize")
     graph.add_edge("refuse", "finalize")
     graph.add_edge("error", "finalize")
@@ -392,7 +471,7 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
 
 
 def _booking_turn_failure(result: dict[str, Any]) -> TurnErrorCode | None:
-    """Fail a booking turn whose `search_rooms` could not reach the database.
+    """Fail a booking part whose `search_rooms` could not reach the database.
 
     The booking agent returns normally after such an outage, with a reply the
     model wrote itself. That reply would reach the guest as an ordinary
@@ -430,6 +509,49 @@ def _after_message_moderation(state: ConversationState) -> _AfterModeration:
     if state.get("flagged") is not None:
         return "refuse"
     return "router"
+
+
+def _fan_out(state: ConversationState) -> list[Send] | Literal["refuse", "error"]:
+    """Send each part of the turn to its sub-agent, or end the turn early.
+
+    Every part gets the earlier history. A single-part turn's agent also
+    gets the guest's message itself, so a turn with one intent reaches its
+    agent exactly as it would without the split. With several parts, each
+    agent gets its own part's standalone query in place of the guest's
+    message instead, so it does not answer, or refuse, the other part.
+
+    Args:
+        state: Current conversation state, after the router.
+
+    Returns:
+        One `Send` per part, to the node named by its step, or
+        ``"refuse"`` or ``"error"`` when the router chose that route.
+        ``"error"`` also when there is no part to send, since an empty list
+        of sends would end the graph before ``finalize``.
+
+    """
+    match state.get("route"):
+        case "refuse" | "error" as route:
+            return route
+        case _:
+            pass
+    messages = state["messages"]
+    parts = state.get("parts", [])
+    if not parts:
+        return "error"
+    if len(parts) == 1:
+        return [Send(parts[0].step, PartInput(messages=list(messages), index=0))]
+    earlier = list(messages[:-1])
+    return [
+        Send(
+            part.step,
+            PartInput(
+                messages=[*earlier, HumanMessage(content=part.query)],
+                index=index,
+            ),
+        )
+        for index, part in enumerate(parts)
+    ]
 
 
 def _record_turn_failure(source: str, exc: BaseException) -> TurnErrorCode:
@@ -528,6 +650,73 @@ def _quota_error(chain: Sequence[BaseException]) -> openai.APIError | None:
         ):
             return link
     return None
+
+
+def _usable_parts(parts: Sequence[RoutePart]) -> list[RoutePart]:
+    """Drop refused parts and merge parts that share a step.
+
+    The prompt asks for at most one part per sub-agent and never a refusal
+    alongside other parts. This enforces both, so a router that splits one
+    room request in two cannot dispatch the booking agent twice.
+
+    Args:
+        parts: The router's parts, in the order the guest asked.
+
+    Returns:
+        At most one part per sub-agent, in order of each step's first
+        appearance, its query the queries of that step's parts joined by a
+        space. Empty when every part was a refusal.
+
+    """
+    queries: dict[PartStep, list[str]] = {}
+    for part in parts:
+        if part.step != "refuse":
+            queries.setdefault(part.step, []).append(part.query)
+    return [
+        RoutePart(query=" ".join(step_queries), step=step)
+        for step, step_queries in queries.items()
+    ]
+
+
+def _new_replies(messages: Sequence[BaseMessage]) -> list[AIMessage]:
+    """Return a sub-agent's replies for this part, without tool-calling messages.
+
+    Args:
+        messages: The sub-agent's completed messages: normally its input
+            history followed by what it added.
+
+    Returns:
+        The AIMessages after the last HumanMessage that carry no tool calls,
+        in order, or every such AIMessage when there is no HumanMessage.
+
+    """
+    start = 0
+    for index, message in enumerate(messages):
+        if isinstance(message, HumanMessage):
+            start = index + 1
+    return [
+        message
+        for message in messages[start:]
+        if isinstance(message, AIMessage) and not message.tool_calls
+    ]
+
+
+def _combined_turn_error(failed: Sequence[PartReply]) -> TurnErrorCode:
+    """Choose the ``turn_error`` for a turn whose every part failed.
+
+    Args:
+        failed: The failed parts' replies.
+
+    Returns:
+        The earliest code in `_TURN_ERROR_PRIORITY` that any part recorded,
+        or ``"internal"`` when there is no failed part to choose from.
+
+    """
+    codes = {reply["turn_error"] for reply in failed}
+    for code in _TURN_ERROR_PRIORITY:
+        if code in codes:
+            return code
+    return "internal"
 
 
 def _turn_replies(messages: Sequence[BaseMessage]) -> list[AIMessage]:

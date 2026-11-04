@@ -6,13 +6,14 @@ import logging
 from typing import TYPE_CHECKING, cast
 
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from blue_horizon.agents._lifecycle import require
 from blue_horizon.agents._llm import build_chat_model
 from blue_horizon.agents.booking import BookingSqlResources, build_booking_agent
 from blue_horizon.agents.exceptions import ConfigurationError, OperationalError
 from blue_horizon.agents.information import InfoRagResources, build_info_agent
-from blue_horizon.agents.orchestration.models import RouteDecision
+from blue_horizon.agents.orchestration.models import RouteDecision, RoutePart
 from blue_horizon.agents.orchestration.moderation import Moderator
 from blue_horizon.agents.prompt_utils import load_packaged_text, prompt_resource_path
 from blue_horizon.config import load_app_config
@@ -29,6 +30,8 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+_ROUTE_PART_MODULE = (RoutePart.__module__, RoutePart.__name__)
 
 
 class OrchestrationResources:
@@ -134,7 +137,11 @@ class OrchestrationResources:
         )
         self.moderator = Moderator(self.config.moderation)
 
-        self.checkpointer = MemorySaver()
+        # RoutePart is the only non-builtin type in checkpointed state; LangGraph
+        # warns on, and will later block, unlisted types.
+        self.checkpointer = MemorySaver(
+            serde=JsonPlusSerializer(allowed_msgpack_modules=[_ROUTE_PART_MODULE]),
+        )
 
     async def startup_check(self) -> None:
         """Validate dependencies and build sub-agents.

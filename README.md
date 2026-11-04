@@ -13,7 +13,7 @@ Built with [LangGraph](https://github.com/langchain-ai/langgraph),
 ## What it does
 
 A guest chats in natural language. A router LLM classifies each message and dispatches
-it to one of two specialised sub-agents:
+it to one or both of two specialised sub-agents:
 
 - **Information agent** answers questions about services, amenities, and policies using
   RAG over a Redis vector store.

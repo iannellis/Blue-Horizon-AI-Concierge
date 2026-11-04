@@ -5,7 +5,7 @@ information and room bookings.
 
 The **agent backend** is built with [LangGraph](https://github.com/langchain-ai/langgraph)
 and served via [FastAPI](https://fastapi.dev). A router LLM classifies each incoming
-message and dispatches it to one of two specialised sub-agents: a RAG-based information
+message and dispatches it to one or both of two specialised sub-agents: a RAG-based information
 agent (Redis vector store plus result merging) or a rooms/bookings agent that turns
 natural-language requests into typed room searches (PostgreSQL). The booking agent only ever searches and *proposes*
 - every booking, cancellation, and modification is committed by server-side code once a

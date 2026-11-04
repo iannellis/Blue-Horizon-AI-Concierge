@@ -12,6 +12,7 @@ from blue_horizon.agents.orchestration.manager import OrchestrationManager, Read
 from blue_horizon.agents.orchestration.models import (
     ConversationState,
     RouteDecision,
+    RoutePart,
     RouteStep,
     turn_error_message,
 )
@@ -23,6 +24,7 @@ __all__ = [
     "OrchestrationResources",
     "Readiness",
     "RouteDecision",
+    "RoutePart",
     "RouteStep",
     "build_orchestration_agent",
     "format_chat_response",

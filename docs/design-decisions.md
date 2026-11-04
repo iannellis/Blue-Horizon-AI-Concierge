@@ -1073,6 +1073,56 @@ A message flagged for self-harm gets the same generic refusal as any other, whic
 poor reply to a guest in distress. See
 [Orchestration](architecture/orchestration.md#moderation).
 
+### A message that needed both agents got half an answer
+
+"Show me some presidential suites. What kind of room service can I get with them?"
+needs the booking agent for the suites and the information agent for room service. The
+router could choose only one route, and its mixed-intent rule sent the message to
+whichever half blocked the next action, here booking. The booking agent then searched
+the suites and either skipped the room service question, refused it, or answered it
+without the FAQ corpus behind it. Each of those is a defect.
+
+The router now returns a list of parts, each a `step` and a `query` restating that piece
+of the message so it stands alone. The parts fan out to their sub-agents in parallel,
+and a `join` node puts the replies together in the order the guest asked. Four choices
+shape it:
+
+- **The split lives in the router, not in a sub-agent.** Giving the booking agent a
+  lookup into the information agent would have mixed the two agents' jobs and their
+  prompts, and the information agent stays a fixed DAG rather than a tool.
+- **A single-intent turn is unchanged.** Its agent receives the guest's own message, not
+  the router's restatement, so the common case cannot regress because a rewrite dropped
+  a detail. A turn whose parts depend on each other ("the room closest to the spa") is
+  not split and keeps the old blocking-intent rule.
+- **The join makes no model call.** A model merging the replies could misdescribe a
+  proposal, which is the failure invariant 3 exists to prevent. It would also add a
+  model call to every hybrid turn.
+- **A failure belongs to its part.** One failed part is answered with its own failure
+  copy beside the other part's reply, and the turn fails only when every part did.
+  Failing the whole turn would discard an answer the guest could use. A failed booking
+  part still invalidates its proposal, since the guest read the failure copy and not
+  the reply that described it.
+
+The router's reasoning effort stayed at `none`. Splitting and restating is extraction,
+which the model handled at that setting, and the router runs on every turn, so a higher
+setting would add latency to every refusal and single-intent turn to help the few
+hybrid ones.
+
+The new output format did move one boundary on its own. With nothing else changed, a
+terse request for an in-room feature went to `refuse` in 2 of 5 samples, where the
+single-step router had sent all 5 to booking. A general rule that splitting never
+changes how a part is classified, and that a short request is not out of scope for
+being brief, restored it to 10 of 10 across four such phrasings. See
+[Orchestration](architecture/orchestration.md#a-message-that-needs-both-agents-is-split).
+
+The first smoke run turned up a second boundary. A prompt injection that opened with
+"Also," after two info turns went to `info`: the router re-added the earlier turns'
+requests as parts, then dropped the refused one. A rule that every part comes from a
+request in the latest message, and that earlier messages are context rather than a
+source of parts, brought the full router-only run to 570 of 571 turns. Scoping the
+injection rule's "remaining legitimate intent" to the latest message, tried alongside
+it, made the misroute more frequent and was reverted.
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

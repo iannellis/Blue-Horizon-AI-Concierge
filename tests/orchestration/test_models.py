@@ -1,6 +1,6 @@
 """Tests for orchestration routing models.
 
-_route_from_state is a pure function operating on dict-like state.
+_merge_part_replies is a pure reducer, so it is tested on plain lists.
 """
 
 # ruff: noqa: S101
@@ -8,36 +8,42 @@ _route_from_state is a pure function operating on dict-like state.
 import pytest
 from pydantic import ValidationError
 
-from blue_horizon.agents.orchestration.models import RouteDecision, _route_from_state
+from blue_horizon.agents.orchestration.models import (
+    PartReply,
+    RouteDecision,
+    RoutePart,
+    _merge_part_replies,
+)
 
 # ---------------------------------------------------------------------------
-# _route_from_state
+# _merge_part_replies
 # ---------------------------------------------------------------------------
 
 
-class TestRouteFromState:
-    """_route_from_state extracts the route key or falls back to 'error'."""
+def _reply(index: int) -> PartReply:
+    """Build a successful part reply with no messages.
 
-    @pytest.mark.parametrize("route", ["info", "booking", "refuse", "error"])
-    def test_valid_route_returned(self, route: str) -> None:
-        """All valid RouteStep values are passed through unchanged."""
-        state = {"messages": [], "route": route}
-        assert _route_from_state(state) == route  # type: ignore[arg-type]
+    Args:
+        index: The part's position in the guest's message.
 
-    def test_none_route_defaults_to_error(self) -> None:
-        """A None route value falls back to 'error'."""
-        state = {"messages": [], "route": None}
-        assert _route_from_state(state) == "error"  # type: ignore[arg-type]
+    Returns:
+        PartReply: A reply for the info step.
 
-    def test_missing_route_key_defaults_to_error(self) -> None:
-        """A state dict without a 'route' key falls back to 'error'."""
-        state = {"messages": []}
-        assert _route_from_state(state) == "error"  # type: ignore[arg-type]
+    """
+    return PartReply(index=index, step="info", replies=[], turn_error=None)
 
-    def test_empty_string_route_defaults_to_error(self) -> None:
-        """An empty-string route is falsy and falls back to 'error'."""
-        state = {"messages": [], "route": ""}
-        assert _route_from_state(state) == "error"  # type: ignore[arg-type]
+
+class TestMergePartReplies:
+    """_merge_part_replies appends parallel writes and clears on None."""
+
+    def test_update_is_appended(self) -> None:
+        """A node's replies are added after those already collected."""
+        first, second = _reply(0), _reply(1)
+        assert _merge_part_replies([first], [second]) == [first, second]
+
+    def test_none_clears_the_channel(self) -> None:
+        """None empties the channel, so an earlier turn's replies are dropped."""
+        assert _merge_part_replies([_reply(0)], None) == []
 
 
 # ---------------------------------------------------------------------------
@@ -46,15 +52,23 @@ class TestRouteFromState:
 
 
 class TestRouteDecision:
-    """RouteDecision validates its step field."""
+    """RouteDecision validates each part's step."""
 
-    @pytest.mark.parametrize("step", ["info", "booking", "refuse", "error"])
+    @pytest.mark.parametrize("step", ["info", "booking", "refuse"])
     def test_valid_steps_accepted(self, step: str) -> None:
-        """All four valid steps parse without error."""
-        decision = RouteDecision(step=step)  # type: ignore[arg-type]
-        assert decision.step == step
+        """All three valid steps parse without error."""
+        decision = RouteDecision(
+            parts=[RoutePart(query="Hello", step=step)],  # type: ignore[arg-type]
+        )
+        assert decision.parts[0].step == step
 
-    def test_invalid_step_raises(self) -> None:
-        """An unknown step string is rejected by Pydantic validation."""
+    @pytest.mark.parametrize("step", ["unknown", "error"])
+    def test_invalid_step_raises(self, step: str) -> None:
+        """An unknown step, or the internal error route, is rejected."""
         with pytest.raises(ValidationError):
-            RouteDecision(step="unknown")  # type: ignore[arg-type]
+            RoutePart(query="Hello", step=step)  # type: ignore[arg-type]
+
+    def test_query_is_required(self) -> None:
+        """A part without its standalone query is rejected."""
+        with pytest.raises(ValidationError):
+            RoutePart(step="info")  # type: ignore[call-arg]

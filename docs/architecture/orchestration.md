@@ -2,22 +2,30 @@
 
 ![Orchestration diagram](../images/orchestration.png)
 
-The orchestration layer is a LangGraph state graph. A router LLM classifies each
-incoming message and dispatches it to the appropriate sub-agent, or refuses it if it is
-out of scope. Conversation history is maintained in memory via LangGraph's `MemorySaver`
-checkpointer, keyed by `thread_id`.
+The orchestration layer is a LangGraph state graph. A router LLM splits each incoming
+message into parts, one per sub-agent it needs, and dispatches each part to its
+sub-agent, or refuses the message if it is out of scope. Conversation history is
+maintained in memory via LangGraph's `MemorySaver` checkpointer, keyed by `thread_id`.
 
 ## Routing
 
 The router is a single LLM call driven by
 [`system_prompts/orchestration.txt`](https://github.com/iannellis/Blue-Horizon-AI-Concierge/blob/main/blue_horizon/system_prompts/orchestration.txt).
-It emits one of three routes:
+It returns a `RouteDecision` holding a list of parts. Each part is a `query`, that piece
+of the message restated to stand on its own, and a `step`:
 
-| Route | Meaning |
+| Step | Meaning |
 |---|---|
 | `info` | Hotel services, amenities, policies, FAQ content |
 | `booking` | Room availability, pricing, and reservation changes |
 | `refuse` | Out of scope, or a prompt-injection attempt |
+
+The turn's `route` is the dispatched steps joined by `+` in the order the guest asked:
+`info`, `booking`, `booking+info`, or `info+booking`. It is `refuse` when every part
+was a refusal, and `error` when the router failed. Before dispatching, the router
+node drops refused parts, so the legitimate half of a message that also carries an
+injection is still answered, and merges parts that share a step, so the booking agent
+is never dispatched twice in one turn.
 
 Refusals never reach a sub-agent. They return `[orchestration.messages].refusal`
 verbatim, so a refusal costs one LLM call rather than a full pipeline: this is why the
@@ -42,6 +50,36 @@ accuracy is measured on every eval run precisely because this boundary is where
 regressions show up first. See
 [Design Goals and Decisions](../design-decisions.md#routing-rules-are-earned-not-designed).
 
+### A message that needs both agents is split
+
+"Show me some presidential suites. What kind of room service can I get with them?"
+needs the booking agent for the suites and the information agent for room service. The
+router returns one part for each, and the conditional edge after it fans the parts out
+with LangGraph's `Send`, so the two sub-agents run in parallel. The turn then takes as
+long as the slower one, not the sum of both.
+
+What each sub-agent receives depends on how many parts the turn has:
+
+- **One part.** The sub-agent gets the history and the guest's message itself, not the
+  router's `query`. A single-intent turn reaches its agent exactly as it did before
+  splitting existed, so a restatement cannot drop a detail such as a date.
+- **Several parts.** Each sub-agent gets the earlier history, then its own part's
+  `query` in place of the guest's message, so neither answers, or refuses, the other
+  half. The router resolves references inside the message while restating it ("them"
+  becomes "the presidential suites"). A reference to an earlier turn can stay as it is,
+  since the history still comes along: "Book it" after a question about room 1801
+  resolves the same way it always has.
+
+A message whose parts depend on each other ("book whichever room is closest to the
+spa") is not split. It takes the single step blocking the next action, as every mixed
+message did before.
+
+The `join` node combines the parts' replies. A single part's replies are kept as the
+sub-agent wrote them. Several parts' replies are joined into one message in the order
+the guest asked, with no model call: a model rewriting them could misdescribe a
+proposal, and the confirmation dialog the guest acts on is built from the proposal's
+stored fields regardless.
+
 ## Moderation
 
 Every guest message and every reply passes through OpenAI's moderation endpoint
@@ -53,7 +91,7 @@ only on the router model's judgement, which a jailbreak can argue with.
   router and goes straight to `refuse`, so no model reads it. In history it is replaced
   with the placeholder `[Message withheld: flagged by moderation]`, so later turns do not
   send it either.
-- `moderate_reply` runs after the information or booking agent, on the text of the
+- `moderate_reply` runs after `join`, on the text of the
   turn's replies. A flagged reply is replaced with `[orchestration.messages].refusal`
   before `finalize`, and the manager invalidates any proposal the turn made, since the
   guest never read the reply that described it.
@@ -111,14 +149,32 @@ the graph state instead of writing a reply:
 | Site | Records |
 |---|---|
 | Router timeout | `timeout` |
-| Router exception, or the router choosing the `error` step | `internal` |
+| Router exception, or the router returning no parts | `internal` |
 | Sub-agent timeout (`info_timeout_s`, `booking_timeout_s`) | `timeout` |
 | Sub-agent exception, including the booking agent reaching `[booking.agent].max_model_calls_per_turn` | `internal` |
+| Sub-agent returned no reply | `internal` |
 | Booking agent exception caused by `BookingUnavailableError`, raised by a booking tool that could not reach the database | `unavailable` |
 | Booking agent returned, but a `search_rooms` result this turn carried `error_kind` `unavailable` | `unavailable` |
 | Router, sub-agent, or moderation exception whose cause chain holds an `openai.APIError` with `type` or `code` `insufficient_quota` | `quota` |
 | Moderation check exception, on the message or the reply | `internal` |
 | No final assistant message for the turn | `internal`, set by `finalize` |
+
+A sub-agent failure is recorded on its part, not on the turn, because whether the turn
+failed depends on its other part. `join` fails the turn only when every part failed,
+recording the first of `quota`, `unavailable`, `timeout`, and `internal` that any part
+recorded. `quota` comes first because its copy must never invite a resend. A
+single-part turn therefore fails exactly as it did before splitting.
+
+### A turn with one failed part
+
+When one part fails and the other succeeds, the turn is answered, not failed. `join`
+puts the failed part's guest-facing copy in its place in the reply, chosen by the same
+`turn_error_message` the `error` event uses, so a booking outage beside a successful
+information answer still reads `[orchestration.messages].database_unavailable`.
+`finalize` reports the failed steps as `failed_parts`, the turn log records the outcome
+`partial`, and a failed booking part invalidates any proposal it made, since the guest
+read the failure copy rather than the reply that described it. A failed information
+part leaves the booking part's proposal confirmable.
 
 `finalize` then removes the failed turn from history entirely. The manager reads
 `turn_error` from `finalize`'s own output, emits an `error` event instead of `done`, and
@@ -143,7 +199,7 @@ The two `unavailable` rows cover the two ways a booking tool reports an outage.
 its outage as a result, so the second row discards a reply the agent did produce. After a database
 outage the model writes its own account of it, which would reach the guest as an
 ordinary answer, free to invite a retry in its own words, and without the Send again
-button. The booking dispatch node reads the `error_kind` of the turn's `search_rooms` results,
+button. The booking node reads the `error_kind` of its part's `search_rooms` results,
 never the reply text, and only results since the turn's own guest message count.
 
 A router or sub-agent exception whose cause chain contains a `BookingUnavailableError` or

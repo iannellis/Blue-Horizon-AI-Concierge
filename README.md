@@ -48,24 +48,24 @@ replacing the agent with a fixed LangGraph DAG removed the model's opportunity t
 misinterpret emptiness at all.
 [The full story](https://iannellis.github.io/Blue-Horizon-AI-Concierge/design-decisions/#the-information-agent-is-a-workflow-not-an-agent).
 
-**Measured, with CI that can fail on it.** A 225-case multi-turn evaluation suite scores
+**Measured, with CI that can fail on it.** A 237-case multi-turn evaluation suite scores
 routing, grounding, injection resistance, RAG quality, and booking outcomes, with pinned
 baselines a smoke eval checks on every push. A concurrency stress test drives 50
 simultaneous sessions deliberately fighting over the same 10 rooms.
 
 ## Results
 
-Mean of three full runs over the dataset's first 221 cases, the current baseline:
+Mean of three full runs over the 237-case dataset, the current baseline:
 
 | | |
 |---|---|
-| Route accuracy | **99.9%** across 221 multi-turn cases (one safe misroute in three runs) |
-| Consumer quality / grounding (LLM judge, 0-5) | **5.00** / **5.00** |
-| RAG faithfulness / context recall | **95.3%** / **98.7%** |
-| RAG context precision / answer relevancy | **90.4%** / **83.7%** |
+| Route accuracy | **99.8%** across 237 multi-turn cases (three misroutes in three runs) |
+| Consumer quality / grounding (LLM judge, 0-5) | **4.99** / **5.00** |
+| RAG faithfulness / context recall | **95.5%** / **98.6%** |
+| RAG context precision / answer relevancy | **90.0%** / **83.6%** |
 | Booking tool-call success rate | **99.9%** |
 | Stress test: 250 concurrent booking ops | **0 errors** |
-| Latency p50 (info / booking) | **4.6 s** / **4.9 s** |
+| Latency p50 (info / booking) | **5.5 s** / **5.7 s** |
 
 Double-bookings do not appear in the stress test because the schema makes them
 unstorable.

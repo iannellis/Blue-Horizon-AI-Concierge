@@ -121,6 +121,14 @@ class TestTurnOutput:
         turn = TurnOutput.model_validate({"latency_ms": _LATENCY_MS})
         assert turn.latency_ms == _LATENCY_MS  # type: ignore[attr-defined]
 
+    def test_routed_to_matches_any_step_of_a_split_route(self) -> None:
+        """A split route counts for each of its steps and no others."""
+        turn = TurnOutput(route_pred="booking+info")
+        assert turn.routed_to("booking")
+        assert turn.routed_to("info")
+        assert not turn.routed_to("refuse")
+        assert not TurnOutput().routed_to("booking")
+
 
 class TestExampleTurn:
     """ExampleTurn resolves the reference alias chain and typed labels."""

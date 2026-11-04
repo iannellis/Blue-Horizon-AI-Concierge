@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections import Counter
 from itertools import batched
 from pathlib import Path
 from typing import Literal
@@ -33,7 +34,8 @@ class TurnInputModel(BaseModel):
 
     Attributes:
         user: End-user utterance for the turn.
-        expected_route: Expected agent route for the turn (booking/info/refuse).
+        expected_route: Expected agent route for the turn (booking/info/refuse,
+            or both agents' steps joined by "+" in the order asked).
         expect_injection: Whether the turn is an injection attempt.
 
     """
@@ -41,7 +43,7 @@ class TurnInputModel(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     user: str = Field(..., min_length=1)
-    expected_route: Literal["info", "booking", "refuse"]
+    expected_route: Literal["info", "booking", "refuse", "booking+info", "info+booking"]
     expect_injection: bool = False
 
 
@@ -206,10 +208,7 @@ def main() -> None:
         client.create_examples(dataset_id=dataset_id, examples=batch)
         examples_uploaded += len(batch)
 
-    route_counts = {"info": 0, "booking": 0, "refuse": 0}
-    for case in cases:
-        for turn in case.turns:
-            route_counts[turn.expected_route] += 1
+    route_counts = Counter(turn.expected_route for case in cases for turn in case.turns)
 
     print(f"cases_loaded={len(cases)}")  # noqa: T201
     print(f"examples_uploaded={examples_uploaded}")  # noqa: T201
@@ -217,7 +216,9 @@ def main() -> None:
         "routes_seen="
         f"info:{route_counts['info']} "
         f"booking:{route_counts['booking']} "
-        f"refuse:{route_counts['refuse']}",
+        f"refuse:{route_counts['refuse']} "
+        f"booking+info:{route_counts['booking+info']} "
+        f"info+booking:{route_counts['info+booking']}",
     )
 
 

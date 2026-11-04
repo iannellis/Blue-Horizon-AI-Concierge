@@ -481,6 +481,11 @@ def _is_transient_gemini_error(exc: BaseException) -> bool:
 def _rag_is_eligible_turn(turn_output: TurnOutput) -> bool:
     """Determine whether a turn should be scored by Ragas.
 
+    A turn split across both agents is not scored: its reply also carries
+    the booking agent's section and its contexts the room search results,
+    which a reference written for the info part would mark as irrelevant
+    or unsupported. The judge and the reference-subset check still see it.
+
     Args:
         turn_output: Parsed turn output from the run outputs.
 

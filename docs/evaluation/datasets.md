@@ -35,7 +35,7 @@ Each line in a JSONL dataset file is a single JSON object:
 | `case_id` | Yes | harness | Unique string identifier |
 | `tags` | No | harness | Labels used for filtering: `booking`, `info`, `refuse`, `mixed`, `injection`, `attribute_search`, `filters` (every case with an `expected_filters` label carries it). `no_auto_confirm` additionally opts the whole case out of post-turn auto-confirmation |
 | `turns[].user` | Yes | harness | User message text sent to the agent |
-| `turns[].expected_route` | Yes | `eval_routing_accuracy` | Expected route: `booking`, `info`, or `refuse` |
+| `turns[].expected_route` | Yes | `eval_routing_accuracy` | Expected route: `booking`, `info`, or `refuse`, or `booking+info` or `info+booking` for a message split across both agents, in the order the guest asked |
 | `turns[].expect_injection` | No | `eval_injection_tripwires` | `true` if this turn is a prompt-injection attempt |
 | `turns[].injection_grade_rubric` | No | `eval_llm_rubrics` | Rubric text for the LLM judge on injection turns |
 | `turns[].reference` | No | `eval_llm_rubrics`, `eval_info_reference_subset`, `eval_rag_metrics_info_turns` | Ground-truth or reference answer |
@@ -159,6 +159,32 @@ The cases are also scored by the existing booking metrics (tool errors,
 as a context string, so a reply that invents a room or a count the search did not return
 is marked down there.
 
+### Split-routing cases
+
+`case_0226` through `case_0237` cover messages the router splits across both agents, and
+messages it must not split. They are tagged `split_routing`. Every first turn carries
+`expect_no_write`, and every case except the two confirmation cases carries
+`no_auto_confirm`.
+
+| Cases | Request | Expected route |
+|---|---|---|
+| `case_0226`, `case_0227` | A room search, then a hotel question, one referring back to the rooms ("room service with them") | `booking+info` |
+| `case_0228`, `case_0229` | A hotel question, then a room search | `info+booking` |
+| `case_0230`, `case_0231` | A split question about a named room, then "book it" on the next turn | split, then `booking` with `expected_success: true` |
+| `case_0232`, `case_0233` | A prompt injection plus one real request | the real request's single step |
+| `case_0234`, `case_0235` | Two questions that are both about rooms | `booking`, not split |
+| `case_0236`, `case_0237` | A room search plus a question about a facility the hotel does not have | split, with no `reference`: the no-match sentinel only opens a reply whose stated constraints went unmet, so the judge's grounding score covers these |
+
+Route accuracy ignores the order of a split turn's steps, since it measures whether the
+message reached the right agents. `route_confusions` keeps the raw strings, so a turn
+whose sections came back in the wrong order still shows up there. A split turn is scored by every booking evaluator, since its
+route includes `booking`, but not by `eval_rag_metrics_info_turns`: its reply and
+contexts also hold the room search, which a reference written for the info part would
+count against it. The judge and `eval_info_reference_subset` still score its info part.
+Room availability for the dated searches and the two named rooms (1805 and 1830, which no
+other case uses) was checked against `data/pandas/`. `case_0226` and `case_0230` are
+also in the smoke set.
+
 ### Uploading a dataset to LangSmith
 
 ```bash
@@ -198,7 +224,7 @@ ties a baseline to a dataset size any more.
 | `eval_injection_tripwires` | `injection_tripwire_pass` | All injection-labeled turns resisted |
 | `eval_booking_outcome_and_invariants` | `booking_no_unexpected_failure_rate`, `db_invariants_pass`, `db_no_double_booking`, `db_no_null_status`, `booking_tool_errors` | Booking outcomes plus live DB invariant checks |
 | `eval_llm_rubrics` | `judge_consumer_quality`, `judge_injection_resistance`, `judge_grounding_faithfulness` | LLM-as-judge rubric scores (0-5) via Gemini |
-| `eval_rag_metrics_info_turns` | `rag_faithfulness_mean`, `rag_answer_relevancy_mean`, `rag_context_precision_mean`, `rag_context_recall_mean` | Ragas RAG quality metrics for info turns |
+| `eval_rag_metrics_info_turns` | `rag_faithfulness_mean`, `rag_answer_relevancy_mean`, `rag_context_precision_mean`, `rag_context_recall_mean` | Ragas RAG quality metrics for info turns; split turns are skipped |
 | `eval_info_reference_subset` | `info_reference_subset_pass_rate` | Agent response covers expected reference items |
 | `eval_info_expected_filters` | `info_expected_filters_pass_rate` | Parser extracts expected filters from queries |
 | `eval_booking_expected_search` | `booking_expected_search_pass_rate` | Labeled turns' `search_rooms` calls use the expected filters |

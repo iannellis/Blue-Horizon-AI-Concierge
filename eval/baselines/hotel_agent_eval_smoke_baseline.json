@@ -1,6 +1,6 @@
 {
-  "generated_from": "hotel-agent-eval-25_20261017_035005_Small_dataset_with_25_cases",
-  "description": "Baseline metric thresholds for the 25-case smoke eval (propose/confirm booking architecture; typed search_rooms tool, returning 4 rooms by default and up to 15 on request via its limit argument). Two cases are attribute searches: case_0207 (room type, floor, and view, then the cheapest of the matches) and case_0220 (ocean-view suites, then a price cap on the same search); both carry expect_no_write on every turn, and case_0220 accepts either reading of 'suites', matching the full set. strict=true metrics require every individual case score to equal 1.0; strict=false metrics require the mean across cases to be >= min_allowed. Judge and Ragas LLM is gemini-3.5-flash-lite (gemini-2.5-flash was deprecated for this account); booking.llm.reasoning_effort is medium. Ragas context precision uses the hotel-tuned prompt in eval/evaluators/_rag_prompts.py, which scores a chunk as useful when it answers any one clause of a multi-part question, and skips turns whose reference is only the 'nothing matched' sentinel ([ragas].no_match_reference). Ragas calls retry transient Gemini errors, and a failed call is never scored as 0.0, so a 0.0 in the per-turn detail is a real score. This is the first run scored with the two-sided booking outcome check and the relabeled turns; booking_no_unexpected_failure_rate was 1.0 over 29 scored turns. booking_expected_search_pass_rate is averaged over the two labeled cases, whose three labeled turns all passed; min_allowed 0.75 tolerates one missed turn in case_0220 but fails if case_0207's only labeled turn misses. info_expected_filters_pass_rate was 1.0; case_0005's 'I only have 20-minute' turn, which misses intermittently in the full runs, passed here. rag_faithfulness_mean, rag_answer_relevancy_mean, and rag_context_precision_mean are single-run figures on few turns and sit below the full-eval means of 0.96, 0.84, and 0.89; min_allowed for faithfulness and precision matches the full-eval baseline (0.85 / 0.80), which at this sample size leaves less headroom than the full set, so watch precision first if a run trips it.",
+  "generated_from": "hotel-agent-eval-smoke_20261103_235722_Smoke_dataset",
+  "description": "Baseline metric thresholds for the 27-case smoke eval (propose/confirm booking architecture; typed search_rooms tool, returning 4 rooms by default and up to 15 on request via its limit argument; split routing, so one message can reach both agents). Two cases are attribute searches: case_0207 (room type, floor, and view, then the cheapest of the matches) and case_0220 (ocean-view suites, then a price cap on the same search); both carry expect_no_write on every turn, and case_0220 accepts either reading of 'suites', matching the full set. Two cases are split across both agents: case_0226 (presidential suites, then room service 'with them') and case_0230 (a named room plus a breakfast question, then 'book it'); both routed booking+info and passed every check. strict=true metrics require every individual case score to equal 1.0; strict=false metrics require the mean across cases to be >= min_allowed. Judge and Ragas LLM is gemini-3.5-flash-lite; booking.llm.reasoning_effort is medium and the router's is none. Ragas context precision uses the hotel-tuned prompt in eval/evaluators/_rag_prompts.py, which scores a chunk as useful when it answers any one clause of a multi-part question, and skips turns whose reference is only the 'nothing matched' sentinel ([ragas].no_match_reference). Ragas skips split turns, whose reply and contexts also carry the room search. Ragas calls retry transient Gemini errors, and a failed call is never scored as 0.0, so a 0.0 in the per-turn detail is a real score. Route accuracy ignores the order of a split turn's steps. booking_no_unexpected_failure_rate was 1.0 over 17 scored cases. booking_expected_search_pass_rate is averaged over the four labeled cases; min_allowed 0.75 tolerates one missed case. info_expected_filters_pass_rate is 0.9667 because case_0005's 'I only have 20-minute' turn was read as an exact duration, the intermittent miss the full runs also show. rag_* figures are single-run means on 18 cases and sit below the full-eval means; min_allowed for faithfulness and precision matches the full-eval baseline (0.85 / 0.80), which at this sample size leaves less headroom than the full set, so watch precision first if a run trips it. Values from one run; thresholds were left unchanged from the 25-case baseline.",
   "metrics": {
     "route_accuracy": {
       "baseline": 1.0,
@@ -43,7 +43,7 @@
       "strict": false
     },
     "info_expected_filters_pass_rate": {
-      "baseline": 1.0,
+      "baseline": 0.9667,
       "min_allowed": 0.85,
       "strict": false
     },
@@ -68,22 +68,22 @@
       "strict": false
     },
     "rag_faithfulness_mean": {
-      "baseline": 0.9249,
+      "baseline": 0.9439,
       "min_allowed": 0.85,
       "strict": false
     },
     "rag_answer_relevancy_mean": {
-      "baseline": 0.8024,
+      "baseline": 0.8193,
       "min_allowed": 0.70,
       "strict": false
     },
     "rag_context_precision_mean": {
-      "baseline": 0.8425,
+      "baseline": 0.8557,
       "min_allowed": 0.80,
       "strict": false
     },
     "rag_context_recall_mean": {
-      "baseline": 0.9861,
+      "baseline": 1.0,
       "min_allowed": 0.85,
       "strict": false
     }

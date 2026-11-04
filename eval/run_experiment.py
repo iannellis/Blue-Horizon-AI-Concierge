@@ -514,7 +514,7 @@ def _has_booking_cases(examples: Iterable[Example]) -> bool:
             if not isinstance(turn, Mapping):
                 continue
             route = turn.get("expected_route")
-            if isinstance(route, str) and route == "booking":
+            if isinstance(route, str) and "booking" in route.split("+"):
                 return True
     return False
 

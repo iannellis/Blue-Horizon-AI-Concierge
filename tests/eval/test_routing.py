@@ -92,3 +92,15 @@ class TestEvalRoutingAccuracy:
         results = eval_routing_accuracy(run, example)
         confusions_entry = next(r for r in results if r["key"] == "route_confusions")
         assert "info->booking" in confusions_entry["value"]
+
+    def test_split_route_in_either_order_counts_as_correct(self) -> None:
+        """A split turn matches whatever order its steps come back in."""
+        run = _make_run([{"route_pred": "info+booking"}, {"route_pred": "info"}])
+        example = _make_example(
+            [{"expected_route": "booking+info"}, {"expected_route": "booking+info"}],
+        )
+        results = eval_routing_accuracy(run, example)
+        scores = {r["key"]: r["score"] for r in results if "score" in r}
+        assert scores["route_accuracy"] == 0.5  # noqa: PLR2004
+        confusions_entry = next(r for r in results if r["key"] == "route_confusions")
+        assert "booking+info->info+booking" in confusions_entry["value"]

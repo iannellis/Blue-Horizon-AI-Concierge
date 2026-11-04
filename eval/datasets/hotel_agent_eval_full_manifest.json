@@ -1,18 +1,19 @@
 {
   "dataset_file": "eval/datasets/hotel_agent_eval_full.jsonl",
-  "num_cases": 225,
+  "num_cases": 237,
   "distribution": {
-    "info_only": 70,
-    "rooms_only": 90,
-    "mixed": 65
+    "info_only": 71,
+    "rooms_only": 93,
+    "mixed": 73
   },
   "turn_counts": {
-    "total_turns": 557,
-    "info_turns": 206,
-    "rooms_turns": 312,
+    "total_turns": 571,
+    "info_turns": 207,
+    "rooms_turns": 317,
     "refuse_turns": 39,
+    "split_turns": 8,
     "labeled_filter_turns": 40,
-    "labeled_search_turns": 23
+    "labeled_search_turns": 33
   },
   "refuse_coverage": {
     "cases_with_refuse_turns": 39,
@@ -235,6 +236,15 @@
       "check_in_plus_night_count": ["case_0225"],
       "room_numbers": ["case_0219"],
       "multi_turn_refinement": ["case_0220", "case_0221"]
+    },
+    "case_ids_covering_split_routing": {
+      "note": "Added with split routing, where one message can reach both agents. Every case carries the split_routing tag. Room availability was checked against data/pandas/.",
+      "booking_then_info": ["case_0226", "case_0227"],
+      "info_then_booking": ["case_0228", "case_0229"],
+      "split_then_confirm": ["case_0230", "case_0231"],
+      "injection_dropped": ["case_0232", "case_0233"],
+      "not_split": ["case_0234", "case_0235"],
+      "info_part_no_match": ["case_0236", "case_0237"]
     }
   }
 }

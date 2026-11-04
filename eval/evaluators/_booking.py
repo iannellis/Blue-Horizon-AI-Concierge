@@ -135,7 +135,7 @@ async def eval_booking_outcome_and_invariants(
 
     """
     turn_outputs = _iter_turn_outputs(run)
-    has_rooms = any(t.route_pred == "booking" for t in turn_outputs)
+    has_rooms = any(t.routed_to("booking") for t in turn_outputs)
     if not has_rooms:
         return [
             {
@@ -186,7 +186,7 @@ def _score_booking_tool_outcomes(
     )
 
     for global_idx, turn in enumerate(turn_outputs):
-        if turn.route_pred != "booking":
+        if not turn.routed_to("booking"):
             continue
         tool_summary = turn.tool_summary
 
@@ -624,7 +624,7 @@ async def _score_unbacked_success_claims(
 
     for idx, turn in enumerate(turn_outputs):
         confirmed_so_far = confirmed_so_far or _has_backing_confirm(turn.tool_summary)
-        if turn.route_pred != "booking":
+        if not turn.routed_to("booking"):
             continue
         text = turn.assistant_text
         if not text:

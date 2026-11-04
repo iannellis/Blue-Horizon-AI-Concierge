@@ -57,7 +57,11 @@ def eval_routing_accuracy(run: Run, example: Example) -> list[dict[str, Any]]:
             pred = turn_outputs[idx].route_pred
         pred_str = str(pred) if pred is not None else "<missing>"
 
-        if expected_str == pred_str and expected is not None:
+        # A split turn's steps may come back in either order; the confusion key
+        # below keeps the raw strings, so an order flip stays visible there.
+        if expected is not None and sorted(expected_str.split("+")) == sorted(
+            pred_str.split("+"),
+        ):
             correct += 1
         key = f"{expected_str}->{pred_str}"
         confusions[key] = confusions.get(key, 0) + 1

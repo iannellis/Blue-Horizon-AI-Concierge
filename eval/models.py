@@ -165,6 +165,20 @@ class TurnOutput(BaseModel):
             return []
         return [item for item in value if isinstance(item, str) and item]
 
+    def routed_to(self, step: str) -> bool:
+        """Report whether the router sent any part of this turn to ``step``.
+
+        A turn split across both agents has a route such as ``"booking+info"``.
+
+        Args:
+            step: Sub-agent step name, ``"booking"`` or ``"info"``.
+
+        Returns:
+            True when ``step`` is one of the route's ``+``-joined steps.
+
+        """
+        return step in (self.route_pred or "").split("+")
+
 
 class ExampleTurn(BaseModel):
     """One turn of a dataset case: the guest message plus optional labels.
@@ -175,7 +189,8 @@ class ExampleTurn(BaseModel):
             Accepts the legacy aliases ``expected_answer``/``ground_truth``
             for datasets that used those names instead; whichever of the
             three keys is present first (in that order) wins.
-        expected_route: Expected router decision ("info" or "booking").
+        expected_route: Expected router decision: "info", "booking", "refuse",
+            or a split turn's steps joined by "+" in the order asked.
         expected_filters: Expected amenity/service filters for this turn,
             when the case labels one. ``None`` means the case does not
             label filter expectations for this turn.

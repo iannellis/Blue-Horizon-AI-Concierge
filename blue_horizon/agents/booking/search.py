@@ -173,6 +173,13 @@ _RANGE_BOUNDS: Final = (
     ("min_nightly_price", "max_nightly_price"),
 )
 
+# A guest's broad request ("a suite", "an ocean view") also covers the values whose
+# names contain it; the closest single value alone drops rooms they asked for.
+_ANY_OF_COVERAGE: Final = (
+    " List every value that is a kind of what the guest asked for, including each "
+    "value whose name contains the requested one, unless the guest wants only that one."
+)
+
 
 def build_search_args_model(
     meta: RoomsMetadata,
@@ -247,11 +254,17 @@ def build_search_args_model(
         ),
         room_types=(
             room_types,
-            Field(default=None, description="Any of these room types."),
+            Field(
+                default=None,
+                description="Any of these room types." + _ANY_OF_COVERAGE,
+            ),
         ),
         bed_types=(
             bed_types,
-            Field(default=None, description="Any of these bed types."),
+            Field(
+                default=None,
+                description="Any of these bed types." + _ANY_OF_COVERAGE,
+            ),
         ),
         amenities=(
             amenities,
@@ -259,7 +272,10 @@ def build_search_args_model(
         ),
         view_types=(
             view_types,
-            Field(default=None, description="The room must have any of these."),
+            Field(
+                default=None,
+                description="The room must have any of these." + _ANY_OF_COVERAGE,
+            ),
         ),
         min_floor=(
             int | None,

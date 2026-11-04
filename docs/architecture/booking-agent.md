@@ -50,6 +50,12 @@ unknown one is rejected before any SQL runs. The same startup read supplies the 
 range and the availability window, which bound the floor and date fields and are
 rendered into the system prompt. Nothing about the data's dates is hardcoded.
 
+The descriptions of `room_types`, `bed_types`, and `view_types` tell the model to list
+every value that is a kind of what the guest asked for, including each value whose name
+contains the requested one. A broad request such as "a suite" or "an ocean view" then
+reaches the premium variants too. The guidance lives in the tool schema rather than
+`booking.txt`, so a client that brings its own prompt still gets it.
+
 `blue_horizon/agents/booking/search.py` then runs one of two fixed queries, one for a
 dated stay and one without dates, with the filter values bound as parameters. Each
 query returns `[booking.agent].default_search_results` rooms, or as many as the model

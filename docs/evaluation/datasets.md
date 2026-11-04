@@ -103,7 +103,7 @@ stand in for a range: the bounds have to be filters for the right rooms to come 
 
 | Case | Request | Filters checked |
 |---|---|---|
-| `case_0222` | The most expensive suite for a stay | `room_types`, `sort_by` `"price_desc"`; either reading of "suites" |
+| `case_0222` | The most expensive suite for a stay | `room_types` including Presidential Suite, `sort_by` `"price_desc"` |
 | `case_0223` | Rooms between $300 and $500 a night | `min_nightly_price` and `max_nightly_price` together |
 | `case_0224` | A room that sleeps three at most and is no more than 500 square feet | `max_occupancy`, `max_square_feet` |
 
@@ -136,10 +136,15 @@ entries match as follows:
 A labeled turn passes when any one of its `search_rooms` calls matches any one of its
 specs, whatever the call returned; tool errors are scored separately. A labeled turn
 with no search fails. A list of specs exists because some requests have more than one
-reasonable reading. "An ocean view" may be `["Ocean View"]` or `["Ocean View",
-"Panoramic Ocean View"]`, and since lists compare as sets, each accepted reading needs
-its own spec. Likewise "suites" may be `["Suite"]` or `["Suite", "Presidential Suite"]`,
-so `case_0220` carries four specs per turn, one for each combination. A reading is accepted only if it returns rooms that answer the request on
+reasonable reading, and since lists compare as sets, each accepted reading needs its
+own spec. A broad request for a room type, bed type, or view is not one of those: it
+covers every value whose name contains it, so "suites" is `["Suite", "Presidential
+Suite"]` and "an ocean view" is `["Ocean View", "Panoramic Ocean View"]`, and a search
+for the closest single value fails. The exception is `case_0220`'s second turn, which
+adds a $1,200 cap to ocean-view suites: no ocean-view Presidential Suite has a stay
+under it on those dates, and the first turn's results show the agent so, so dropping
+Presidential Suite or Panoramic Ocean View returns the same rooms and every combination
+is accepted. A reading is accepted only if it returns rooms that answer the request on
 Development: "a deluxe room with a balcony" does not accept `["Balcony", "Wraparound
 Balcony"]`, because `amenities` requires every listed value and no Deluxe room has both.
 

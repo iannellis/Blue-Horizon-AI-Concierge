@@ -1123,6 +1123,37 @@ source of parts, brought the full router-only run to 570 of 571 turns. Scoping t
 injection rule's "remaining legitimate intent" to the latest message, tried alongside
 it, made the misroute more frequent and was reverted.
 
+### A search for an ocean view left out the panoramic ones
+
+Asked for the most expensive rooms with an ocean view, the booking agent searched
+`view_types` `["Ocean View"]` alone and never offered a room with a Panoramic Ocean
+View, though every guest asking for an ocean view wants those too. The search ran as
+told. `booking.txt` said to pick "the closest" values to the request, and the closest
+single value to "ocean view" is Ocean View.
+
+**The `room_types`, `bed_types`, and `view_types` descriptions in the tool schema now
+say to list every value that is a kind of what the guest asked for, including each
+value whose name contains the requested one,** and `booking.txt` says to pick every
+matching value rather than the closest. The same sentence in `booking.txt` alone did not
+hold: in a recheck of the fifteen labeled cases that use these filters, the agent still
+searched the bare `Suite` and `Ocean View` values, and only the schema descriptions,
+which the model reads as it fills in each argument, moved it. They are also what an MCP
+client sees, since it brings its own prompt. `amenities` is left out because it
+requires every listed value, so listing a feature with its more specific variant would
+demand a room with both.
+
+The eval let this through because the labels accepted either reading. The ocean-view
+labels accepted `["Ocean View"]` alone, and the "suites" labels accepted `["Suite"]`
+alone after `case_0217` once included Presidential Suites
+([above](#a-follow-up-search-narrowed-to-the-rooms-already-shown)). Both now accept only the inclusive
+reading, which reverses that earlier choice: a guest who asks for a suite without
+saying which has not ruled the Presidential Suite out. The panoramic ocean views are
+all on Presidential Suites, so `case_0220`'s "suites with an ocean view" drops exactly
+those rooms if it narrows either filter. Its second turn, which adds a $1,200 cap,
+accepts every combination: in eight repeats the agent narrowed both filters every time,
+having seen in the first turn's results that no ocean-view Presidential Suite comes in
+under the cap, and on those dates none does.
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

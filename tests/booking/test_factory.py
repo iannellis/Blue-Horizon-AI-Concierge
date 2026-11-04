@@ -112,6 +112,8 @@ class _StubBookingSqlResources:
 
     """
 
+    rooms_metadata = make_rooms_metadata()
+
     def get_system_prompt(self) -> str:
         """Return a fixed stand-in system prompt.
 
@@ -277,6 +279,49 @@ def test_search_rooms_rejects_bad_arguments_as_a_result(
     assert result["status"] == "error"
     assert result["error_kind"] == "invalid_arguments"
     assert "2026-01-04" in result["error"]
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "args"),
+    [
+        (
+            "propose_booking",
+            {"rooms": [{
+                "room_number": 429,
+                "check_in": "2026-02-18", "check_out": "2026-02-20",
+            }]},
+        ),
+        (
+            "propose_modification",
+            {"booking_id": 1, "changes": [{
+                "booking_room_id": 1, "new_room_number": 429,
+                "new_check_in": "2026-02-18", "new_check_out": "2026-02-20",
+            }]},
+        ),
+    ],
+)
+def test_propose_tools_name_the_window_for_out_of_range_dates(
+    booking_config: BookingSqlConfig, tool_name: str, args: dict[str, Any],
+) -> None:
+    """A wrong year is refused with the window, before any DB access.
+
+    The stub has no pools, so reaching the database would raise instead.
+
+    Args:
+        booking_config: Parsed booking configuration fixture.
+        tool_name: The `propose_*` tool under test.
+        args: Model-supplied arguments with dates past the window.
+
+    """
+    tools = _tools_by_name(_build_graph(booking_config))
+    result = asyncio.run(
+        tools[tool_name].ainvoke(
+            args, config={"configurable": {"customer_id": 1, "thread_id": "t"}},
+        ),
+    )
+    assert result["status"] == "error"
+    assert "out of range" in result["error"]
+    assert "2026-01-03" in result["error"]
 
 
 def test_every_tool_has_a_non_empty_description(

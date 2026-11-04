@@ -402,11 +402,6 @@ def _consistency_validator(meta: RoomsMetadata) -> Any:  # noqa: ANN401
         A Pydantic `model_validator(mode="after")` for `create_model`.
 
     """
-    window = (
-        f"Availability covers nights {meta.first_night} through {meta.last_night} "
-        f"(latest check-out {meta.last_check_out})."
-    )
-
     def check(args: Any) -> Any:  # noqa: ANN401
         """Reject argument combinations no query can honor.
 
@@ -430,9 +425,9 @@ def _consistency_validator(meta: RoomsMetadata) -> Any:  # noqa: ANN401
             if check_out <= check_in:
                 msg = "check_out must be after check_in."
                 raise ValueError(msg)
-            if check_in < meta.first_night or check_out > meta.last_check_out:
-                msg = f"Dates {check_in} to {check_out} are out of range. {window}"
-                raise ValueError(msg)
+            problem = date_window_problem(meta, check_in, check_out)
+            if problem is not None:
+                raise ValueError(problem)
         else:
             for price in ("min_nightly_price", "max_nightly_price"):
                 if getattr(args, price) is not None:
@@ -446,6 +441,33 @@ def _consistency_validator(meta: RoomsMetadata) -> Any:  # noqa: ANN401
         return args
 
     return model_validator(mode="after")(check)
+
+
+def date_window_problem(
+    meta: RoomsMetadata, check_in: dt.date, check_out: dt.date,
+) -> str | None:
+    """Describe why a stay falls outside the bookable window, if it does.
+
+    Shared by `search_rooms` and the `propose_*` tools, so a wrong year gets
+    the same message naming the window from either.
+
+    Args:
+        meta: Supplies the bookable date window.
+        check_in: First night of the stay.
+        check_out: Check-out date (exclusive).
+
+    Returns:
+        A message naming the window, or None if the stay is inside it.
+
+    """
+    if meta.first_night <= check_in and check_out <= meta.last_check_out:
+        return None
+    return (
+        f"Dates {check_in} to {check_out} are out of range. Availability covers "
+        f"nights {meta.first_night} through {meta.last_night} "
+        f"(latest check-out {meta.last_check_out}). If the guest gave no year, "
+        "retry with the year that puts these dates inside that period."
+    )
 
 
 async def run_room_search(

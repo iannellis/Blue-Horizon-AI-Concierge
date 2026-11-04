@@ -99,6 +99,13 @@ To book, cancel, or modify, the agent calls a `propose_*` tool. That tool prices
 validates the request and stores it in an in-process `ProposalStore`. Nothing is written
 to the database. The tool returns **only a proposal id, never success text**.
 
+`propose_booking` and `propose_modification` check the dates against the availability
+window before pricing, and refuse with the same message `search_rooms` gives
+(`search.date_window_problem`). That message tells the model to retry with another year
+if the guest gave none. Without the check, a wrong year reached pricing as missing
+nights and came back as "not available for every night requested", which reads as the
+room being taken.
+
 The UI renders a confirmation dialog built strictly from the *proposal's own stored
 fields*, never from the model's chat text. Only a guest clicking **Confirm** calls
 `POST /v1/booking/confirm`, which is the sole caller of the `write_ops` commit functions

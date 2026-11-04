@@ -1154,6 +1154,24 @@ accepts every combination: in eight repeats the agent narrowed both filters ever
 having seen in the first turn's results that no ocean-view Presidential Suite comes in
 under the cap, and on those dates none does.
 
+### A wrong year read as a taken room
+
+Given a date with no year, the booking agent sometimes proposed it in the year after the
+availability window. `propose_booking` priced the stay, found no availability rows for
+those nights, and refused with "Room 429 is not available for every night requested."
+That is the same message as a room someone else holds, so the agent told the guest the
+room was taken and never reconsidered the year. In the full-eval runs after the
+ocean-view change, `case_0124` and `case_0164` each failed this way twice in three runs.
+
+**`propose_booking` and `propose_modification` now check the dates against the window
+before pricing,** and refuse with the message `search_rooms` already gave for the same
+mistake, built by one function in `search.py`. Naming the window alone was not enough:
+in three of twelve repeats the agent got it and then told the guest availability ends
+January 3, 2026, treating its own guess at the year as the guest's request. The message
+now ends by saying to retry with the year that puts the dates inside the window if the
+guest gave none. The check runs in the tool, not in `write_ops`, so the write path is
+unchanged.
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

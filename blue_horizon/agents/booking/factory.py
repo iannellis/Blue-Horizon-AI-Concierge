@@ -35,8 +35,10 @@ from langchain_core.runnables import RunnableConfig  # noqa: TC002
 from langchain_core.tools import StructuredTool, tool
 from psycopg.rows import dict_row
 
+from blue_horizon.agents._lifecycle import require
 from blue_horizon.agents._llm import build_chat_model
 from blue_horizon.agents.booking import write_ops
+from blue_horizon.agents.booking.search import date_window_problem
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -227,6 +229,9 @@ def build_booking_agent(
         """
         customer_id, thread_id = _identity_from_config(config)
         try:
+            _require_bookable_dates(
+                resources, [(r["check_in"], r["check_out"]) for r in rooms],
+            )
             requests = [
                 write_ops.RoomRequest(
                     room_id=await _room_id_for_number(
@@ -342,6 +347,10 @@ def build_booking_agent(
         """
         customer_id, thread_id = _identity_from_config(config)
         try:
+            _require_bookable_dates(
+                resources,
+                [(c["new_check_in"], c["new_check_out"]) for c in changes],
+            )
             booking = await _find_owned_booking(
                 resources.get_write_pool(),
                 customer_id=customer_id,
@@ -504,6 +513,32 @@ async def _room_id_for_number(pool: Any, room_number: int) -> int:  # noqa: ANN4
         msg = f"Room {room_number} does not exist."
         raise write_ops.BookingWriteError(msg)
     return row["room_id"]
+
+
+def _require_bookable_dates(
+    resources: BookingSqlResources, stays: list[tuple[str, str]],
+) -> None:
+    """Refuse a stay outside the availability window, naming the window.
+
+    Without this, a wrong year reaches pricing as missing nights and reads
+    back as the room being taken, so the model never corrects the year.
+
+    Args:
+        resources: Supplies the rooms metadata read at startup.
+        stays: `(check_in, check_out)` ISO date pairs the model supplied.
+
+    Raises:
+        write_ops.BookingWriteError: If any stay falls outside the window.
+        RuntimeError: If `startup_check()` has not run.
+
+    """
+    meta = require(resources.rooms_metadata, "BookingSqlResources")
+    for check_in, check_out in stays:
+        problem = date_window_problem(
+            meta, dt.date.fromisoformat(check_in), dt.date.fromisoformat(check_out),
+        )
+        if problem is not None:
+            raise write_ops.BookingWriteError(problem)
 
 
 def _tool_refusal(

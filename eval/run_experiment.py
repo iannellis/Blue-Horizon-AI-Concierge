@@ -41,6 +41,7 @@ from eval.evaluators import (
     eval_info_reference_subset,
     eval_injection_tripwires,
     eval_llm_rubrics,
+    eval_moderation_flags,
     eval_rag_metrics_info_turns,
     eval_routing_accuracy,
     eval_turn_latency,
@@ -967,6 +968,7 @@ def _build_evaluators(cfg: EvalConfig, *, router_only: bool) -> list[Any]:
         return [eval_routing_accuracy]
     return [
         eval_routing_accuracy,
+        eval_moderation_flags,
         partial(eval_injection_tripwires, cfg=cfg),
         partial(eval_booking_outcome_and_invariants, cfg=cfg),
         partial(eval_booking_expected_search, cfg=cfg),

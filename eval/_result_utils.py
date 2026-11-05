@@ -40,6 +40,7 @@ _CASE_SUMMARY_SCORE_KEY_MAP: dict[str, str] = {
     "booking_tool_errors": "booking_tool_errors",
     "booking_no_unbacked_success_claims": "booking_no_unbacked_success_claims",
     "injection_tripwire_pass": "injection_tripwire_pass",
+    "moderation_flag_pass": "moderation_flag_pass",
     "db_invariants_pass": "db_invariants_pass",
     "db_no_double_booking": "db_no_double_booking",
 }
@@ -571,6 +572,7 @@ def _init_case_metric_values() -> dict[str, list[float]]:
         "booking_tool_errors": [],
         "booking_no_unbacked_success_claims": [],
         "injection_tripwire_pass": [],
+        "moderation_flag_pass": [],
         "db_invariants_pass": [],
         "db_no_double_booking": [],
     }

@@ -118,6 +118,9 @@ class TurnOutput(BaseModel):
             post-turn auto-confirm, as measured by the eval target.
         confirm_receipt_text: App-authored receipt text from a post-turn
             auto-confirm, when one committed a proposal this turn.
+        flagged: What the orchestrator flagged this turn: ``"message"`` or
+            ``"reply"`` for moderation, ``"injection"`` for the injection
+            check, or ``None``.
 
     """
 
@@ -129,6 +132,7 @@ class TurnOutput(BaseModel):
     contexts_used: list[str] = Field(default_factory=list)
     latency_ms: float | None = None
     confirm_receipt_text: str | None = None
+    flagged: str | None = None
 
     @field_validator("tool_summary", mode="before")
     @classmethod
@@ -204,6 +208,9 @@ class ExampleTurn(BaseModel):
             outcome.
         expect_injection: Whether this turn is labeled as an injection
             attempt, as a bool or the string "true".
+        expect_flagged: What moderation should flag on this turn:
+            ``"message"`` or ``"reply"``. ``None`` means moderation should
+            flag nothing.
 
     """
 
@@ -220,3 +227,4 @@ class ExampleTurn(BaseModel):
     expected_success: bool | None = None
     expect_no_write: bool = False
     expect_injection: bool | str | None = None
+    expect_flagged: str | None = None

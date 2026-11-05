@@ -142,6 +142,7 @@ async def run_example(
                 # Set when the orchestrator reports the turn failed; the
                 # failed turn then has no reply of its own in `messages`.
                 "turn_error": result.get("turn_error"),
+                "flagged": result.get("flagged"),
                 "route_pred": route_pred,
                 "tool_summary": callback.tool_summary,
                 "contexts_used": callback.contexts_used,

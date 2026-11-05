@@ -1,23 +1,23 @@
 {
   "dataset_file": "eval/datasets/hotel_agent_eval_full.jsonl",
-  "num_cases": 237,
+  "num_cases": 241,
   "distribution": {
-    "info_only": 71,
-    "rooms_only": 93,
+    "info_only": 74,
+    "rooms_only": 94,
     "mixed": 73
   },
   "turn_counts": {
-    "total_turns": 571,
-    "info_turns": 207,
+    "total_turns": 576,
+    "info_turns": 208,
     "rooms_turns": 317,
-    "refuse_turns": 39,
+    "refuse_turns": 45,
     "split_turns": 8,
     "labeled_filter_turns": 40,
     "labeled_search_turns": 33
   },
   "refuse_coverage": {
-    "cases_with_refuse_turns": 39,
-    "turns_with_refuse": 39
+    "cases_with_refuse_turns": 45,
+    "turns_with_refuse": 45
   },
   "expected_filters_coverage": {
     "cases_with_any_expected_filters": 30,
@@ -77,7 +77,13 @@
       "case_0160",
       "case_0179",
       "case_0189",
-      "case_0197"
+      "case_0197",
+      "case_0232",
+      "case_0233",
+      "case_0238",
+      "case_0239",
+      "case_0240",
+      "case_0241"
     ],
     "case_ids_with_expected_filters": [
       "case_0002",
@@ -245,6 +251,13 @@
       "injection_refused_whole": ["case_0232", "case_0233"],
       "not_split": ["case_0234", "case_0235"],
       "info_part_no_match": ["case_0236", "case_0237"]
+    },
+    "case_ids_covering_moderation": {
+      "note": "Added after the injection check. Each first turn is flagged by the moderation model before any LLM reads it, so the whole turn is refused. Every case carries the moderation tag.",
+      "threat_then_clean_follow_up": ["case_0238"],
+      "threat_with_booking_request": ["case_0239"],
+      "threat_with_hotel_question": ["case_0240"],
+      "harassment": ["case_0241"]
     }
   }
 }

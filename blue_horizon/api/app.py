@@ -366,6 +366,32 @@ def _database_unreachable(exc: write_ops.BookingUnavailableError) -> HTTPExcepti
     )
 
 
+@router.get("/booking/window")
+async def booking_window() -> dict[str, str]:
+    """Return the dates a stay may span, read from the database at startup.
+
+    Returns:
+        dict[str, str]: ISO `first_night` and `last_check_out` (exclusive
+        end, the day after the last night with availability).
+
+    Raises:
+        HTTPException: 503 with a `Retry-After` header during the startup
+            window, before the booking agent has read the dates.
+
+    """
+    meta = orchestrator.get_booking_resources().rooms_metadata
+    if meta is None:
+        raise HTTPException(
+            status_code=503,
+            detail=orchestrator.get_readiness_message(),
+            headers={"Retry-After": str(_chat_retry_after_s())},
+        )
+    return {
+        "first_night": meta.first_night.isoformat(),
+        "last_check_out": meta.last_check_out.isoformat(),
+    }
+
+
 @router.post("/chat")
 async def chat(payload: ChatPayload, request: Request) -> Response:
     """Send a user message to the agent, as JSON or as an SSE stream.

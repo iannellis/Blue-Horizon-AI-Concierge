@@ -11,6 +11,7 @@ orchestrator says failed.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
@@ -391,3 +392,40 @@ class TestChatFailedTurn:
             ]
 
         assert events == [failure]
+
+
+# ---------------------------------------------------------------------------
+# /v1/booking/window
+# ---------------------------------------------------------------------------
+
+
+class TestBookingWindow:
+    """`/v1/booking/window` reports the bookable dates once they are known."""
+
+    def test_returns_503_before_dates_are_read(
+        self, client: TestClient, mock_orchestrator: MagicMock,
+    ) -> None:
+        """No metadata yet (the startup window) is reported as 503."""
+        mock_orchestrator.get_readiness_message.return_value = "Still starting up."
+        mock_orchestrator.get_booking_resources.return_value.rooms_metadata = None
+
+        response = client.get("/v1/booking/window")
+
+        assert response.status_code == _HTTP_SERVICE_UNAVAILABLE
+        assert response.headers["retry-after"]
+
+    def test_returns_first_night_and_exclusive_check_out(
+        self, client: TestClient, mock_orchestrator: MagicMock,
+    ) -> None:
+        """The last check-out is the day after the last night."""
+        meta = mock_orchestrator.get_booking_resources.return_value.rooms_metadata
+        meta.first_night = dt.date(2025, 12, 1)
+        meta.last_check_out = dt.date(2026, 4, 1)
+
+        response = client.get("/v1/booking/window")
+
+        assert response.status_code == _HTTP_OK
+        assert response.json() == {
+            "first_night": "2025-12-01",
+            "last_check_out": "2026-04-01",
+        }

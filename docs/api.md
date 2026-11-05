@@ -7,6 +7,7 @@ The FastAPI backend runs on port `8000` and exposes the following endpoints unde
 |--------|------|-------------|
 | `GET` | `/v1/health` | Returns `{"status": "ok"}` (200) when ready, `{"status": "starting"}` or `{"status": "failed"}` (503) otherwise |
 | `GET` | `/v1/customers` | Lists the seeded guests as `{customer_id, first_name, last_name}`, for guest assignment. 503 during the startup window or while the database is unreachable |
+| `GET` | `/v1/booking/window` | Returns the bookable dates as ISO `{first_night, last_check_out}` (check-out exclusive), shown in the UI sidebar. 503 during the startup window |
 | `GET` | `/v1/bookings?customer_id=` | Lists one guest's reservations (confirmation number, rooms, dates, total, status). 503 during the startup window or while the database is unreachable |
 | `POST` | `/v1/chat` | Send a message. Content-negotiated: `Accept: text/event-stream` streams SSE events, anything else returns one JSON response. 503 while not ready |
 | `POST` | `/v1/booking/confirm` | Commit a pending proposal. The only path that ever writes a booking, cancellation, or modification |

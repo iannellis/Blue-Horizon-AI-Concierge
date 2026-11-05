@@ -30,7 +30,7 @@ import secrets
 import threading
 import tomllib
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -224,6 +224,49 @@ def _fetch_customers() -> list[dict[str, Any]]:
     except Exception as exc:  # noqa: BLE001
         _log_api_failure(exc, "Could not fetch the guest list")
         return []
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _fetch_booking_window_uncached() -> dict[str, str]:
+    """Fetch the dates a stay may span.
+
+    Cached like the guest list, and for the same reason: it changes only on
+    a demo database reload, and a failed lookup is not memoized.
+
+    Returns:
+        dict[str, str]: ISO `first_night` and `last_check_out`.
+
+    Raises:
+        httpx2.HTTPError: If the API could not be reached or returned an
+            error status.
+
+    """
+    response = httpx2.get(
+        f"{_API_BASE}/v1/booking/window", timeout=_DATA_TIMEOUT_S,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def _booking_window_notice() -> str | None:
+    """Describe the bookable dates for the sidebar.
+
+    Returns:
+        str | None: The notice, or ``None`` if the API could not supply the
+        dates, in which case the sidebar simply omits it.
+
+    """
+    try:
+        window = _fetch_booking_window_uncached()
+    except Exception as exc:  # noqa: BLE001
+        _log_api_failure(exc, "Could not fetch the booking window")
+        return None
+    first = date.fromisoformat(window["first_night"])
+    last = date.fromisoformat(window["last_check_out"])
+    return (
+        f"Rooms can be booked for stays from **{first:%B} {first.day}, "
+        f"{first.year}** to check-out on **{last:%B} {last.day}, {last.year}**."
+    )
 
 
 def _fetch_bookings(customer_id: int) -> list[dict[str, Any]] | None:
@@ -1058,6 +1101,8 @@ def _render_sidebar() -> None:
         st.session_state.api_online = online
 
         _render_guest_assignment(api_online=online)
+        if online and (window_notice := _booking_window_notice()):
+            st.caption(window_notice)
         st.divider()
 
         # This reports readiness (`/v1/health`: startup finished), not

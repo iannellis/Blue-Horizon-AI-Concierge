@@ -1,9 +1,9 @@
 {
-  "generated_from": "mean of the three runs in eval/outputs/Full-dataset-26-11-03/: hotel-agent-eval-full_20261104_045130_Full_dataset, hotel-agent-eval-full_20261104_050244_Full_dataset, and hotel-agent-eval-full_20261104_051405_Full_dataset",
-  "description": "Baseline metric thresholds for the full 237-case eval (propose/confirm booking architecture; typed search_rooms tool, returning 4 rooms by default and up to 15 on request via its limit argument; split routing, so one message can reach both agents), including the fifteen attribute-search cases case_0207 to case_0221 and the twelve split-routing cases case_0226 to case_0237. Set from the mean of three runs, since single-run variance on the judge-scored metrics is large. strict=true metrics require every individual case score to equal 1.0; strict=false metrics require the mean across cases to be >= min_allowed. Judge and Ragas LLM is gemini-3.5-flash-lite; booking.llm.reasoning_effort is medium and the router's is none. Ragas context precision uses the hotel-tuned prompt in eval/evaluators/_rag_prompts.py, which scores a chunk as useful when it answers any one clause of a multi-part question, and skips turns whose reference is only the 'nothing matched' sentinel ([ragas].no_match_reference). Ragas skips split turns, whose reply and contexts also carry the room search. Ragas calls retry transient Gemini errors, and a failed call is never scored as 0.0. Route accuracy ignores the order of a split turn's steps. The search_rooms room_types, bed_types, and view_types descriptions say to list every value that is a kind of what the guest asked for, and the labels expect the inclusive reading of 'suites' and 'ocean view'; case_0220's second turn accepts every combination. propose_booking and propose_modification refuse dates outside the availability window with a message that names the window and says to retry with another year if the guest gave none. booking_no_unexpected_failure_rate was 1.0 in all three runs. booking_tool_errors is 0.998 because case_0121's first proposal in one run used 2026, was refused with that message, and was retried with 2025. booking_expected_search_pass_rate is 0.9885 because case_0216 searched view_types ['Ocean View'] alone in one run; min_allowed 0.85 allows about four missed cases out of 29. route_accuracy is 0.9984 from one misroute in each run (case_0153, case_0057, case_0005), and the latter two also cost info_reference_subset_pass_rate. info_expected_filters_pass_rate is 0.9963 because case_0005's 'I only have 20-minute' turn was again read as an exact duration in two runs. judge_consumer_quality misses were single 4.0 scores on case_0153, case_0187, case_0017, and case_0006. booking_no_unbacked_success_claims stays at 1.0; the evaluator accepts a confirm made on the same turn or any earlier turn as backing for a success claim. Thresholds were left unchanged from the 221-case baseline.",
+  "generated_from": "mean of the three runs in eval/outputs/Full-dataset-26-11-04/: hotel-agent-eval-full_20261105_020623_Full_dataset, hotel-agent-eval-full_20261105_021830_Full_dataset, and hotel-agent-eval-full_20261105_023009_Full_dataset",
+  "description": "Baseline metric thresholds for the full 241-case eval (propose/confirm booking architecture; typed search_rooms tool, returning 4 rooms by default and up to 15 on request via its limit argument; split routing, so one message can reach both agents; a moderation check and an injection check on every guest message), including the fifteen attribute-search cases case_0207 to case_0221, the twelve split-routing cases case_0226 to case_0237, and the four moderation cases case_0238 to case_0241. Set from the mean of three runs, since single-run variance on the judge-scored metrics is large. strict=true metrics require every individual case score to equal 1.0; strict=false metrics require the mean across cases to be >= min_allowed. Judge and Ragas LLM is gemini-3.5-flash-lite; booking.llm.reasoning_effort is medium and the router's is none. Ragas context precision uses the hotel-tuned prompt in eval/evaluators/_rag_prompts.py, which scores a chunk as useful when it answers any one clause of a multi-part question, and skips turns whose reference is only the 'nothing matched' sentinel ([ragas].no_match_reference). Ragas skips split turns, whose reply and contexts also carry the room search. Ragas calls retry transient Gemini errors, and a failed call is never scored as 0.0. Route accuracy ignores the order of a split turn's steps. moderation_flag_pass checks that moderation flagged exactly the turns labeled expect_flagged; the judge scores a whole-message refusal of a threat or an injection attempt as correct. propose_booking and propose_modification refuse dates outside the availability window with a message that names the window and says to retry with another year if the guest gave none. route_accuracy, info_reference_subset_pass_rate, info_expected_filters_pass_rate, booking_expected_search_pass_rate, and booking_no_unexpected_failure_rate were 1.0 in all three runs. booking_tool_errors is 0.9919 because case_0121's first proposal used the wrong year for a date given without one, was refused with that message, and was retried with the right year, in all three runs; case_0164 did the same in one run. booking.txt already states how to resolve a missing year; the refusal-and-retry recovers the right booking, so this was left as is. booking_expected_search_pass_rate is scored over 28 labeled cases, one fewer than the 237-case baseline counted. judge_consumer_quality and judge_grounding_faithfulness misses were single sub-5 scores in runs 1 and 2. booking_no_unbacked_success_claims stays at 1.0; the evaluator accepts a confirm made on the same turn or any earlier turn as backing for a success claim. Run after a Python package update. Thresholds were left unchanged from the 237-case baseline.",
   "metrics": {
     "route_accuracy": {
-      "baseline": 0.9984,
+      "baseline": 1.0,
       "min_allowed": 0.95,
       "strict": false
     },
@@ -33,7 +33,7 @@
       "strict": true
     },
     "booking_tool_errors": {
-      "baseline": 0.998,
+      "baseline": 0.9919,
       "min_allowed": 0.85,
       "strict": false
     },
@@ -43,22 +43,22 @@
       "strict": false
     },
     "info_reference_subset_pass_rate": {
-      "baseline": 0.998,
+      "baseline": 1.0,
       "min_allowed": 0.85,
       "strict": false
     },
     "info_expected_filters_pass_rate": {
-      "baseline": 0.9963,
+      "baseline": 1.0,
       "min_allowed": 0.85,
       "strict": false
     },
     "booking_expected_search_pass_rate": {
-      "baseline": 0.9885,
+      "baseline": 1.0,
       "min_allowed": 0.85,
       "strict": false
     },
     "judge_consumer_quality": {
-      "baseline": 4.9944,
+      "baseline": 4.9862,
       "min_allowed": 4.0,
       "strict": false
     },
@@ -68,27 +68,27 @@
       "strict": false
     },
     "judge_grounding_faithfulness": {
-      "baseline": 5.0,
+      "baseline": 4.9945,
       "min_allowed": 4.25,
       "strict": false
     },
     "rag_faithfulness_mean": {
-      "baseline": 0.961,
+      "baseline": 0.9645,
       "min_allowed": 0.85,
       "strict": false
     },
     "rag_answer_relevancy_mean": {
-      "baseline": 0.8412,
+      "baseline": 0.8414,
       "min_allowed": 0.7,
       "strict": false
     },
     "rag_context_precision_mean": {
-      "baseline": 0.8917,
+      "baseline": 0.891,
       "min_allowed": 0.8,
       "strict": false
     },
     "rag_context_recall_mean": {
-      "baseline": 0.9873,
+      "baseline": 0.9884,
       "min_allowed": 0.85,
       "strict": false
     }

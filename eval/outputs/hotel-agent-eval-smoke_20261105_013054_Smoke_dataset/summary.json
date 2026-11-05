@@ -1,18 +1,20 @@
 {
-  "experiment_name": "hotel-agent-eval-smoke_20261104_052723_Smoke_dataset",
+  "experiment_name": "hotel-agent-eval-smoke_20261105_013054_Smoke_dataset",
   "dataset_name": "BlueHorizonEval_smoke",
   "max_concurrency": 10,
-  "started_at": "2026-11-04T05:27:23.537100+00:00",
-  "finished_at": "2026-11-04T05:29:41.583524+00:00",
+  "started_at": "2026-11-05T01:30:54.004435+00:00",
+  "finished_at": "2026-11-05T01:33:20.845765+00:00",
   "upload_results": false,
   "metadata": {
-    "git_sha": "c1b6316ba0e6ae29dddcee30d92294ebe59c843e",
+    "git_sha": "b550fa234f6955067b0cd6109ff5bcc6a99ebe4f",
     "git_dirty": true,
     "dataset_name": "BlueHorizonEval_smoke",
     "max_concurrency": 10,
     "upload_results": false,
     "router_model": "gpt-5.6-luna",
     "router_reasoning_effort": "none",
+    "injection_check_model": "gpt-5.6-luna",
+    "injection_check_reasoning_effort": "none",
     "info_model": "gpt-5.6-luna",
     "info_reasoning_effort": "medium",
     "info_embeddings_model": "text-embedding-3-small",
@@ -21,31 +23,33 @@
     "judge_model": "gemini-3.5-flash-lite",
     "ragas_llm_model": "gemini-3.5-flash-lite",
     "ragas_embedding_model": "gemini-embedding-2",
-    "app_config_sha256": "a6547bbab868",
+    "app_config_sha256": "ac0fc5ce0a0c",
     "eval_config_sha256": "00b81d4ad12d",
-    "router_prompt_sha256": "f6c87ca9299d",
+    "router_prompt_sha256": "f5f52922d1f1",
+    "injection_check_prompt_sha256": "5ddc63ecc3a4",
     "info_system_prompt_sha256": "15001e4dbeb1",
     "info_parser_prompt_sha256": "662fd562b851",
-    "booking_prompt_sha256": "60d2401f5f58"
+    "booking_prompt_sha256": "4e99a2d8b08b"
   },
-  "num_examples": 27,
+  "num_examples": 28,
   "num_failed_runs": 0,
   "case_based_summary": {
     "route_accuracy": 1.0,
     "booking_no_unexpected_failure_rate": 1.0,
-    "consumer_quality": 4.962962962962963,
+    "consumer_quality": 5.0,
     "grounding": 5.0,
     "injection_resistance": 5.0,
-    "rag_faithfulness_mean": 0.9535573648361004,
-    "rag_answer_relevancy_mean": 0.8109261230235503,
-    "rag_context_precision_mean": 0.8634592398025647,
-    "rag_context_recall_mean": 0.9861111111111112,
+    "rag_faithfulness_mean": 0.969134402097197,
+    "rag_answer_relevancy_mean": 0.8204792360106308,
+    "rag_context_precision_mean": 0.8713848747330312,
+    "rag_context_recall_mean": 1.0,
     "info_reference_subset_pass_rate": 1.0,
     "info_expected_filters_pass_rate": 0.9666666666666666,
     "booking_expected_search_pass_rate": 1.0,
     "booking_tool_errors": 1.0,
     "booking_no_unbacked_success_claims": 1.0,
     "injection_tripwire_pass": 1.0,
+    "moderation_flag_pass": 1.0,
     "db_invariants_pass": 1.0,
     "db_no_double_booking": 1.0
   },
@@ -56,36 +60,36 @@
     "info_expected_filters_pass_rate": 0.9629629629629629,
     "booking_expected_search_pass_rate": 1.0,
     "booking_tool_errors": 1.0,
-    "rag_faithfulness_mean": 0.9460666172290199,
-    "rag_answer_relevancy_mean": 0.7943815647333611,
-    "rag_context_precision_mean": 0.879209498818023,
-    "rag_context_recall_mean": 0.9838709677419355
+    "rag_faithfulness_mean": 0.9633471024904214,
+    "rag_answer_relevancy_mean": 0.8071392372541286,
+    "rag_context_precision_mean": 0.8849295732517559,
+    "rag_context_recall_mean": 1.0
   },
   "latency_quantiles_ms": {
     "booking": {
-      "p50_ms": 5975.7,
-      "p95_ms": 8042.5,
-      "p99_ms": 9170.1
+      "p50_ms": 6419.7,
+      "p95_ms": 8026.8,
+      "p99_ms": 10601.5
     },
     "booking+info": {
-      "p50_ms": 8640.3,
-      "p95_ms": 8810.5,
-      "p99_ms": 8825.6
+      "p50_ms": 7817.6,
+      "p95_ms": 8984.0,
+      "p99_ms": 9087.6
     },
     "info": {
-      "p50_ms": 5031.4,
-      "p95_ms": 8923.1,
-      "p99_ms": 9697.0
+      "p50_ms": 5649.7,
+      "p95_ms": 8563.3,
+      "p99_ms": 10609.6
     },
     "refuse": {
-      "p50_ms": 1364.4,
-      "p95_ms": 1602.8,
-      "p99_ms": 1653.3
+      "p50_ms": 1590.4,
+      "p95_ms": 2232.0,
+      "p99_ms": 2543.1
     },
     "all": {
-      "p50_ms": 5569.9,
-      "p95_ms": 8489.1,
-      "p99_ms": 9756.2
+      "p50_ms": 5684.7,
+      "p95_ms": 9113.6,
+      "p99_ms": 11235.2
     }
   }
 }

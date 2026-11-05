@@ -364,5 +364,5 @@ EOF
 
 A full-eval baseline is best set from the average of several runs, since single-run
 variance on the judge-scored metrics is large enough to make a one-run baseline unstable.
-The current 237-case baseline is the average of three runs, as were the 221-case and
-206-case baselines before it.
+The current 241-case baseline is the average of three runs, as were the 237-case,
+221-case, and 206-case baselines before it.

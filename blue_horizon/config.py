@@ -414,14 +414,14 @@ class LoadDataConfig(FrozenModel):
 
 
 class OrchestrationLlmConfig(FrozenModel):
-    """LLM configuration for the router component.
+    """LLM configuration for the router or the injection check.
 
     Attributes:
-        model: Router chat model identifier.
+        model: Chat model identifier.
         reasoning_effort: Reasoning effort hint.
-        timeout_s: Network timeout for router LLM calls.
-        max_retries: Retry budget for transient router failures.
-        max_output_tokens: Most tokens one router response may generate.
+        timeout_s: Network timeout for one LLM call.
+        max_retries: Retry budget for transient failures.
+        max_output_tokens: Most tokens one response may generate.
 
     """
 
@@ -439,6 +439,8 @@ class OrchestrationRuntimeConfig(FrozenModel):
         init_retry_base_s: Initial backoff between initialization attempts.
         init_retry_max_s: Maximum backoff between retries.
         router_timeout_s: Timeout for the router decision step.
+        injection_check_timeout_s: Timeout for the injection check node,
+            which runs alongside the router.
         info_timeout_s: Timeout for the info agent node.
         booking_timeout_s: Timeout for the booking agent node.
         llm_concurrency: Maximum number of concurrent LLM pipeline executions.
@@ -460,6 +462,7 @@ class OrchestrationRuntimeConfig(FrozenModel):
     init_retry_base_s: float
     init_retry_max_s: float
     router_timeout_s: float
+    injection_check_timeout_s: float
     info_timeout_s: float
     booking_timeout_s: float
     llm_concurrency: Annotated[int, Field(ge=1)] = 10
@@ -488,11 +491,14 @@ class OrchestrationPromptsConfig(FrozenModel):
     Attributes:
         folder: Directory relative to the package containing router prompts.
         orchestration_prompt_filename: Router system prompt filename.
+        injection_check_prompt_filename: Injection check system prompt
+            filename.
 
     """
 
     folder: str
     orchestration_prompt_filename: str
+    injection_check_prompt_filename: str
 
 
 class MessagesConfig(FrozenModel):
@@ -533,6 +539,7 @@ class OrchestrationConfig(FrozenModel):
 
     Attributes:
         llm: Router LLM settings.
+        injection_check_llm: Injection check LLM settings.
         orchestration: Runtime retry/timeouts.
         moderation: Moderation check settings.
         prompts: Prompt file metadata.
@@ -541,6 +548,7 @@ class OrchestrationConfig(FrozenModel):
     """
 
     llm: OrchestrationLlmConfig
+    injection_check_llm: OrchestrationLlmConfig
     orchestration: OrchestrationRuntimeConfig
     moderation: OrchestrationModerationConfig
     prompts: OrchestrationPromptsConfig

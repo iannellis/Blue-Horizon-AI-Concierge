@@ -295,9 +295,9 @@ def _experiment_metadata(
 def _model_metadata(app_cfg: AppConfig, cfg: EvalConfig) -> dict[str, object]:
     """Capture every LLM/embedding model actually used by the run.
 
-    Includes the reasoning-effort hint for the three OpenAI chat models
-    (router, info, booking); the judge and Ragas models are Gemini-backed,
-    and this codebase has no reasoning-effort knob for them.
+    Includes the reasoning-effort hint for the four OpenAI chat models
+    (router, injection check, info, booking); the judge and Ragas models are
+    Gemini-backed, and this codebase has no reasoning-effort knob for them.
 
     Args:
         app_cfg: Loaded application configuration (router/info/booking models).
@@ -310,6 +310,10 @@ def _model_metadata(app_cfg: AppConfig, cfg: EvalConfig) -> dict[str, object]:
     return {
         "router_model": app_cfg.orchestration.llm.model,
         "router_reasoning_effort": app_cfg.orchestration.llm.reasoning_effort,
+        "injection_check_model": app_cfg.orchestration.injection_check_llm.model,
+        "injection_check_reasoning_effort": (
+            app_cfg.orchestration.injection_check_llm.reasoning_effort
+        ),
         "info_model": app_cfg.info.llm.model,
         "info_reasoning_effort": app_cfg.info.llm.reasoning_effort,
         "info_embeddings_model": app_cfg.info.embeddings.model,
@@ -371,6 +375,14 @@ def _prompt_fingerprint_metadata(app_cfg: AppConfig) -> dict[str, object]:
                 prompt_resource_path(
                     orchestration_prompts.folder,
                     orchestration_prompts.orchestration_prompt_filename,
+                ),
+            ),
+        ),
+        "injection_check_prompt_sha256": _hash_text(
+            load_packaged_text(
+                prompt_resource_path(
+                    orchestration_prompts.folder,
+                    orchestration_prompts.injection_check_prompt_filename,
                 ),
             ),
         ),

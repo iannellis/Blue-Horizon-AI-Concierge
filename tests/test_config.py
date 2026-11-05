@@ -35,10 +35,18 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
             "max_retries": 2,
             "max_output_tokens": 8000,
         },
+        "injection_check_llm": {
+            "model": "gpt-5-nano",
+            "reasoning_effort": "none",
+            "timeout_s": 15.0,
+            "max_retries": 2,
+            "max_output_tokens": 100,
+        },
         "orchestration": {
             "init_retry_base_s": 2.0,
             "init_retry_max_s": 10.0,
             "router_timeout_s": 30.0,
+            "injection_check_timeout_s": 30.0,
             "info_timeout_s": 60,
             "booking_timeout_s": 60,
         },
@@ -50,6 +58,7 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
         "prompts": {
             "folder": "system_prompts",
             "orchestration_prompt_filename": "orchestration_prompt.txt",
+            "injection_check_prompt_filename": "injection_check.txt",
         },
         "messages": {
             "refusal": (

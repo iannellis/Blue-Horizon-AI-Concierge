@@ -7,7 +7,7 @@ The file is structured into sections that map to the Pydantic models in
 
 | Section | Controls |
 |---------|----------|
-| `[orchestration]` | Router LLM, moderation model, timeouts, retry backoff, concurrency limit, history length |
+| `[orchestration]` | Router and injection check LLMs, moderation model, timeouts, retry backoff, concurrency limit, history length |
 | `[chat]` | The longest message a guest may send, and how many messages one visitor may send per hour |
 | `[info]` | Information agent LLM, embeddings model, Redis tuning, retrieval `top_k` |
 | `[booking]` | Booking agent LLM, search bounds, DB pool settings |
@@ -26,7 +26,7 @@ Neon branch management (project ID, branch name, reset tuning) lives entirely in
 pipeline executions. It prevents tokens-per-minute exhaustion under high concurrency,
 which otherwise fails every in-flight request at once rather than making a few wait.
 The value is sized against the OpenAI project's rate limits of 10M tokens and 10,000
-requests per minute. A turn makes three or four model calls of roughly 20k input tokens
+requests per minute. A turn makes four or five model calls of roughly 20k input tokens
 in total and takes about 5 seconds, so 25 concurrent turns come to about 6M tokens per
 minute, leaving room for longer turns and for the embedding calls that share the quota.
 The eval judge runs on Gemini outside this semaphore, so its rate limits do not bear on
@@ -40,6 +40,16 @@ generating, and each of the `max_retries` asks for another full response. The ro
 gets less because it runs with no reasoning and returns one route. A response that
 reaches the cap comes back cut short, so keep the info and booking values well above
 what a medium-effort answer needs.
+
+**`[orchestration.injection_check_llm]`** configures the injection check that runs
+beside the router on every guest message that passes moderation, with the same five
+fields as `[orchestration.llm]`. It defaults to the router's model with reasoning effort
+`none`, the setting it was measured at, and `max_output_tokens` 100, since it returns a
+single boolean. Its prompt is
+`[orchestration.prompts].injection_check_prompt_filename` (default
+`injection_check.txt`), and `[orchestration.orchestration].injection_check_timeout_s`
+(default 30) caps the node's wall-clock time. A check that fails after its retries
+fails the turn. See [Orchestration](../architecture/orchestration.md#injection-check).
 
 **`[orchestration.moderation]`** sets the OpenAI moderation model (default
 `omni-moderation-latest`) that checks every guest message before the router and every

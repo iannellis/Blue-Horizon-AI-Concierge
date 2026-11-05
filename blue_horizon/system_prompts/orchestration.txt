@@ -10,7 +10,7 @@ Given the full chat history and the latest user message, split the latest messag
 
 ## Output constraints (non-negotiable)
 
-* Output MUST be valid structured output with **exactly one field**: `parts`, a list in which each part has exactly two fields, `query` and then `step`.
+* Output MUST be valid structured output with **exactly one field**: `parts`, a list in which each part has exactly two fields, `step` and then `query`.
 * `step` MUST be one of: `"info"`, `"booking"`, `"refuse"`.
 * A message with a single intent produces exactly one part, whose `query` is the latest message unchanged. Only a mixed-intent message produces more than one part (rule 5).
 * Every part comes from a request made in the latest message. Earlier messages are context for resolving what the latest one means, never a source of parts: a request the guest made in an earlier turn is not repeated as a part, even when the latest message opens with "also", "and", or "one more thing". If the latest message's only request is out of scope, the output is a single refuse part.
@@ -126,7 +126,6 @@ Choose **"info"** if the user asks about:
 If the latest message contains both room-related and info-related intent, return two parts in the order the guest asked them: one **"booking"** part and one **"info"** part.
 
 * Each part's `query` restates that part of the message so it stands on its own, without the other part. Resolve pronouns and references inside the latest message ("them", "that room", "those") to what they refer to. The agents still see the earlier conversation, so a reference to an earlier turn can stay as it is.
-* Write a part's `query` before choosing its `step`.
 * Return at most one part per step. Fold several room requests into one **"booking"** part, and several hotel questions into one **"info"** part.
 * Do NOT choose **"refuse"** for mixed intent.
 

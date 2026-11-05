@@ -851,6 +851,29 @@ class TestTurnFinishedLog:
         assert isinstance(record.__dict__["duration_ms"], int)
         assert "route=booking outcome=ok" in record.getMessage()
 
+    def test_stream_injection_gate_overrides_the_router_route(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A turn the injection gate refused logs ``refuse``, not the router's route."""
+        router_end = {
+            "event": "on_chain_end",
+            "name": "router",
+            "metadata": {"langgraph_node": "router"},
+            "data": {"output": {"route": "info"}},
+        }
+        gate_end = {
+            "event": "on_chain_end",
+            "name": "injection_gate",
+            "metadata": {"langgraph_node": "injection_gate"},
+            "data": {"output": {"route": "refuse", "parts": [], "turn_error": None}},
+        }
+        manager = _make_manager(agent=_mock_agent([router_end, gate_end]))
+
+        with caplog.at_level(logging.INFO, logger=_MANAGER_LOGGER):
+            asyncio.run(_run_stream(manager))
+
+        assert _turn_finished_record(caplog).__dict__["route"] == "refuse"
+
     def test_stream_failure_before_routing_reports_error_route(
         self, caplog: pytest.LogCaptureFixture,
     ) -> None:

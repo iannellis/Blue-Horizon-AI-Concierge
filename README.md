@@ -20,7 +20,8 @@ it to one or both of two specialised sub-agents:
 - **Booking agent** searches room availability with a typed, **read-only** search tool,
   and proposes bookings, cancellations, and modifications for the guest to confirm.
 
-Anything outside those two jobs is refused.
+Anything outside those two jobs is refused, and a separate injection check, run beside
+the router, refuses any message that tries to manipulate the assistant.
 
 ![Orchestration diagram](docs/images/orchestration.png)
 

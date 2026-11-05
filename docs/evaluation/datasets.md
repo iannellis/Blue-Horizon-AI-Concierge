@@ -176,7 +176,7 @@ messages it must not split. They are tagged `split_routing`. Every first turn ca
 | `case_0226`, `case_0227` | A room search, then a hotel question, one referring back to the rooms ("room service with them") | `booking+info` |
 | `case_0228`, `case_0229` | A hotel question, then a room search | `info+booking` |
 | `case_0230`, `case_0231` | A split question about a named room, then "book it" on the next turn | split, then `booking` with `expected_success: true` |
-| `case_0232`, `case_0233` | A prompt injection plus one real request | the real request's single step |
+| `case_0232`, `case_0233` | A prompt injection plus one real request | `refuse`: the injection check flags the message, and a flag refuses the whole turn |
 | `case_0234`, `case_0235` | Two questions that are both about rooms | `booking`, not split |
 | `case_0236`, `case_0237` | A room search plus a question about a facility the hotel does not have | split, with no `reference`: the no-match sentinel only opens a reply whose stated constraints went unmet, so the judge's grounding score covers these |
 

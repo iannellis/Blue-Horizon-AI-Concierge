@@ -16,32 +16,33 @@ if TYPE_CHECKING:
 type RouteStep = Literal["info", "booking", "refuse"]
 type PartStep = Literal["info", "booking"]
 type TurnErrorCode = Literal["timeout", "internal", "unavailable", "quota"]
-type FlaggedText = Literal["message", "reply"]
+type FlaggedText = Literal["message", "reply", "injection"]
 
 
 class RoutePart(BaseModel):
     """One piece of the guest's message and the step that should answer it.
 
     Attributes:
-        query: That piece of the message, restated to stand on its own.
         step: The sub-agent that should answer it, or ``"refuse"``.
+        query: That piece of the message, restated to stand on its own.
 
     Notes:
-        - ``query`` is declared before ``step`` so the model writes the
-          standalone question before classifying it.
+        - ``step`` is declared before ``query``. With the query first, the
+          router refused injection attempts less often, sending some to a
+          sub-agent instead.
 
     """
 
+    step: RouteStep = Field(
+        ...,
+        description="The step that should answer this part.",
+    )
     query: str = Field(
         ...,
         description=(
             "This part of the guest's latest message, restated so it can be "
             "understood without the rest of the message."
         ),
-    )
-    step: RouteStep = Field(
-        ...,
-        description="The step that should answer this part.",
     )
 
 
@@ -66,6 +67,18 @@ class RouteDecision(BaseModel):
             "One entry per agent the guest's message needs, in the order asked."
         ),
     )
+
+
+class InjectionCheck(BaseModel):
+    """Structured output of the injection check.
+
+    Attributes:
+        injection: Whether any part of the guest's latest message tries to
+            manipulate the assistant instead of asking for hotel help.
+
+    """
+
+    injection: bool
 
 
 class PartInput(TypedDict):
@@ -147,11 +160,18 @@ class ConversationState(MessagesState, total=False):
             turn resets it, so a value from an earlier turn never leaks
             forward. A failed turn is reported to the client as an ``error``
             event, not as an apology written into history.
-        flagged: Which text of the current turn the moderation check
-            flagged, or ``None`` if neither was. ``"message"`` when the
-            guest's message was flagged and the turn was refused before the
-            router ran, ``"reply"`` when a sub-agent's reply was flagged and
-            replaced with the refusal. Reset at the start of every turn.
+        flagged: Which check flagged the current turn, or ``None`` if none
+            did. ``"message"`` when moderation flagged the guest's message
+            and the turn was refused before the router ran, ``"injection"``
+            when the injection check flagged it and the whole turn was
+            refused, ``"reply"`` when moderation flagged a sub-agent's reply
+            and it was replaced with the refusal. Reset at the start of
+            every turn.
+        injection_error: Why the injection check failed, or ``None`` if it
+            did not. Kept apart from ``turn_error`` because the check runs
+            in the same step as the router, which writes ``turn_error``
+            itself; ``injection_gate`` merges the two. Reset at the start
+            of every turn.
 
     """
 
@@ -161,6 +181,7 @@ class ConversationState(MessagesState, total=False):
     failed_parts: list[PartStep]
     turn_error: TurnErrorCode | None
     flagged: FlaggedText | None
+    injection_error: TurnErrorCode | None
 
 
 def turn_error_message(messages: MessagesConfig, turn_error: str) -> str:

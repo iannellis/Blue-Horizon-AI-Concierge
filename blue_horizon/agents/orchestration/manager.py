@@ -434,11 +434,14 @@ class OrchestrationManager:
                 elif event_type == "on_chain_end" and event.get("name") in {
                     "moderate_message",
                     "router",
+                    "injection_gate",
                 }:
                     # Matched on the event's own name: the router's model call
                     # carries the same `langgraph_node` metadata. A turn whose
                     # message moderation flagged or failed never reaches the
-                    # router, and takes its route from the check instead.
+                    # router, and takes its route from the check instead. The
+                    # injection gate, which ends after the router, overrides
+                    # the router's route only when it refuses or fails the turn.
                     router_output = cast(
                         "dict[str, Any]", event["data"].get("output") or {},
                     )
@@ -650,7 +653,8 @@ def _turn_outcome(result: dict[str, Any]) -> str:
 
     Returns:
         The turn's ``turn_error`` code if it failed, ``"flagged_message"``
-        or ``"flagged_reply"`` if moderation flagged it, ``"partial"`` if
+        or ``"flagged_reply"`` if moderation flagged it,
+        ``"flagged_injection"`` if the injection check did, ``"partial"`` if
         one of its parts failed while another was answered, otherwise
         ``"ok"``.
 

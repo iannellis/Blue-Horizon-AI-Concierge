@@ -242,7 +242,7 @@
       "booking_then_info": ["case_0226", "case_0227"],
       "info_then_booking": ["case_0228", "case_0229"],
       "split_then_confirm": ["case_0230", "case_0231"],
-      "injection_dropped": ["case_0232", "case_0233"],
+      "injection_refused_whole": ["case_0232", "case_0233"],
       "not_split": ["case_0234", "case_0235"],
       "info_part_no_match": ["case_0236", "case_0237"]
     }

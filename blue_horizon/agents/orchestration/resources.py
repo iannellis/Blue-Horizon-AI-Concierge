@@ -13,7 +13,11 @@ from blue_horizon.agents._llm import build_chat_model
 from blue_horizon.agents.booking import BookingSqlResources, build_booking_agent
 from blue_horizon.agents.exceptions import ConfigurationError, OperationalError
 from blue_horizon.agents.information import InfoRagResources, build_info_agent
-from blue_horizon.agents.orchestration.models import RouteDecision, RoutePart
+from blue_horizon.agents.orchestration.models import (
+    InjectionCheck,
+    RouteDecision,
+    RoutePart,
+)
 from blue_horizon.agents.orchestration.moderation import Moderator
 from blue_horizon.agents.prompt_utils import load_packaged_text, prompt_resource_path
 from blue_horizon.config import load_app_config
@@ -39,8 +43,8 @@ class OrchestrationResources:
 
     Responsibilities:
         - Load orchestration configuration.
-        - Resolve and load the orchestration system prompt.
-        - Construct and hold the router LLM runnable.
+        - Resolve and load the router and injection check system prompts.
+        - Construct and hold the router and injection check LLM runnables.
         - Construct and hold the moderation client.
         - Construct and hold sub-resources (InfoRagResources, BookingSqlResources).
         - Build and hold the compiled sub-agents for info + rooms.
@@ -60,6 +64,8 @@ class OrchestrationResources:
     config: OrchestrationConfig
     _system_prompt_resource: str
     _system_prompt: str | None
+    _injection_check_prompt_resource: str
+    _injection_check_prompt: str | None
 
     _info_config: InfoRagConfig
     info_resources: InfoRagResources
@@ -70,6 +76,7 @@ class OrchestrationResources:
     _booking_agent: CompiledStateGraph | None
 
     router: Runnable[list[BaseMessage], RouteDecision]
+    injection_checker: Runnable[list[BaseMessage], InjectionCheck]
     moderator: Moderator
     checkpointer: MemorySaver
 
@@ -82,8 +89,9 @@ class OrchestrationResources:
         """Initialize orchestration resources.
 
         This constructor performs only lightweight work: it reads the orchestration
-        TOML, resolves the orchestration prompt path, constructs resource objects,
-        and builds the router runnable and the moderation client.
+        TOML, resolves the router and injection check prompt paths, constructs
+        resource objects, and builds the router and injection check runnables
+        and the moderation client.
 
         Heavy work (connectivity checks, agent compilation) occurs in startup_check().
 
@@ -114,6 +122,11 @@ class OrchestrationResources:
             self.config.prompts.orchestration_prompt_filename,
         )
         self._system_prompt = None
+        self._injection_check_prompt_resource = prompt_resource_path(
+            self.config.prompts.folder,
+            self.config.prompts.injection_check_prompt_filename,
+        )
+        self._injection_check_prompt = None
 
         self._info_config = app_config.info
         self.info_resources = InfoRagResources(
@@ -135,6 +148,12 @@ class OrchestrationResources:
             "Runnable[list[BaseMessage], RouteDecision]",
             llm.with_structured_output(RouteDecision, method="function_calling"),
         )
+        self.injection_checker = cast(
+            "Runnable[list[BaseMessage], InjectionCheck]",
+            build_chat_model(self.config.injection_check_llm).with_structured_output(
+                InjectionCheck, method="json_schema",
+            ),
+        )
         self.moderator = Moderator(self.config.moderation)
 
         # RoutePart is the only non-builtin type in checkpointed state; LangGraph
@@ -147,7 +166,8 @@ class OrchestrationResources:
         """Validate dependencies and build sub-agents.
 
         This method should run once during FastAPI startup (or inside the
-        OrchestrationManager retry loop). It loads the orchestration prompt, runs
+        OrchestrationManager retry loop). It loads the router and injection
+        check prompts, runs
         each sub-resource startup check, and builds the compiled info/rooms agents.
 
         Raises:
@@ -163,6 +183,9 @@ class OrchestrationResources:
         """
         try:
             self._system_prompt = load_packaged_text(self._system_prompt_resource)
+            self._injection_check_prompt = load_packaged_text(
+                self._injection_check_prompt_resource,
+            )
 
             await self.info_resources.startup_check()
             self._info_agent = build_info_agent(
@@ -202,6 +225,7 @@ class OrchestrationResources:
 
         """
         self._system_prompt = None
+        self._injection_check_prompt = None
         self._info_agent = None
         self._booking_agent = None
 
@@ -216,6 +240,18 @@ class OrchestrationResources:
 
         """
         return require(self._system_prompt, "System prompt")
+
+    def get_injection_check_prompt(self) -> str:
+        """Return the injection check system prompt text.
+
+        Returns:
+            Injection check prompt content.
+
+        Raises:
+            RuntimeError: If startup_check() has not been called.
+
+        """
+        return require(self._injection_check_prompt, "Injection check prompt")
 
     def get_info_agent(self) -> CompiledStateGraph:
         """Return the compiled info agent.

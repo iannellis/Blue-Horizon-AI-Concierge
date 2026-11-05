@@ -13,12 +13,26 @@ max_retries = 2
 # Most tokens one router response may generate
 max_output_tokens = 1000
 
+[orchestration.injection_check_llm]
+# Model for the injection check, run alongside the router on every guest message
+model = "gpt-5.6-luna"
+# Reasoning effort: "none", "minimal", "low", "medium", or "high"
+reasoning_effort = "none"
+# Per-request network timeout for the LLM client
+timeout_s = 15.0
+# Retry count for transient provider/network errors
+max_retries = 2
+# Most tokens one check response may generate
+max_output_tokens = 100
+
 [orchestration.orchestration]
 # Initialization retry policy for dependency startup
 init_retry_base_s = 2.0
 init_retry_max_s = 10.0
 # Wall-clock cap for the router node (wraps the router LLM call)
 router_timeout_s = 30.0
+# Wall-clock cap for the injection check node (wraps the check's LLM call)
+injection_check_timeout_s = 30.0
 # Wall-clock cap for the info node (wraps the info LLM call)
 info_timeout_s = 60
 # Wall-clock cap for the booking node (wraps the booking LLM call)
@@ -50,6 +64,8 @@ max_turns_per_hour = 10
 folder = "system_prompts"
 # Router system prompt filename within the prompts folder
 orchestration_prompt_filename = "orchestration.txt"
+# Injection check system prompt filename within the prompts folder
+injection_check_prompt_filename = "injection_check.txt"
 
 [orchestration.messages]
 # Shown when the router chooses "refuse"

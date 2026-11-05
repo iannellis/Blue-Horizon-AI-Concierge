@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
     from blue_horizon.agents.orchestration.models import (
+        InjectionCheck,
         PartStep,
         RouteDecision,
         TurnErrorCode,
@@ -70,7 +71,9 @@ _TURN_ERROR_PRIORITY: tuple[TurnErrorCode, ...] = (
     "internal",
 )
 
-type _AfterModeration = Literal["router", "refuse", "error"]
+type _AfterModeration = (
+    list[Literal["router", "injection_check"]] | Literal["refuse", "error"]
+)
 
 
 def build_orchestration_agent(  # noqa: C901, PLR0915
@@ -170,22 +173,30 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
         """Check the guest's message before any model reads it.
 
         This is the first node of every turn, so it also clears
-        ``turn_error``, ``flagged``, and ``failed_parts``: an earlier turn's
-        values, still held in the checkpoint, must not be reported again.
+        ``turn_error``, ``flagged``, ``injection_error``, and
+        ``failed_parts``: an earlier turn's values, still held in the
+        checkpoint, must not be reported again.
 
         Args:
             state: Current conversation state, ending with the guest's
                 message.
 
         Returns:
-            State patch with ``turn_error``, ``flagged``, and ``failed_parts``
-            reset. A flagged message also sets ``flagged`` to ``"message"``,
+            State patch with ``turn_error``, ``flagged``, ``injection_error``,
+            and ``failed_parts`` reset. A flagged message also sets
+            ``flagged`` to ``"message"``,
             routes the turn to ``refuse``, and replaces the message in
             history with a placeholder carrying the same id. A failed check
             sets ``turn_error`` and the ``error`` route instead.
 
         """
         guest_message = state["messages"][-1]
+        reset: dict[str, Any] = {
+            "turn_error": None,
+            "flagged": None,
+            "injection_error": None,
+            "failed_parts": [],
+        }
         try:
             flagged = await resources.moderator.flagged(
                 guest_message.text,
@@ -193,19 +204,17 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
             )
         except Exception as exc:  # noqa: BLE001
             return {
+                **reset,
                 "route": "error",
                 "turn_error": _record_turn_failure("Message moderation", exc),
-                "flagged": None,
-                "failed_parts": [],
             }
         if not flagged:
-            return {"turn_error": None, "flagged": None, "failed_parts": []}
+            return reset
         return {
+            **reset,
             "messages": [HumanMessage(content=_WITHHELD_MESSAGE, id=guest_message.id)],
             "route": "refuse",
-            "turn_error": None,
             "flagged": "message",
-            "failed_parts": [],
         }
 
     async def router_node(state: ConversationState) -> dict[str, Any]:
@@ -248,6 +257,48 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
         route = "+".join(part.step for part in parts) or "refuse"
         logger.info("Router decision: %s", route)
         return {"route": route, "parts": parts, "part_replies": None}
+
+    async def injection_check_node(state: ConversationState) -> dict[str, Any]:
+        """Ask whether the guest's message tries to manipulate the assistant.
+
+        Runs in the same step as the router. The router alone sometimes
+        answers a request for its instructions instead of refusing it,
+        because it is busy splitting the message into parts. This check asks
+        only the one question. Its verdict is applied by ``injection_gate``.
+
+        Args:
+            state: Current conversation state, ending with the guest's
+                message.
+
+        Returns:
+            An empty patch when the message is clean, ``flagged`` set to
+            ``"injection"`` when it is not, or ``injection_error`` when the
+            check failed or timed out. It never writes ``turn_error`` or
+            ``route``, which the router writes in the same step.
+
+        """
+        timeout_s = cfg.orchestration.injection_check_timeout_s
+        check_input = [
+            SystemMessage(content=resources.get_injection_check_prompt()),
+            HumanMessage(content=_injection_check_input(state["messages"])),
+        ]
+        try:
+            result = cast(
+                "InjectionCheck",
+                await asyncio.wait_for(
+                    resources.injection_checker.ainvoke(check_input),
+                    timeout=timeout_s,
+                ),
+            )
+        except TimeoutError:
+            logger.warning("Injection check timed out after %s s", timeout_s)
+            return {"injection_error": "timeout"}
+        except Exception as exc:  # noqa: BLE001
+            return {"injection_error": _record_turn_failure("Injection check", exc)}
+        if not result.injection:
+            return {}
+        logger.warning("Injection check flagged the guest message")
+        return {"flagged": "injection"}
 
     info_node = _make_part_node(
         "info",
@@ -356,18 +407,18 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
     def error_node(state: ConversationState) -> dict[str, Any]:
         """Mark the turn failed without writing a reply.
 
-        Reached when the message moderation check or the router failed, or
-        the router returned no parts.
+        Reached when the message moderation check, the router, or the
+        injection check failed, or the router returned no parts.
         No apology is written into history: the client is told about the
         failure through an ``error`` event instead (see `finalize_node`).
 
         Args:
-            state: Current conversation state, read for a ``turn_error`` the
-                router already recorded.
+            state: Current conversation state, read for a ``turn_error`` an
+                earlier node already recorded.
 
         Returns:
-            State patch carrying ``turn_error``: ``"internal"`` unless the
-            router recorded something more specific.
+            State patch carrying ``turn_error``: ``"internal"`` unless an
+            earlier node recorded something more specific.
 
         """
         logger.info("Turn failed at routing")
@@ -439,6 +490,8 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
     graph = StateGraph(ConversationState)
     graph.add_node("moderate_message", moderate_message_node)
     graph.add_node("router", router_node)
+    graph.add_node("injection_check", injection_check_node)
+    graph.add_node("injection_gate", _injection_gate_node)
     graph.add_node("info", info_node)
     graph.add_node("booking", booking_node)
     graph.add_node("join", join_node)
@@ -451,10 +504,12 @@ def build_orchestration_agent(  # noqa: C901, PLR0915
     graph.add_conditional_edges(
         "moderate_message",
         _after_message_moderation,
-        {"router": "router", "refuse": "refuse", "error": "error"},
+        ["router", "injection_check", "refuse", "error"],
     )
+    # Waits for both branches, so the fan-out sees the check's verdict.
+    graph.add_edge(["router", "injection_check"], "injection_gate")
     graph.add_conditional_edges(
-        "router",
+        "injection_gate",
         _fan_out,
         ["info", "booking", "refuse", "error"],
     )
@@ -501,14 +556,69 @@ def _after_message_moderation(state: ConversationState) -> _AfterModeration:
 
     Returns:
         ``"error"`` if the check failed, ``"refuse"`` if it flagged the
-        message, otherwise ``"router"``.
+        message, otherwise both ``"router"`` and ``"injection_check"``, which
+        run in parallel.
 
     """
     if state.get("turn_error") is not None:
         return "error"
     if state.get("flagged") is not None:
         return "refuse"
-    return "router"
+    return ["router", "injection_check"]
+
+
+def _injection_check_input(messages: Sequence[BaseMessage]) -> str:
+    """Lay out the conversation as one block of text for the injection check.
+
+    The check reads the earlier turns as context, labelled by speaker, and
+    judges only the latest message. This is the layout it was measured
+    with.
+
+    Args:
+        messages: The thread's history, ending with the guest's message.
+
+    Returns:
+        The earlier turns, one ``user:`` or ``assistant:`` line each, then
+        the latest message under its own heading.
+
+    """
+    *earlier, latest = messages
+    history = "\n".join(
+        f"{'user' if isinstance(msg, HumanMessage) else 'assistant'}: {msg.text}"
+        for msg in earlier
+    )
+    context = f"Earlier turns:\n{history}\n\n" if history else ""
+    return f"{context}Latest guest message:\n{latest.text}"
+
+
+def _injection_gate_node(state: ConversationState) -> dict[str, Any]:
+    """Apply the injection check's verdict once the router has also finished.
+
+    A flag refuses the whole turn, since the check cannot say which part of
+    the message was the injection. It takes precedence over a router
+    failure, which would only fail the turn. A failed check fails the turn
+    rather than letting it through unchecked, as a failed moderation check
+    does.
+
+    Args:
+        state: Current conversation state, after the router and the check.
+
+    Returns:
+        The ``refuse`` route with ``turn_error`` cleared when the check
+        flagged the message, the ``error`` route with a ``turn_error`` when
+        the check failed (the router's own code if it also failed),
+        otherwise an empty patch that leaves the router's route in place.
+
+    """
+    if state.get("flagged") == "injection":
+        return {"route": "refuse", "parts": [], "turn_error": None}
+    injection_error = state.get("injection_error")
+    if injection_error is not None:
+        return {
+            "route": "error",
+            "turn_error": state.get("turn_error") or injection_error,
+        }
+    return {}
 
 
 def _fan_out(state: ConversationState) -> list[Send] | Literal["refuse", "error"]:
@@ -521,11 +631,13 @@ def _fan_out(state: ConversationState) -> list[Send] | Literal["refuse", "error"
     message instead, so it does not answer, or refuse, the other part.
 
     Args:
-        state: Current conversation state, after the router.
+        state: Current conversation state, after the router and the
+            injection gate.
 
     Returns:
         One `Send` per part, to the node named by its step, or
-        ``"refuse"`` or ``"error"`` when the router chose that route.
+        ``"refuse"`` or ``"error"`` when the router or the injection gate
+        chose that route.
         ``"error"`` also when there is no part to send, since an empty list
         of sends would end the graph before ``finalize``.
 

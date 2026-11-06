@@ -232,3 +232,14 @@ class TestMain:
         )
         secrets = tomllib.loads(secrets_path.read_text())
         assert set(secrets["auth"]) == {"redirect_uri", "cookie_secret", "huggingface"}
+
+    def test_hugging_face_overrides_the_default_prompt(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path,
+    ) -> None:
+        """Hugging Face gets a prompt it accepts; Google keeps Streamlit's default."""
+        secrets_path = self._run_main(monkeypatch, tmp_path, hf_credentials=True)
+        secrets = tomllib.loads(secrets_path.read_text())
+        assert secrets["auth"]["huggingface"]["client_kwargs"] == {
+            "prompt": "consent",
+        }
+        assert "client_kwargs" not in secrets["auth"]["google"]

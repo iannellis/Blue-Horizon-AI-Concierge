@@ -70,14 +70,14 @@ _PRIVACY_POLICY_URL = f"{_DOCS_URL}/privacy/"
 _TERMS_URL = f"{_DOCS_URL}/terms/"
 
 _API_BASE: str = os.getenv("BLUE_HORIZON_API_URL", "http://127.0.0.1:8000").rstrip("/")
-# Sign-in providers as (secrets.toml section name, button label). One is
-# offered when the env var that deploy/generate_secrets.py writes its section
-# from is set.
+# Sign-in providers as (secrets.toml section name, button label), in button
+# order, preferred first. One is offered when the env var that
+# deploy/generate_secrets.py writes its section from is set.
 _AUTH_PROVIDERS: tuple[tuple[str, str], ...] = tuple(
     (name, label)
     for name, label, env_var in (
-        ("google", "Google", "GOOGLE_CLIENT_ID"),
         ("huggingface", "Hugging Face", "OAUTH_CLIENT_ID"),
+        ("google", "Google", "GOOGLE_CLIENT_ID"),
     )
     if os.getenv(env_var)
 )

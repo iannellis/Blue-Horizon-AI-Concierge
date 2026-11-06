@@ -38,11 +38,19 @@ _GOOGLE_METADATA_URL: str = (
 _HF_METADATA_URL: str = "https://huggingface.co/.well-known/openid-configuration"
 
 # Provider name (as passed to st.login), client ID var, client secret var,
-# OIDC discovery URL. Order is the order of the sign-in buttons.
+# OIDC discovery URL. The first configured provider's secret seeds the derived
+# cookie secret, so reordering would sign everyone out once. ui/app.py sets the
+# order of the sign-in buttons.
 _PROVIDERS: tuple[tuple[str, str, str, str], ...] = (
     ("google", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", _GOOGLE_METADATA_URL),
     ("huggingface", "OAUTH_CLIENT_ID", "OAUTH_CLIENT_SECRET", _HF_METADATA_URL),
 )
+
+# OIDC prompt value per provider, overriding Streamlit's default of
+# "select_account". Hugging Face accepts only "consent", "none", or "login",
+# and rejects the default with invalid_request, which Streamlit reports only
+# in the server log before sending the visitor back to the login page.
+_PROVIDER_PROMPTS: dict[str, str] = {"huggingface": "consent"}
 
 
 def _build_redirect_uri() -> str:
@@ -115,6 +123,8 @@ def main() -> None:
             client_secret = "{client_secret}"
             server_metadata_url = "{metadata_url}"
         """)
+        if prompt := _PROVIDER_PROMPTS.get(name):
+            content += f'client_kwargs = {{ prompt = "{prompt}" }}\n'
 
     app_root = pathlib.Path(__file__).resolve().parent.parent
     for secrets_dir in (

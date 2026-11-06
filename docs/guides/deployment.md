@@ -50,6 +50,10 @@ HuggingFace Space secrets. Hugging Face sign-in needs no secrets: `hf_oauth: tru
 Hugging Face account. `deploy/generate_secrets.py` writes the project-level
 `.streamlit/secrets.toml` that Streamlit's auth support expects from those environment
 variables at container start, with one `[auth.<provider>]` section per provider.
+The Hugging Face section also sets `client_kwargs = { prompt = "consent" }`. Streamlit
+otherwise sends `prompt=select_account`, which Hugging Face rejects with
+`invalid_request`. Streamlit logs that rejection and returns the visitor to the login
+page, so from the browser it looks like the page just reloaded.
 
 The container log is lost on every restart. To keep it, set `AXIOM_API_KEY` as a Space
 secret and `AXIOM_DATASET` as a Space variable; both processes then ship their records

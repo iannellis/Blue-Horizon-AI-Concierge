@@ -209,6 +209,15 @@ first message was flagged 3/3 by `omni-moderation-latest` when the cases were ad
 and none of the dataset's other 569 distinct guest messages was. `case_0238` is also in
 the smoke set.
 
+`case_0242` asks for presidential suites on Feb 10-12, then Feb 10-15, with no year.
+Both turns carry an `expected_search` in the window's year. The deployed agent once put
+the dates in the following year and declined without searching, so the tool's date check,
+which tells it to retry with the right year, never ran. Unlike the other `missing_year`
+cases, a turn here fails if the agent never searches. The third turn names 2027, outside
+the window, and expects a search with those dates anyway: the tool, not the model, decides
+that dates are out of range. It carries `expected_success: false`, so the refusal is not
+counted as a tool error. The case is also in the smoke set.
+
 ### Uploading a dataset to LangSmith
 
 ```bash

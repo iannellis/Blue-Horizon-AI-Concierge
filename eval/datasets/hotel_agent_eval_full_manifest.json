@@ -1,19 +1,19 @@
 {
   "dataset_file": "eval/datasets/hotel_agent_eval_full.jsonl",
-  "num_cases": 241,
+  "num_cases": 242,
   "distribution": {
     "info_only": 74,
-    "rooms_only": 94,
+    "rooms_only": 95,
     "mixed": 73
   },
   "turn_counts": {
-    "total_turns": 576,
+    "total_turns": 579,
     "info_turns": 208,
-    "rooms_turns": 317,
+    "rooms_turns": 320,
     "refuse_turns": 45,
     "split_turns": 8,
     "labeled_filter_turns": 40,
-    "labeled_search_turns": 33
+    "labeled_search_turns": 36
   },
   "refuse_coverage": {
     "cases_with_refuse_turns": 45,

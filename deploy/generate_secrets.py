@@ -46,11 +46,16 @@ _PROVIDERS: tuple[tuple[str, str, str, str], ...] = (
     ("huggingface", "OAUTH_CLIENT_ID", "OAUTH_CLIENT_SECRET", _HF_METADATA_URL),
 )
 
-# OIDC prompt value per provider, overriding Streamlit's default of
-# "select_account". Hugging Face accepts only "consent", "none", or "login",
-# and rejects the default with invalid_request, which Streamlit reports only
-# in the server log before sending the visitor back to the login page.
-_PROVIDER_PROMPTS: dict[str, str] = {"huggingface": "consent"}
+# client_kwargs per provider, as TOML inline-table contents, overriding
+# Streamlit's defaults of prompt "select_account" and scope "openid email
+# profile". Hugging Face accepts only "consent", "none", or "login" as a
+# prompt, and rejects the default with invalid_request, which Streamlit
+# reports only in the server log before sending the visitor back to the login
+# page. Its scope leaves out email, which the app does not need; it must match
+# the Space's OAuth scopes (hf_space_metadata.yml) or the login is rejected.
+_PROVIDER_CLIENT_KWARGS: dict[str, str] = {
+    "huggingface": 'prompt = "consent", scope = "openid profile"',
+}
 
 
 def _build_redirect_uri() -> str:
@@ -123,8 +128,8 @@ def main() -> None:
             client_secret = "{client_secret}"
             server_metadata_url = "{metadata_url}"
         """)
-        if prompt := _PROVIDER_PROMPTS.get(name):
-            content += f'client_kwargs = {{ prompt = "{prompt}" }}\n'
+        if client_kwargs := _PROVIDER_CLIENT_KWARGS.get(name):
+            content += f"client_kwargs = {{ {client_kwargs} }}\n"
 
     app_root = pathlib.Path(__file__).resolve().parent.parent
     for secrets_dir in (

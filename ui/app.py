@@ -828,8 +828,9 @@ def _visitor_key() -> str:
     """Identify who is sending, for the hourly turn limit.
 
     Also names who holds a guest claim. A signed-in visitor is counted by
-    account email, so opening a second tab does not grant a second allowance
-    or a second guest. Without auth the session is all there is to go on;
+    the provider's issuer and stable subject id, so opening a second tab
+    does not grant a second allowance or a second guest, and no email is
+    needed. Without auth the session is all there is to go on;
     its id survives a hard refresh through the ``sid`` URL param, so a
     refresh does not reset the count or lose the guest either.
 
@@ -837,8 +838,8 @@ def _visitor_key() -> str:
         str: A key naming the account or, failing that, the session.
 
     """
-    if _AUTH_ENABLED and st.user.is_logged_in and st.user.email:
-        return f"user:{st.user.email}"
+    if _AUTH_ENABLED and st.user.is_logged_in:
+        return f"user:{st.user.iss}:{st.user.sub}"
     return f"session:{st.session_state.session_id}"
 
 
@@ -965,8 +966,9 @@ def _render_login_page() -> None:
             use_container_width=True,
         )
     st.caption(
-        "Your name and email are used only to show who is signed in and to count "
-        "your messages against the hourly limit. By signing in, you agree to the "
+        "Your name is used only to show who is signed in, and your account ID only "
+        "to count your messages against the hourly limit. By signing in, you "
+        "agree to the "
         f"[terms of service]({_TERMS_URL}). See also the "
         f"[privacy policy]({_PRIVACY_POLICY_URL}).",
     )

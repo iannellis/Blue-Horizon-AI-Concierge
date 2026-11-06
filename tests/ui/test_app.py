@@ -1052,9 +1052,10 @@ class TestTurnLimitRegistry:
             patch("ui.app.st") as mock_st,
         ):
             mock_st.user.is_logged_in = True
-            mock_st.user.email = "guest@example.com"
+            mock_st.user.iss = "https://huggingface.co"
+            mock_st.user.sub = "12345"
             mock_st.session_state.session_id = "session-a"
-            assert _visitor_key() == "user:guest@example.com"
+            assert _visitor_key() == "user:https://huggingface.co:12345"
 
     def test_anonymous_visitor_is_keyed_by_session(self) -> None:
         """Without auth, the session id is all there is to count by."""

@@ -11,7 +11,6 @@ app_port: 7860
 startup_duration_timeout: 1h
 # Sign in with Hugging Face: the platform registers an OAuth app and injects
 # OAUTH_CLIENT_ID/OAUTH_CLIENT_SECRET. Redirect path is Streamlit's callback.
+# Default scopes (openid profile) only; generate_secrets.py requests the same.
 hf_oauth: true
-hf_oauth_scopes:
-  - email
 hf_oauth_redirect_path: /oauth2callback

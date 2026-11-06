@@ -12,13 +12,14 @@ information about you.
 ### Your Google or Hugging Face account
 
 You sign in with Google or Hugging Face so the demo can limit how many messages each visitor sends per
-hour. Signing in shares your name, email address, and profile picture with the demo.
-The demo uses them for two things only:
+hour. Signing in shares your name, profile picture, and an account ID with the demo.
+Google also shares your email address; Hugging Face does not. The demo uses your name
+and account ID for two things only, and does not use your email address:
 
 - showing who is signed in, in the sidebar
 - counting your messages against the hourly limit
 
-Your name and email address are held in the demo's memory and in a sign-in cookie in
+What your provider shared is held in the demo's memory and in a sign-in cookie in
 your browser. They are not written to a database or to any log, and the hourly count
 is cleared whenever the demo restarts, which happens at least once a day.
 

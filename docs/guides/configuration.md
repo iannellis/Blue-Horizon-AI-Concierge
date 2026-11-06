@@ -75,7 +75,7 @@ renaming a key breaks the UI even though the API's typed config would still load
   so a guest never sees that rejection.
 - `max_turns_per_hour` (default 10) is how many messages one visitor may send in any
   rolling hour, a resend included. Only the UI enforces it, since only the UI knows who
-  the visitor is: a signed-in visitor is counted by account email, and without auth,
+  the visitor is: a signed-in visitor is counted by account id, and without auth,
   by session. The API never reads this key. See
   [Architecture](../architecture/index.md#usage-limits).
 

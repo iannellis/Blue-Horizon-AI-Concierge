@@ -80,9 +80,10 @@ A deployed instance runs on HuggingFace Spaces at
 **[iellis02-blue-horizon.hf.space](https://iellis02-blue-horizon.hf.space)**. Use that
 exact URL; Google sign-in does not work from any other origin.
 
-Sign-in is limited to an allowlist of Google accounts. Recruiters and hiring managers
-can request access by messaging the author on
-[LinkedIn](https://www.linkedin.com/in/iannellis/) with the Google account to add.
+Sign-in is required, with either a Hugging Face account (preferred) or a Google
+account. Google sign-in may show an unverified app warning; if it does, choose
+*Advanced*, then continue to the app. Google sign-in is limited to 100 users in total,
+ever; once those are used, only Hugging Face sign-in works.
 
 Once signed in, you browse as one of the hotel's fictional guests, with their existing
 reservations in the sidebar. A few things to know:

@@ -46,8 +46,9 @@ Sign-in is optional, and the login page offers a button per configured provider.
 is enabled by setting `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `COOKIE_SECRET` as
 HuggingFace Space secrets. Hugging Face sign-in needs no secrets: `hf_oauth: true` in
 `deploy/hf_space_metadata.yml` makes the platform register an OAuth app and inject
-`OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET`. Unlike the Google allow-list, it admits any
-Hugging Face account. `deploy/generate_secrets.py` writes the project-level
+`OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET`. Both providers admit any account. The Google
+OAuth app is published but unverified, so Google may show visitors an unverified app
+warning. `deploy/generate_secrets.py` writes the project-level
 `.streamlit/secrets.toml` that Streamlit's auth support expects from those environment
 variables at container start, with one `[auth.<provider>]` section per provider.
 The Hugging Face section also sets

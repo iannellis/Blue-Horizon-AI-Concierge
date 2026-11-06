@@ -29,7 +29,7 @@ Please use the demo as a guest of the hotel would. Do not:
 ## Access
 
 The demo is offered free of charge and may change, go offline, or end at any time. Any
-Google account's access may be suspended or ended at any time, including for use that
+account's access may be suspended or ended at any time, including for use that
 breaks these terms.
 
 ## No warranty

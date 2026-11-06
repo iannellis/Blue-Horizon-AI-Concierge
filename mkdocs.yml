@@ -79,6 +79,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Using the Demo: using-the-demo.md
   - Architecture:
       - architecture/index.md
       - Orchestration: architecture/orchestration.md

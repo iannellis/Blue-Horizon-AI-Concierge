@@ -50,12 +50,14 @@ bubble as each request is processed, then renders the final response.
 
 ## Live demo
 
-A deployed instance runs on HuggingFace Spaces. Access is controlled via Google or Hugging Face sign-in.
-Recruiters and hiring managers can request access to be added to the allowed-users list.
-
-Once access is granted, the agent is available at
+A deployed instance runs on HuggingFace Spaces at
 **[iellis02-blue-horizon.hf.space](https://iellis02-blue-horizon.hf.space)** (this exact
-URL must be used; Google login will not work from any other origin).
+URL must be used; Google sign-in will not work from any other origin).
 
-If the Space has gone to sleep and returns a 500 error, it can be restarted from the
-Space page at [huggingface.co/spaces/iellis02/blue-horizon](https://huggingface.co/spaces/iellis02/blue-horizon).
+Sign-in is required, with either a Hugging Face account (preferred) or a Google account.
+Google sign-in may show an unverified app warning; if it does, choose *Advanced*, then
+continue to the app. Google sign-in is limited to 100 users in total, ever; once those are
+used, only Hugging Face sign-in works.
+
+[Using the Demo](using-the-demo.md) explains what to expect, what you can search for,
+and has a demo video.

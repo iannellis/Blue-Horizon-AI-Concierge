@@ -265,7 +265,7 @@ for the reasoning.
 
 `finalize` also caps how much history a thread keeps. After dropping tool chatter and
 any failed turn, it keeps only the most recent
-`[orchestration.orchestration].max_history_turns` completed turns (default 10), so the
+`[orchestration.orchestration].max_history_turns` completed turns (default 25), so the
 router and the sub-agent on the next turn see at most that many earlier turns plus the
 new message. Every turn resends the whole history to both, so without the cap the cost
 of a message grows with the length of the conversation. A failed turn is dropped before
@@ -339,10 +339,13 @@ searches costs about 100 KB once the history window is full.
 
 The growth is bounded rather than leaked. At most `seeded_customer_count` visitors hold
 a guest at once, and each signed-in visitor may send `[chat].max_turns_per_hour` turns,
-so with the defaults (100 guests, 10 turns) the ceiling is about 1,000 turns an hour, or
-roughly 2.4 GB a day. The Space restart at the end of the nightly reset workflow
-(`.github/workflows/nightly-reset.yml`) clears it, well inside the Space's 16 GB. A host
-without that restart, or with much less memory, would need `checkpointer.delete_thread()`
+but a guest claim is released after ten idle minutes or at sign-out, so the 100 guests
+can pass through 600 or more visitors an hour. At 25 turns each that is over 15,000 turns
+an hour, far more than the Space's 16 GB could hold for a day. What bounds it in practice
+is cost: the monthly budget on the deployment's OpenAI project stops turns, and with them
+checkpoint growth, long before memory runs out. The Space restart at the end of the
+nightly reset workflow (`.github/workflows/nightly-reset.yml`) clears what has built up.
+A host without that restart, or with much less memory, would need `checkpointer.delete_thread()`
 when a guest claim expires, or a checkpointer that keeps only the latest checkpoint.
 
 ## Streaming

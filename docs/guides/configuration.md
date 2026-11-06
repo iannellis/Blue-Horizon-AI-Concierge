@@ -58,7 +58,7 @@ reply before the guest sees it, with its own `timeout_s` (default 10) and `max_r
 answered turn. A check that fails after its retries fails the turn rather than skipping
 moderation. See [Orchestration](../architecture/orchestration.md#moderation).
 
-**`[orchestration.orchestration].max_history_turns`** (default 10) is how many completed
+**`[orchestration.orchestration].max_history_turns`** (default 25) is how many completed
 guest turns a thread's history keeps. The router and the chosen sub-agent are sent the
 whole history on every turn, so without a cap each message in a long conversation costs
 more than the one before it. Older turns are dropped when each turn finalizes, which
@@ -73,7 +73,7 @@ renaming a key breaks the UI even though the API's typed config would still load
 - `max_message_chars` (default 1000) is the longest message `/v1/chat` accepts. A longer
   one gets a `422` before any model call. The UI's input box stops at the same length,
   so a guest never sees that rejection.
-- `max_turns_per_hour` (default 10) is how many messages one visitor may send in any
+- `max_turns_per_hour` (default 25) is how many messages one visitor may send in any
   rolling hour, a resend included. Only the UI enforces it, since only the UI knows who
   the visitor is: a signed-in visitor is counted by account id, and without auth,
   by session. The API never reads this key. See

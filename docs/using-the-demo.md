@@ -31,7 +31,7 @@ concierge handles each part and answers them together.
 - **Nothing is booked until you click Confirm.** When you ask to book, cancel, or change a
   reservation, the concierge prepares the change and the app shows a confirmation dialog
   with the exact details. The confirmation number appears only after you confirm.
-- **Limits keep the public demo affordable:** 10 messages per rolling hour, and 60
+- **Limits keep the public demo affordable:** 25 messages per rolling hour, and 60
   room-nights per guest in any 24 hours (one room for one night is one room-night).
 - **Each search shows a few rooms,** four by default. Ask for more and it shows up to 15,
   along with how many rooms matched in total.

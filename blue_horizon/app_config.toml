@@ -42,7 +42,7 @@ llm_concurrency = 25
 # Retry-After seconds on a 503 while not ready or the database is unreachable
 unavailable_retry_after_s = 5.0
 # Completed guest turns kept in a thread's history; older ones are dropped
-max_history_turns = 10
+max_history_turns = 25
 
 [orchestration.moderation]
 # OpenAI moderation model, run on every guest message and every reply
@@ -57,7 +57,7 @@ max_retries = 2
 # Longest guest message accepted, in characters
 max_message_chars = 1000
 # Most messages one visitor may send in any rolling hour (enforced by the UI)
-max_turns_per_hour = 10
+max_turns_per_hour = 25
 
 [orchestration.prompts]
 # Folder (relative to blue_horizon package root) containing prompt files

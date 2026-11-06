@@ -95,8 +95,8 @@ enforced by the component that has the information to enforce it.
 | Limit | Default | Enforced by |
 |---|---|---|
 | Message length (`[chat].max_message_chars`) | 1000 characters | The UI's input box, and `/v1/chat` with a `422` |
-| Messages per visitor per rolling hour (`[chat].max_turns_per_hour`) | 10 | The UI |
-| Turns of history the model sees (`[orchestration.orchestration].max_history_turns`) | 10 | `finalize`; see [Orchestration](orchestration.md#history-length) |
+| Messages per visitor per rolling hour (`[chat].max_turns_per_hour`) | 25 | The UI |
+| Turns of history the model sees (`[orchestration.orchestration].max_history_turns`) | 25 | `finalize`; see [Orchestration](orchestration.md#history-length) |
 
 The hourly limit lives in the UI because the API sees only a `thread_id` and a
 `customer_id`, and neither names the visitor: a **New Conversation** click makes a

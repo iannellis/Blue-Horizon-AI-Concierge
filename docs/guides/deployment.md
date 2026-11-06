@@ -42,10 +42,14 @@ reading of the login cookie, and the app has no file uploader.
 The config also turns off Streamlit's usage statistics, which visitors' browsers would
 otherwise send to Streamlit; the [privacy policy](../privacy.md) says no trackers run.
 
-Optional Google OAuth can be enabled by setting `GOOGLE_CLIENT_ID`,
-`GOOGLE_CLIENT_SECRET`, and `COOKIE_SECRET` as HuggingFace Space secrets.
-`deploy/generate_secrets.py` writes the project-level `.streamlit/secrets.toml` that
-Streamlit's auth support expects from those environment variables at container start.
+Sign-in is optional, and the login page offers a button per configured provider. Google
+is enabled by setting `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `COOKIE_SECRET` as
+HuggingFace Space secrets. Hugging Face sign-in needs no secrets: `hf_oauth: true` in
+`deploy/hf_space_metadata.yml` makes the platform register an OAuth app and inject
+`OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET`. Unlike the Google allow-list, it admits any
+Hugging Face account. `deploy/generate_secrets.py` writes the project-level
+`.streamlit/secrets.toml` that Streamlit's auth support expects from those environment
+variables at container start, with one `[auth.<provider>]` section per provider.
 
 The container log is lost on every restart. To keep it, set `AXIOM_API_KEY` as a Space
 secret and `AXIOM_DATASET` as a Space variable; both processes then ship their records

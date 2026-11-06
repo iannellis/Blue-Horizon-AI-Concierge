@@ -9,10 +9,13 @@ Run with:
 Environment variables:
     BLUE_HORIZON_API_URL: Base URL for the Blue Horizon API.
         Defaults to ``http://localhost:8000``.
-    GOOGLE_CLIENT_ID: When set, enables Google OAuth authentication.
+    GOOGLE_CLIENT_ID: When set, offers Google sign-in.
         Set alongside ``GOOGLE_CLIENT_SECRET`` as HuggingFace Space secrets.
         While the OAuth consent screen is in testing mode, only the test users
         listed in Google Cloud Console can sign in.
+    OAUTH_CLIENT_ID: When set, offers Hugging Face sign-in. Injected by the
+        platform when the Space's metadata sets ``hf_oauth: true``; any
+        Hugging Face account can sign in.
     AXIOM_API_KEY, AXIOM_DATASET: When both are set, log records are also
         shipped to that Axiom dataset, as the API's are.
 """
@@ -67,7 +70,18 @@ _PRIVACY_POLICY_URL = f"{_DOCS_URL}/privacy/"
 _TERMS_URL = f"{_DOCS_URL}/terms/"
 
 _API_BASE: str = os.getenv("BLUE_HORIZON_API_URL", "http://127.0.0.1:8000").rstrip("/")
-_AUTH_ENABLED: bool = bool(os.getenv("GOOGLE_CLIENT_ID"))
+# Sign-in providers as (secrets.toml section name, button label). One is
+# offered when the env var that deploy/generate_secrets.py writes its section
+# from is set.
+_AUTH_PROVIDERS: tuple[tuple[str, str], ...] = tuple(
+    (name, label)
+    for name, label, env_var in (
+        ("google", "Google", "GOOGLE_CLIENT_ID"),
+        ("huggingface", "Hugging Face", "OAUTH_CLIENT_ID"),
+    )
+    if os.getenv(env_var)
+)
+_AUTH_ENABLED: bool = bool(_AUTH_PROVIDERS)
 _CHAT_TIMEOUT_S: float = 90.0
 _HEALTH_TIMEOUT_S: float = 3.0
 # Real DB-backed reads (guest list, bookings), as opposed to the bare health
@@ -814,10 +828,10 @@ def _visitor_key() -> str:
     """Identify who is sending, for the hourly turn limit.
 
     Also names who holds a guest claim. A signed-in visitor is counted by
-    Google account, so opening a second tab does not grant a second
-    allowance or a second guest. Without auth the session is all there is
-    to go on; its id survives a hard refresh through the ``sid`` URL param,
-    so a refresh does not reset the count or lose the guest either.
+    account email, so opening a second tab does not grant a second allowance
+    or a second guest. Without auth the session is all there is to go on;
+    its id survives a hard refresh through the ``sid`` URL param, so a
+    refresh does not reset the count or lose the guest either.
 
     Returns:
         str: A key naming the account or, failing that, the session.
@@ -941,12 +955,15 @@ def _render_recovery_poll() -> None:
 
 def _render_login_page() -> None:
     """Render the sign-in page shown to unauthenticated visitors."""
-    st.info("Please sign in with your Google account to access the concierge.")
-    st.button(
-        "Sign in with Google",
-        on_click=st.login,
-        use_container_width=True,
-    )
+    st.info("Please sign in to access the concierge.")
+    for name, label in _AUTH_PROVIDERS:
+        st.button(
+            f"Sign in with {label}",
+            key=f"login_{name}",
+            on_click=st.login,
+            args=(name,),
+            use_container_width=True,
+        )
     st.caption(
         "Your name and email are used only to show who is signed in and to count "
         "your messages against the hourly limit. By signing in, you agree to the "

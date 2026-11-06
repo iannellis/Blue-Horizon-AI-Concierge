@@ -75,7 +75,7 @@ renaming a key breaks the UI even though the API's typed config would still load
   so a guest never sees that rejection.
 - `max_turns_per_hour` (default 10) is how many messages one visitor may send in any
   rolling hour, a resend included. Only the UI enforces it, since only the UI knows who
-  the visitor is: a signed-in visitor is counted by Google account, and without auth,
+  the visitor is: a signed-in visitor is counted by account email, and without auth,
   by session. The API never reads this key. See
   [Architecture](../architecture/index.md#usage-limits).
 
@@ -307,6 +307,7 @@ covers both processes when running locally.
 | `LANGCHAIN_PROJECT` | LangSmith project name to log traces under |
 | `GOOGLE_CLIENT_ID` | Google OAuth client ID, enabling the login gate in the UI |
 | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret (required when `GOOGLE_CLIENT_ID` is set) |
+| `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET` | Hugging Face OAuth credentials, offering Hugging Face sign-in. Injected by the Space platform because of `hf_oauth: true`; set them by hand only to test locally |
 | `COOKIE_SECRET` | Secret used to sign the Streamlit auth session cookie (required when OAuth is enabled) |
 | `AXIOM_API_KEY` | Axiom API token with ingest permission. The API and the UI ship their logs to Axiom only when this and `AXIOM_DATASET` are both set. `tests/conftest.py` blanks it, so test runs never ship |
 | `AXIOM_DATASET` | Axiom dataset the API and the UI ship their logs to |

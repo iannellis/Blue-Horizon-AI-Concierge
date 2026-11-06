@@ -9,9 +9,9 @@ information about you.
 
 ## Information collected
 
-### Your Google account
+### Your Google or Hugging Face account
 
-You sign in with Google so the demo can limit how many messages each visitor sends per
+You sign in with Google or Hugging Face so the demo can limit how many messages each visitor sends per
 hour. Signing in shares your name, email address, and profile picture with the demo.
 The demo uses them for two things only:
 
@@ -64,7 +64,9 @@ handles your connection to it under its own privacy policy.
 ## Your choices
 
 You can remove the demo's access to your Google account at any time from
-[your Google account's permissions page](https://myaccount.google.com/permissions).
+[your Google account's permissions page](https://myaccount.google.com/permissions),
+or to your Hugging Face account from
+[your Hugging Face connected apps](https://huggingface.co/settings/connected-applications).
 
 Use of information received from Google APIs adheres to the
 [Google API Services User Data Policy](https://developers.google.com/terms/api-services-user-data-policy),

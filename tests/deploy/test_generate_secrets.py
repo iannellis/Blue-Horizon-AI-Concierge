@@ -9,18 +9,24 @@ so no real ~/.streamlit/secrets.toml is written during the test run.
 
 import hashlib
 import pathlib
+import tomllib
 
 import pytest
 
+from deploy import generate_secrets
 from deploy.generate_secrets import (
     _GOOGLE_METADATA_URL,
+    _HF_METADATA_URL,
     _build_redirect_uri,
     _derive_cookie_secret,
     main,
 )
 
 _SPACE_VARS = ("SPACE_HOST", "SPACE_AUTHOR_NAME", "SPACE_REPO_NAME")
-_AUTH_VARS = ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "COOKIE_SECRET")
+_AUTH_VARS = (
+    "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "COOKIE_SECRET",
+    "OAUTH_CLIENT_ID", "OAUTH_CLIENT_SECRET",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +124,7 @@ class TestMain:
         *,
         client_id: str | None = "test-client-id",
         client_secret: str | None = "test-client-secret",
+        hf_credentials: bool = False,
     ) -> pathlib.Path:
         """Set up env and patch Path.home(), then run main().
 
@@ -126,6 +133,7 @@ class TestMain:
             tmp_path: Temporary directory used as the fake home directory.
             client_id: Value for GOOGLE_CLIENT_ID, or None to leave unset.
             client_secret: Value for GOOGLE_CLIENT_SECRET, or None to leave unset.
+            hf_credentials: Also set Hugging Face OAuth credentials.
 
         Returns:
             The path where secrets.toml would be written.
@@ -138,9 +146,15 @@ class TestMain:
             monkeypatch.setenv("GOOGLE_CLIENT_ID", client_id)
         if client_secret is not None:
             monkeypatch.setenv("GOOGLE_CLIENT_SECRET", client_secret)
+        if hf_credentials:
+            monkeypatch.setenv("OAUTH_CLIENT_ID", "hf-id")
+            monkeypatch.setenv("OAUTH_CLIENT_SECRET", "hf-secret")
 
         monkeypatch.setenv("COOKIE_SECRET", "fixed-cookie-secret")
         monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
+        # main() also writes beside the repo's ui/; keep that inside tmp_path too.
+        fake_script = tmp_path / "deploy" / "generate_secrets.py"
+        monkeypatch.setattr(generate_secrets, "__file__", str(fake_script))
 
         main()
         return tmp_path / ".streamlit" / "secrets.toml"
@@ -195,3 +209,26 @@ class TestMain:
         """Written TOML includes a redirect_uri entry."""
         secrets_path = self._run_main(monkeypatch, tmp_path)
         assert "redirect_uri" in secrets_path.read_text()
+
+    def test_writes_a_named_section_per_provider(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path,
+    ) -> None:
+        """Google and Hugging Face credentials each get an [auth.<name>] table."""
+        secrets_path = self._run_main(monkeypatch, tmp_path, hf_credentials=True)
+        secrets = tomllib.loads(secrets_path.read_text())
+        assert secrets["auth"]["google"]["client_id"] == "test-client-id"
+        assert secrets["auth"]["huggingface"]["client_id"] == "hf-id"
+        assert secrets["auth"]["huggingface"]["server_metadata_url"] == (
+            _HF_METADATA_URL
+        )
+
+    def test_hugging_face_alone_is_enough(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path,
+    ) -> None:
+        """Without Google credentials, a Hugging Face-only file is written."""
+        secrets_path = self._run_main(
+            monkeypatch, tmp_path, client_id=None, client_secret=None,
+            hf_credentials=True,
+        )
+        secrets = tomllib.loads(secrets_path.read_text())
+        assert set(secrets["auth"]) == {"redirect_uri", "cookie_secret", "huggingface"}

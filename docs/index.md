@@ -50,7 +50,7 @@ bubble as each request is processed, then renders the final response.
 
 ## Live demo
 
-A deployed instance runs on HuggingFace Spaces. Access is controlled via Google OAuth.
+A deployed instance runs on HuggingFace Spaces. Access is controlled via Google or Hugging Face sign-in.
 Recruiters and hiring managers can request access to be added to the allowed-users list.
 
 Once access is granted, the agent is available at

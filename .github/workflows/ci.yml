@@ -289,8 +289,9 @@ jobs:
           # which is kept out of the GitHub README and injected here instead
           { echo "---"; cat deploy/hf_space_metadata.yml; echo "---"; echo; cat README.md; } > README.hf.md
           mv README.hf.md README.md
-          # Do not attempt to push data directory as it isn't pulled above
-          git rm -r --cached --ignore-unmatch -- data
-          git add -A -- . ':!data'
+          # Do not push the data directory or the demo video: their LFS
+          # objects are not pulled above, and the Space needs neither
+          git rm -r --cached --ignore-unmatch -- data demo-video.webm
+          git add -A -- . ':!data' ':!demo-video.webm'
           git commit -m "Deploy from main@${MAIN_SHA}"
           git push space hf-deploy:main --force

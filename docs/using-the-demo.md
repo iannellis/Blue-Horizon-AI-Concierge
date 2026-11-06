@@ -4,7 +4,7 @@ This page explains what the concierge can do and how to ask for it. The demo run
 **[iellis02-blue-horizon.hf.space](https://iellis02-blue-horizon.hf.space)**. Sign-in is
 required, with either a Hugging Face account (preferred) or a Google account. Google
 sign-in may show an unverified app warning, and it is limited to 100 users in total, ever;
-once those are used, only Hugging Face sign-in works.
+once those are used, only Hugging Face sign-in works for additional users.
 
 ## Demo video
 
@@ -18,7 +18,10 @@ once those are used, only Hugging Face sign-in works.
 
 Once signed in, you browse as one of the hotel's fictional guests, with that guest's
 existing reservations in the sidebar. The concierge does two jobs: it answers questions
-about the hotel, and it searches for and books rooms. It politely refuses anything else.
+about the hotel, its services, and its amenities, and it searches for and books rooms.
+It politely refuses anything else. One message can ask for both, for example *find me
+an ocean-view suite for March 14 to 17, and what spa treatments do you offer?*; the
+concierge handles each part and answers them together.
 
 - **The room calendar covers January 4, 2025 to January 3, 2026.** The hotel has no rooms
   outside that range. If you give a date without a year, the concierge picks the one
@@ -68,12 +71,9 @@ and "an ocean view" includes Panoramic Ocean View.
 Results can be sorted by stay price, floor, room size, or room number, either lowest or
 highest first. Sorting by price needs dates.
 
-Room amenities you can require include a balcony or wraparound balcony, private terrace,
-private pool, Jacuzzi tub, soaking tub, sauna, steam room or steam shower, full kitchen
-or kitchenette, dining area or formal dining room, living room, walk-in closet, work desk
-or executive office, wine fridge, grand piano, private gym equipment, lounge or executive
-lounge access, butler service, a private chef, luxury car service, a Nespresso machine,
-and premium sound systems from Bose or Bang & Olufsen.
+Room amenities you can require include a balcony, private pool, Jacuzzi tub, full
+kitchen, and butler service. Ask the concierge to list every room amenity, or every
+amenity a particular room has.
 
 ## Asking about the hotel
 
@@ -112,6 +112,5 @@ what satisfies them:
 | Notice | *I can only give 4 hours' notice* |
 | Booking | *something I can walk into without a reservation* |
 
-If nothing matches, the concierge says so and suggests what is available nearby rather
-than inventing a service. The concierge describes these amenities and services but does
-not book them; only rooms can be booked through the chat.
+If nothing matches, the concierge says so. The concierge describes these amenities and
+services but does not book them; only rooms can be booked through the chat.

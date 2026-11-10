@@ -218,6 +218,13 @@ the window, and expects a search with those dates anyway: the tool, not the mode
 that dates are out of range. It carries `expected_success: false`, so the refusal is not
 counted as a tool error. The case is also in the smoke set.
 
+`case_0243` asks to compare seven named rooms without saying how many to show. That is
+more than a search returns by default, so every room reaches the reply only if the model
+sets `limit` or the search raises an unset `limit` to the number of rooms named. The
+`expected_search` checks the arguments. Only the judge checks the reply, and it is not
+reliable here: graded three times, a reply with three of the rooms removed scored 3 for
+consumer quality twice and 5 once. It is in the full set only.
+
 ### Uploading a dataset to LangSmith
 
 ```bash

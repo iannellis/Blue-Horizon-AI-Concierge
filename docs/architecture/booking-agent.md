@@ -61,7 +61,9 @@ dated stay and one without dates, with the filter values bound as parameters. Ea
 query returns `[booking.agent].default_search_results` rooms, or as many as the model
 asks for with `limit` up to `[booking.agent].max_search_results`, each with a fixed set
 of guest-facing fields, plus `matching_count`, the number of rooms that matched, so a
-"how many" question needs no second query. A `limit` above the maximum is clamped rather
+"how many" question needs no second query. A search that names rooms without setting
+`limit` returns every room it names, up to the same maximum; an explicit `limit` is kept,
+since the guest may have asked for fewer. A `limit` above the maximum is clamped rather
 than rejected, and the result then carries a `limit_note` telling the model to say so.
 The note is in the result rather than the prompt so that it reaches a client with its
 own prompt too. Internal identifiers, the room-level status, the

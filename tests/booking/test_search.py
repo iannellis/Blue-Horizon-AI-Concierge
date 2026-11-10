@@ -327,6 +327,27 @@ class TestLimit:
         )
         assert params["limit"] == MAX_RESULTS
 
+    def test_named_rooms_raise_unset_limit(
+        self, args_model: type[BaseModel],
+    ) -> None:
+        """Naming more rooms than the default returns every named room."""
+        rooms = list(range(101, 101 + MAX_ROOM_NUMBERS))
+        params = _query_params(
+            _validate(args_model, room_numbers=rooms), max_results=MAX_RESULTS,
+        )
+        assert params["limit"] == MAX_ROOM_NUMBERS
+
+    def test_named_rooms_keep_explicit_limit(
+        self, args_model: type[BaseModel],
+    ) -> None:
+        """A limit the model set is kept even when it names more rooms."""
+        rooms = list(range(101, 101 + MAX_ROOM_NUMBERS))
+        params = _query_params(
+            _validate(args_model, room_numbers=rooms, limit=2),
+            max_results=MAX_RESULTS,
+        )
+        assert params["limit"] == 2  # noqa: PLR2004
+
     def test_limit_below_one_is_rejected(self, args_model: type[BaseModel]) -> None:
         """A limit of zero is a mistake the model can fix."""
         with pytest.raises(ValidationError):

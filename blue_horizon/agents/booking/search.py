@@ -345,7 +345,8 @@ def build_search_args_model(
                 default=default_results,
                 ge=1,
                 description=(
-                    f"How many rooms to return, {default_results} by default. At "
+                    f"How many rooms to return, {default_results} by default, or "
+                    "every room named in room_numbers. At "
                     f"most {max_results} come back; a larger value is reduced to "
                     f"{max_results}. matching_count always counts every match."
                 ),
@@ -487,7 +488,8 @@ async def run_room_search(
     Returns:
         `{"status": "ok", "matching_count": n, "rooms": [...]}`, where `n`
         counts every matching room and `rooms` holds at most
-        `min(args.limit, max_results)` of them. Dated searches add `nights`
+        `min(args.limit, max_results)` of them (with `limit` unset, at least
+        as many as `room_numbers` names). Dated searches add `nights`
         and `total_price` to each room. When `args.limit` exceeds
         `max_results`, a `limit_note` says the result was cut to
         `max_results`.
@@ -515,11 +517,13 @@ async def run_room_search(
 def _query_params(args: BaseModel, *, max_results: int) -> dict[str, Any]:
     """Turn search arguments into query parameters.
 
-    An empty list means "no restriction", the same as an omitted filter.
+    An empty list means "no restriction", the same as an omitted filter. When
+    the model names rooms without setting `limit`, the limit rises to the
+    number of rooms named, so every named room comes back.
 
     Args:
         args: Validated search arguments.
-        max_results: Ceiling applied to the requested `limit`.
+        max_results: Ceiling applied to the limit.
 
     Returns:
         Mapping of every named placeholder in the search SQL to its value.
@@ -529,6 +533,9 @@ def _query_params(args: BaseModel, *, max_results: int) -> dict[str, Any]:
     for key, value in params.items():
         if isinstance(value, list) and not value:
             params[key] = None
+    if "limit" not in args.model_fields_set and params["room_numbers"]:
+        # Named rooms all come back unless the model chose a smaller number.
+        params["limit"] = max(params["limit"], len(params["room_numbers"]))
     params["limit"] = min(params["limit"], max_results)
     return params
 

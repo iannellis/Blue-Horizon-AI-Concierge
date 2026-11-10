@@ -68,6 +68,7 @@ _EXPORT_THREAD_PREFIX = "OtelBatch"
 _DOCS_URL = "https://iannellis.github.io/Blue-Horizon-AI-Concierge"
 _PRIVACY_POLICY_URL = f"{_DOCS_URL}/privacy/"
 _TERMS_URL = f"{_DOCS_URL}/terms/"
+_DEMO_GUIDE_URL = f"{_DOCS_URL}/using-the-demo/"
 
 _API_BASE: str = os.getenv("BLUE_HORIZON_API_URL", "http://127.0.0.1:8000").rstrip("/")
 # Sign-in providers as (secrets.toml section name, button label), in button
@@ -957,6 +958,11 @@ def _render_recovery_poll() -> None:
 def _render_login_page() -> None:
     """Render the sign-in page shown to unauthenticated visitors."""
     st.info("Please sign in to access the concierge.")
+    st.markdown(
+        "Using the concierge for the first time? Visit "
+        f"[Using the Demo]({_DEMO_GUIDE_URL}) to see what to expect and what "
+        "you can ask.",
+    )
     for name, label in _AUTH_PROVIDERS:
         st.button(
             f"Sign in with {label}",

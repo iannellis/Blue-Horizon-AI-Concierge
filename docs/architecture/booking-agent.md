@@ -301,7 +301,7 @@ otherwise announced.
 
 There is deliberately no manual guest dropdown: letting someone hand-pick an
 already-claimed guest would defeat the point of exclusive assignment. See
-[Design Goals and Decisions](../design-decisions.md#guest-identity-is-a-claim-registry-not-a-dropdown).
+[Design Decisions](../design-decisions.md#guest-identity-is-a-claim-registry-not-a-dropdown).
 
 !!! warning "Demo-grade authorization"
     `GET /v1/bookings` is unauthenticated, consistent with the rest of this demo's

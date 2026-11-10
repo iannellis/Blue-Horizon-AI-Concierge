@@ -75,7 +75,7 @@ respond) plus three parallel vector searches.
     steps is knowable in advance, a workflow is cheaper, faster, and - because it
     removes the model's opportunity to misread a correct-but-empty result as a
     malfunction - more reliable. See
-    [Design Goals and Decisions](../design-decisions.md#the-information-agent-is-a-workflow-not-an-agent).
+    [Design Decisions](../design-decisions.md#the-information-agent-is-a-workflow-not-an-agent).
 
 ## Filters and the no-match path
 

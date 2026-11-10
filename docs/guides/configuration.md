@@ -332,7 +332,7 @@ deliberately named so that they cannot be mistaken for one another:
 `reload_sql_tables` drops and recreates tables, so it must never run against a branch
 that gets reset in place. That is the entire reason `PGSQL_ROOT_PARENT_DB_URL` has its
 own name rather than sharing `PGSQL_ROOT_DB_URL`. See
-[Design Goals and Decisions](../design-decisions.md#test-databases-are-separated-from-production-by-construction).
+[Design Decisions](../design-decisions.md#test-databases-are-separated-from-production-by-construction).
 
 ### Eval-only variables
 

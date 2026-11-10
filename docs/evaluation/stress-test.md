@@ -62,7 +62,7 @@ database error.
     longer existed. The harness then counted that reply as a success. Both are fixed: a
     refused confirm now writes an app-authored note into the thread, and the harness
     counts a success only when a confirm succeeded. The run above is the rerun. See
-    [Design Goals and Decisions](../design-decisions.md#a-refused-confirm-left-the-agent-pointing-at-a-dead-proposal).
+    [Design Decisions](../design-decisions.md#a-refused-confirm-left-the-agent-pointing-at-a-dead-proposal).
 
 !!! note "31 conflicts were flagged as suspicious"
     Reconciliation flags a conflict as *suspicious* when none of the nights it targeted

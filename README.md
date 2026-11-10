@@ -112,12 +112,15 @@ Some things to try:
 Full documentation is at
 **[iannellis.github.io/Blue-Horizon-AI-Concierge](https://iannellis.github.io/Blue-Horizon-AI-Concierge/)**.
 
+- **[Goals](https://iannellis.github.io/Blue-Horizon-AI-Concierge/goals/)** explains what
+  the project set out to demonstrate, what is deliberately out of scope, and the
+  constraints it was built under.
 - **[Architecture](https://iannellis.github.io/Blue-Horizon-AI-Concierge/architecture/)**
   covers the orchestration graph, the
   [information agent](https://iannellis.github.io/Blue-Horizon-AI-Concierge/architecture/information-agent/),
   and the
   [booking agent](https://iannellis.github.io/Blue-Horizon-AI-Concierge/architecture/booking-agent/).
-- **[Design Goals and Decisions](https://iannellis.github.io/Blue-Horizon-AI-Concierge/design-decisions/)**
+- **[Design Decisions](https://iannellis.github.io/Blue-Horizon-AI-Concierge/design-decisions/)**
   records what changed direction and why, including the failures that prompted each
   change.
 - **[Running Locally](https://iannellis.github.io/Blue-Horizon-AI-Concierge/guides/running-locally/)**

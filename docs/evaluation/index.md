@@ -38,7 +38,7 @@ reference checks - are deterministic, code-based checks with no model in the loo
 
 The judge is deliberately from a different model family than the agents, which run on
 OpenAI. See
-[Design Goals and Decisions](../design-decisions.md#the-judge-is-a-different-model-family-from-the-agent).
+[Design Decisions](../design-decisions.md#the-judge-is-a-different-model-family-from-the-agent).
 
 ## Conversation-level scores
 
@@ -129,7 +129,7 @@ attribute-search cases `case_0207` through `case_0225` and the split-routing cas
 search. Every labeled turn passed in all three runs. The labels accept only the
 inclusive reading of a broad request, which `case_0216`'s "15th floor or higher with an
 ocean view" missed once in the previous runs (see
-[Design Goals and Decisions](../design-decisions.md#a-search-for-an-ocean-view-left-out-the-panoramic-ones)).
+[Design Decisions](../design-decisions.md#a-search-for-an-ocean-view-left-out-the-panoramic-ones)).
 
 **Booking - no unexpected failure rate** measures whether a booking, cancellation, or
 modification's success-or-failure outcome matched the case's expectation. A request for
@@ -150,13 +150,13 @@ range. `booking.txt` states how to resolve a date given without a year, so the m
 skipped a rule it had rather than lacking one. The tool refused each proposal with a
 message naming the window, and the agent retried with the right year and booked the
 room (see
-[Design Goals and Decisions](../design-decisions.md#a-wrong-year-read-as-a-taken-room)).
+[Design Decisions](../design-decisions.md#a-wrong-year-read-as-a-taken-room)).
 The previous three runs showed this once.
 The
 ambiguous-column SQL errors that once held this metric below 100% came from
 the model writing its own queries, and cannot recur now that room search is a fixed
 parameterized query (see
-[Design Goals and Decisions](../design-decisions.md#free-form-sql-had-no-bound-on-what-one-search-could-cost)).
+[Design Decisions](../design-decisions.md#free-form-sql-had-no-bound-on-what-one-search-could-cost)).
 
 **RAG faithfulness** measures whether generated answers stay within the retrieved
 context. **RAG context recall** measures whether all relevant context was retrieved.

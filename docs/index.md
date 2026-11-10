@@ -1,7 +1,9 @@
 # Blue Horizon AI Concierge
 
 An AI-powered hotel concierge that handles natural language queries about hotel
-information and room bookings.
+information and room bookings. It is a portfolio project, built to demonstrate the
+design of an AI agent that is safe to trust with a real action and is evaluated well
+enough to prove it. [Goals](goals.md) explains what that means in practice.
 
 The **agent backend** is built with [LangGraph](https://github.com/langchain-ai/langgraph)
 and served via [FastAPI](https://fastapi.dev). A router LLM classifies each incoming
@@ -25,9 +27,10 @@ bubble as each request is processed, then renders the final response.
 
 - **New to the project?**
 
-    Read the [Architecture overview](architecture/index.md) for how the pieces fit
-    together, then [Design Goals and Decisions](design-decisions.md) for why they fit
-    together that way.
+    Start with [Goals](goals.md) for what the project set out to demonstrate. Then
+    read the [Architecture overview](architecture/index.md) for how the pieces fit
+    together, and [Design Decisions](design-decisions.md) for why they fit together
+    that way.
 
 - **Want to run it?**
 

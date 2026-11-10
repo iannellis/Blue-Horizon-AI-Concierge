@@ -128,6 +128,8 @@ The documentation site under `docs/` is the authority. It is written for humans,
 current, and it explains reasoning this file only summarises. Consult it rather than
 inferring intent from the code.
 
+- `docs/goals.md` for what the project is meant to demonstrate, its non-goals, and the
+  constraints it was built under.
 - `docs/architecture/` for how the pieces fit: `orchestration.md`,
   `information-agent.md`, `booking-agent.md`. Read the relevant page before changing an
   agent's control flow or tool surface.
@@ -139,8 +141,9 @@ inferring intent from the code.
 - `docs/guides/configuration.md` for every tunable and environment variable.
 - `docs/evaluation/` for the harness, datasets, baselines, and stress test.
 
-Keep this split intact when you write documentation. `docs/architecture/` describes the
-system as it is now and must be updated in the same commit as the code it describes.
+Keep this split intact when you write documentation. `docs/goals.md` and
+`docs/architecture/` describe the system as it is now and must be updated in the same
+commit as the code they describe.
 `docs/design-decisions.md` is a log: add a new entry, do not rewrite an old one. If a
 fact would need editing in both files after a code change, it is duplicated rather than
 split.

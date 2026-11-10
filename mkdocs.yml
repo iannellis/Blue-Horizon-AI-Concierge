@@ -79,13 +79,14 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Goals: goals.md
   - Using the Demo: using-the-demo.md
   - Architecture:
       - architecture/index.md
       - Orchestration: architecture/orchestration.md
       - Information Agent: architecture/information-agent.md
       - Booking Agent: architecture/booking-agent.md
-  - Design Goals and Decisions: design-decisions.md
+  - Design Decisions: design-decisions.md
   - Guides:
       - Running Locally: guides/running-locally.md
       - Configuration: guides/configuration.md

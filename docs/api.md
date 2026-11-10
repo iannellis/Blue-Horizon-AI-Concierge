@@ -185,7 +185,7 @@ identically is what this API is deliberately designed to avoid:
 | Dismiss `404` / `403` | No | Terminal for this proposal id |
 
 This mirrors the retry-safety tiering described in
-[Design Goals and Decisions](design-decisions.md#asking-the-guest-to-try-again-was-hiding-three-different-failures):
+[Design Decisions](design-decisions.md#asking-the-guest-to-try-again-was-hiding-three-different-failures):
 an idempotent read is retried by the system itself and never surfaces a user-facing
 failure at all; the chat turn offers a resend rather than auto-retrying, since it may
 already have side effects; the confirm write never blind-retries, and instead the `503`

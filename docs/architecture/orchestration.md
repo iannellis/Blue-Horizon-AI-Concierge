@@ -89,7 +89,7 @@ These were found empirically: each one is a case in the eval dataset that misrou
 was diagnosed, and produced either a new rule or a worked example in the prompt. Route
 accuracy is measured on every eval run precisely because this boundary is where
 regressions show up first. See
-[Design Goals and Decisions](../design-decisions.md#routing-rules-are-earned-not-designed).
+[Design Decisions](../design-decisions.md#routing-rules-are-earned-not-designed).
 
 ### A message that needs both agents is split
 
@@ -258,7 +258,7 @@ Two things follow. A failure can no longer reach a client looking like an ordina
 reply, which is what previously kept the UI from offering its Send again button. And the
 router never reads an apology in history as something the concierge said. See
 [API Reference](../api.md#streaming-events) for the event shape, and
-[Design Goals and Decisions](../design-decisions.md#a-failed-turn-was-reported-as-a-successful-one)
+[Design Decisions](../design-decisions.md#a-failed-turn-was-reported-as-a-successful-one)
 for the reasoning.
 
 ## History length
@@ -318,7 +318,7 @@ A `/v1/chat` request is gated on `is_ready` before either content-negotiated bra
 commits to a response, since a `StreamingResponse` commits its `200` as soon as it
 starts and cannot become a `503` afterward. See
 [API Reference](../api.md#readiness-503) for the wire-level response shape, and
-[Design Goals and Decisions](../design-decisions.md#asking-the-guest-to-try-again-was-hiding-three-different-failures)
+[Design Decisions](../design-decisions.md#asking-the-guest-to-try-again-was-hiding-three-different-failures)
 for why "please try again" was replaced by this instead of by better copy alone.
 
 ## Session isolation

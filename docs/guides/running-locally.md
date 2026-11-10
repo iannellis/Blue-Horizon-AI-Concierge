@@ -121,7 +121,7 @@ Besides `rooms` and `room_availability`, this seeds `customers`, `bookings`, and
 default) that the UI offers, because most pre-existing bookings belong to a customer
 outside any small subset. Loading only a subset leaves most of `room_availability`
 marked `Booked` with no matching reservation. See
-[Design Goals and Decisions](../design-decisions.md#loading-only-the-seeded-guests-corrupted-the-availability-data).
+[Design Decisions](../design-decisions.md#loading-only-the-seeded-guests-corrupted-the-availability-data).
 
 The `seeded_customer_count` source customers with the richest pre-existing booking
 history - not an arbitrary first N - are remapped to a dense `customer_id` range of

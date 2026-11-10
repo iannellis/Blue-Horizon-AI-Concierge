@@ -4,8 +4,9 @@ The system is composed of an **orchestration layer** that routes between two age
 
 - **[Information agent](information-agent.md)** answers questions about hotel services,
   amenities, and policies using RAG over a Redis vector store.
-- **[Booking agent](booking-agent.md)** searches availability using LLM-generated,
-  read-only SQL against a PostgreSQL database, and proposes bookings, cancellations,
+- **[Booking agent](booking-agent.md)** searches availability with a typed, read-only
+  search that runs fixed parameterized queries against a PostgreSQL database (the model
+  supplies filter values, never SQL), and proposes bookings, cancellations,
   and modifications for the guest to confirm. It never writes to the database itself.
 
 Both sit behind the [orchestration graph](orchestration.md), which classifies each

@@ -107,11 +107,17 @@ Some things to try:
 - *Show my reservations*, then *move the first one a day later*
 - *Write me a poem about Paris*, which the concierge declines
 
+[Using the Demo](https://iannellis.github.io/Blue-Horizon-AI-Concierge/using-the-demo/)
+has the full guide, including what you can search for and a demo video.
+
 ## Documentation
 
 Full documentation is at
 **[iannellis.github.io/Blue-Horizon-AI-Concierge](https://iannellis.github.io/Blue-Horizon-AI-Concierge/)**.
 
+- **[Using the Demo](https://iannellis.github.io/Blue-Horizon-AI-Concierge/using-the-demo/)**
+  explains what to expect from the live demo, what you can search for, and has a demo
+  video.
 - **[Goals](https://iannellis.github.io/Blue-Horizon-AI-Concierge/goals/)** explains what
   the project set out to demonstrate, what is deliberately out of scope, and the
   constraints it was built under.

@@ -22,6 +22,7 @@ from eval.config import RagasConfig
 from eval.evaluators._rag import (
     _build_retrying,
     _is_transient_gemini_error,
+    _rag_mean_or_comment,
     _rag_reference_is_no_match,
     _rag_score_turn,
 )
@@ -382,3 +383,13 @@ def test_answer_relevancy_failure_is_not_scored_as_zero() -> None:
     metric = _FailingMetric(0.9, _gemini_error(503), failures=1)
     with pytest.raises(genai_errors.ServerError):
         _score_with(metric, None)
+
+
+def test_unscored_case_mean_is_none_not_zero() -> None:
+    """A case with no scored turns gets no score, so it leaves the run mean alone."""
+    assert _rag_mean_or_comment([], "No references") == (None, "No references")
+
+
+def test_scored_case_mean_has_no_comment() -> None:
+    """A case with scored turns gets their mean and no comment."""
+    assert _rag_mean_or_comment([0.5, 1.0], "No references") == (0.75, None)

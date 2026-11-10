@@ -687,19 +687,23 @@ def _metric_result_to_float(value: object) -> float:
 def _rag_mean_or_comment(
     values: list[float],
     empty_comment: str,
-) -> tuple[float, str | None]:
+) -> tuple[float | None, str | None]:
     """Compute a mean score with an optional comment for empty lists.
+
+    An empty list means no turn was scored, so the score is None rather than
+    0.0; a 0.0 would be averaged into the run's mean as a real score.
 
     Args:
         values: List of float values to average.
         empty_comment: Comment to return when the list is empty.
 
     Returns:
-        Tuple of (mean, comment) where comment is None when values exist.
+        Tuple of (mean, comment): (None, empty_comment) when the list is
+        empty, otherwise (mean, None).
 
     """
     if not values:
-        return 0.0, empty_comment
+        return None, empty_comment
     return _rag_mean(values), None
 
 

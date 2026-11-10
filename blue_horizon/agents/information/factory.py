@@ -68,6 +68,24 @@ def _build_context_block(items: list[RetrievalItem]) -> str:
     )
 
 
+def _not_searched_note(queries: list[str]) -> str:
+    """Build the context line naming sub-queries that were never searched.
+
+    Without it, a topic cut by `max_queries` looks like an empty retrieval,
+    which the prompt reads as the hotel not offering it.
+
+    Args:
+        queries: Sub-queries dropped by the `max_queries` cap.
+
+    Returns:
+        A line to append to the context block, or an empty string if none.
+
+    """
+    if not queries:
+        return ""
+    return "\n\nNot searched: " + "; ".join(queries)
+
+
 def _best_by_text(batches: list[list[RetrievalItem]]) -> list[RetrievalItem]:
     """Merge batched retrieval results, keeping the highest-scoring item per text.
 
@@ -109,6 +127,7 @@ def build_info_agent(  # noqa: C901, PLR0915
 
     """
     max_context_items = config.retrieval.max_context_items
+    max_queries = config.retrieval.max_queries
 
     llm_cfg = config.llm
     parser_llm = build_chat_model(llm_cfg).with_structured_output(
@@ -201,11 +220,14 @@ def build_info_agent(  # noqa: C901, PLR0915
     async def parse_node(state: InfoState) -> dict[str, Any]:
         """Parse the user request into a structured query and constraints.
 
+        Sub-queries past `max_queries` are cut from the search and kept in
+        `dropped_queries` so the reply can name them.
+
         Args:
             state: Current info state with conversation messages.
 
         Returns:
-            State patch with the parsed query.
+            State patch with the parsed query and any dropped sub-queries.
 
         """
         try:
@@ -222,7 +244,18 @@ def build_info_agent(  # noqa: C901, PLR0915
             _log_node_failure("parse", exc)
             parsed = ParsedQuery(queries=[_latest_user_text(state["messages"])])
 
-        return {"parsed": parsed}
+        dropped = parsed.queries[max_queries:]
+        if dropped:
+            # Counts only: the topics are the guest's own words.
+            logger.info(
+                "Info parse: searching %d of %d topics",
+                max_queries,
+                len(parsed.queries),
+            )
+            parsed = parsed.model_copy(
+                update={"queries": parsed.queries[:max_queries]},
+            )
+        return {"parsed": parsed, "dropped_queries": dropped}
 
     query_faq_node = _make_retrieval_node(Source.FAQ, "faq_results")
     query_amenities_node = _make_retrieval_node(Source.AMENITIES, "amenities_results")
@@ -268,7 +301,9 @@ def build_info_agent(  # noqa: C901, PLR0915
 
         """
         top_items = state.get("top_results", [])
-        context_block = _build_context_block(top_items)
+        context_block = _build_context_block(top_items) + _not_searched_note(
+            state.get("dropped_queries", []),
+        )
         system_prompt = resources.get_system_prompt()
         try:
             response = await responder_llm.ainvoke(

@@ -60,6 +60,8 @@ class InfoRetrievalConfig(FrozenModel):
         max_context_items: Hard ceiling on the total number of retrieved items
             passed to the LLM after merging all sources. Acts as a safety cap
             against runaway context growth when many sub-queries are parsed.
+        max_queries: Most sub-queries searched for one message. Any beyond it
+            are not searched, and the reply names them to the guest.
         vector_dims: Dimensionality expected by the Redis vector index schema.
         retriever_cache_max: Maximum cached retrievers kept per process.
 
@@ -67,6 +69,7 @@ class InfoRetrievalConfig(FrozenModel):
 
     top_k: int
     max_context_items: int
+    max_queries: int
     vector_dims: int
     retriever_cache_max: int
 

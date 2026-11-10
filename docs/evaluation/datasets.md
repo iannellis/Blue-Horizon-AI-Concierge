@@ -225,6 +225,14 @@ sets `limit` or the search raises an unset `limit` to the number of rooms named.
 reliable here: graded three times, a reply with three of the rooms removed scored 3 for
 consumer quality twice and 5 once. It is in the full set only.
 
+`case_0244` and `case_0245` cover how the information agent spreads its cards across
+topics. `case_0244` asks about six topics, more than `[info.retrieval].max_queries`
+searches, so the reply should card the topics it searched and name the rest as not looked
+up, never as something the hotel lacks. `case_0245` asks for listings on two topics where
+one has far more matches, so the reply should give each topic a card before either gets
+a second. Neither has a deterministic check; only the judge grades the reply. Both are in
+the full set only.
+
 ### Uploading a dataset to LangSmith
 
 ```bash

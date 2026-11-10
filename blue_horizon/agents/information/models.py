@@ -163,6 +163,7 @@ class InfoState(MessagesState, total=False):
         amenities_results: Retrieved amenity items.
         services_results: Retrieved service items.
         top_results: Merged items across sources, sorted by score.
+        dropped_queries: Parsed sub-queries past `max_queries`, never searched.
 
     """
 
@@ -170,6 +171,7 @@ class InfoState(MessagesState, total=False):
     amenities_results: list[RetrievalItem]
     services_results: list[RetrievalItem]
     top_results: list[RetrievalItem]
+    dropped_queries: list[str]
 
 
 class ParsedState(InfoState):

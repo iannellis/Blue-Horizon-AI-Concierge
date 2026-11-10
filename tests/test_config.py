@@ -96,6 +96,7 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
             "vector_dims": 1536,
             "retriever_cache_max": 64,
             "max_context_items": 20,
+            "max_queries": 4,
         },
         "embeddings": {
             "model": "text-embedding-3-small",

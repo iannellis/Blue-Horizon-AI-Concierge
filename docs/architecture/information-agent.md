@@ -28,7 +28,14 @@ START -> parse -> +-- query_faq -------+
 Embeddings are produced with OpenAI (`text-embedding-3-small`) and stored in Redis via
 LlamaIndex. Retrieval is capped by `[info.retrieval].top_k` per source and
 `max_context_items` overall, so a question that parses into many sub-queries cannot grow
-the context without bound.
+the context without bound. At most `[info.retrieval].max_queries` sub-queries are
+searched. Any past it are named on a `Not searched:` line at the end of the context, so
+the reply tells the guest to ask about them separately instead of reading the missing
+results as the hotel not offering them.
+
+When a message asks for listings on several topics, the respond prompt gives each topic
+with a relevant result one card before any topic gets a second, and names the topics
+that did not fit in `top_k` cards.
 
 Every retrieval goes through one Redis client per process, on a blocking connection
 pool capped at `[info.redis].max_connections`. When every connection is busy, a

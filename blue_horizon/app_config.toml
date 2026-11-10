@@ -86,6 +86,8 @@ failed = "Sorry - the system hit a problem that will not resolve on its own. Ple
 top_k = 4
 # Cap on retrieved items passed to the LLM across all sources
 max_context_items = 20
+# Most topics searched from one message; the rest are named to the guest
+max_queries = 4
 # Embedding dimensionality; must match the Redis index schema
 vector_dims = 1536
 # Maximum cached amenity/service retrievers per process

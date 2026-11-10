@@ -12,6 +12,7 @@ from blue_horizon.agents.information.factory import (
     _best_by_text,
     _build_context_block,
     _latest_user_text,
+    _not_searched_note,
 )
 from blue_horizon.agents.information.models import RetrievalItem, Source
 
@@ -102,6 +103,25 @@ class TestBestByText:
     def test_no_batches_returns_empty(self) -> None:
         """Zero batches produce an empty list."""
         assert _best_by_text([]) == []
+
+
+# ---------------------------------------------------------------------------
+# _not_searched_note
+# ---------------------------------------------------------------------------
+
+
+class TestNotSearchedNote:
+    """_not_searched_note names the sub-queries cut by max_queries."""
+
+    def test_no_dropped_queries_adds_nothing(self) -> None:
+        """An uncut parse leaves the context block unchanged."""
+        assert _not_searched_note([]) == ""
+
+    def test_dropped_queries_are_named(self) -> None:
+        """Every dropped sub-query appears on the note line."""
+        assert _not_searched_note(["golf", "kayaks"]) == (
+            "\n\nNot searched: golf; kayaks"
+        )
 
 
 # ---------------------------------------------------------------------------

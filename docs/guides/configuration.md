@@ -157,6 +157,12 @@ source and the most amenity or service cards the information agent presents. The
 judge's `[judge].info_cards_max` must match it; see
 [Evaluation](../evaluation/harness.md#configuration).
 
+**`[info.retrieval].max_queries`** (default 4) is the most sub-queries the information
+agent searches for one message. Each sub-query runs against all three sources, so this
+bounds the retrieval fan-out. Sub-queries past it are not searched, and the reply names
+them and asks the guest to ask about them separately. It matches `top_k`, since a message
+with more listing topics than that cannot give each one a card anyway.
+
 **`[info.retrieval].vector_dims`** (default 1536) must match the dimensionality of the
 vector field in the Redis index schema, which is fixed by the embedding model. Startup
 reads each index's schema from Redis and refuses to become ready on a mismatch.

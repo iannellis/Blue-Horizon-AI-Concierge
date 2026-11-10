@@ -99,10 +99,11 @@ run.
 
 ### A failure mode worth knowing about
 
-The `eval` job requires `db-integration-tests` to pass first. When
-`db-integration-tests` is broken, `eval` **skips** rather than fails, and the deploy
-gate treats a skip as acceptable. That combination once hid a real eval crash for
-several commits: the eval had not been passing, it had not been running at all.
+`eval` runs only after `db-integration-tests` passes. When the DB tests fail, `eval`
+shows as **skipped**, not failed. The deploy is still blocked, because the deploy gate
+checks `db-integration-tests` directly. But the eval itself has not run, so a broken
+eval stays hidden for as long as the DB tests stay red. That once hid a real eval crash
+for several commits: the eval had not been passing, it had not been running at all.
 
 If eval results stop appearing in CI, check whether `db-integration-tests` is red before
 concluding the eval is fine.

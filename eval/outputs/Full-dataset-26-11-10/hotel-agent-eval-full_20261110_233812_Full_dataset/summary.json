@@ -1,12 +1,12 @@
 {
-  "experiment_name": "hotel-agent-eval-full_20261105_021830_Full_dataset",
+  "experiment_name": "hotel-agent-eval-full_20261110_233812_Full_dataset",
   "dataset_name": "BlueHorizonEval_full",
   "max_concurrency": 10,
-  "started_at": "2026-11-05T02:18:30.831621+00:00",
-  "finished_at": "2026-11-05T02:30:00.371677+00:00",
+  "started_at": "2026-11-10T23:38:12.464000+00:00",
+  "finished_at": "2026-11-10T23:49:41.597294+00:00",
   "upload_results": false,
   "metadata": {
-    "git_sha": "5f12c158e2635676075790d363a40721ba0d4bd8",
+    "git_sha": "e46da12af109551218fe46371cb609f1549aabf8",
     "git_dirty": true,
     "dataset_name": "BlueHorizonEval_full",
     "max_concurrency": 10,
@@ -23,30 +23,30 @@
     "judge_model": "gemini-3.5-flash-lite",
     "ragas_llm_model": "gemini-3.5-flash-lite",
     "ragas_embedding_model": "gemini-embedding-2",
-    "app_config_sha256": "ac0fc5ce0a0c",
+    "app_config_sha256": "83c7f88411b1",
     "eval_config_sha256": "fb95982ca6e3",
     "router_prompt_sha256": "f5f52922d1f1",
     "injection_check_prompt_sha256": "5ddc63ecc3a4",
-    "info_system_prompt_sha256": "15001e4dbeb1",
+    "info_system_prompt_sha256": "663743b38a55",
     "info_parser_prompt_sha256": "662fd562b851",
-    "booking_prompt_sha256": "4e99a2d8b08b"
+    "booking_prompt_sha256": "dfde238faa5c"
   },
-  "num_examples": 241,
+  "num_examples": 245,
   "num_failed_runs": 0,
   "case_based_summary": {
     "route_accuracy": 1.0,
-    "booking_no_unexpected_failure_rate": 1.0,
-    "consumer_quality": 4.987551867219917,
+    "booking_no_unexpected_failure_rate": 0.9967948717948718,
+    "consumer_quality": 4.983673469387755,
     "grounding": 5.0,
     "injection_resistance": 5.0,
-    "rag_faithfulness_mean": 0.9682299487421724,
-    "rag_answer_relevancy_mean": 0.8458915437894099,
-    "rag_context_precision_mean": 0.8932447719974673,
-    "rag_context_recall_mean": 0.9825581395348837,
+    "rag_faithfulness_mean": 0.9585690443154095,
+    "rag_answer_relevancy_mean": 0.8404063172894419,
+    "rag_context_precision_mean": 0.914114244478386,
+    "rag_context_recall_mean": 0.9883720930232558,
     "info_reference_subset_pass_rate": 1.0,
-    "info_expected_filters_pass_rate": 1.0,
+    "info_expected_filters_pass_rate": 0.9944444444444444,
     "booking_expected_search_pass_rate": 1.0,
-    "booking_tool_errors": 0.9939024390243902,
+    "booking_tool_errors": 0.9878787878787879,
     "booking_no_unbacked_success_claims": 1.0,
     "injection_tripwire_pass": 1.0,
     "moderation_flag_pass": 1.0,
@@ -56,45 +56,45 @@
   "turn_based_summary": {
     "route_accuracy": 1.0,
     "info_reference_subset_pass_rate": 1.0,
-    "booking_no_unexpected_failure_rate": 1.0,
-    "info_expected_filters_pass_rate": 1.0,
+    "booking_no_unexpected_failure_rate": 0.9961832061068703,
+    "info_expected_filters_pass_rate": 0.9916666666666666,
     "booking_expected_search_pass_rate": 1.0,
-    "booking_tool_errors": 0.9965277777777778,
-    "rag_faithfulness_mean": 0.9644014712717789,
-    "rag_answer_relevancy_mean": 0.8420612958400718,
-    "rag_context_precision_mean": 0.9064101079082959,
-    "rag_context_recall_mean": 0.9830097087378641
+    "booking_tool_errors": 0.9930795847750865,
+    "rag_faithfulness_mean": 0.9529936483777338,
+    "rag_answer_relevancy_mean": 0.8382926408389987,
+    "rag_context_precision_mean": 0.9016792623094803,
+    "rag_context_recall_mean": 0.9878640776699029
   },
   "latency_quantiles_ms": {
     "booking": {
-      "p50_ms": 5809.4,
-      "p95_ms": 7938.7,
-      "p99_ms": 8778.9
+      "p50_ms": 5715.2,
+      "p95_ms": 7959.0,
+      "p99_ms": 9432.8
     },
     "booking+info": {
-      "p50_ms": 5583.2,
-      "p95_ms": 8123.8,
-      "p99_ms": 8457.4
+      "p50_ms": 5643.7,
+      "p95_ms": 7504.0,
+      "p99_ms": 7737.9
     },
     "info": {
-      "p50_ms": 5463.2,
-      "p95_ms": 8791.5,
-      "p99_ms": 12278.7
+      "p50_ms": 5299.4,
+      "p95_ms": 8627.0,
+      "p99_ms": 9945.3
     },
     "info+booking": {
-      "p50_ms": 5664.1,
-      "p95_ms": 5883.3,
-      "p99_ms": 5898.2
+      "p50_ms": 5417.3,
+      "p95_ms": 5635.6,
+      "p99_ms": 5665.4
     },
     "refuse": {
-      "p50_ms": 1634.5,
-      "p95_ms": 2298.8,
-      "p99_ms": 2545.0
+      "p50_ms": 1600.9,
+      "p95_ms": 1895.0,
+      "p99_ms": 1962.4
     },
     "all": {
-      "p50_ms": 5617.6,
-      "p95_ms": 8110.4,
-      "p99_ms": 10305.1
+      "p50_ms": 5511.0,
+      "p95_ms": 7978.2,
+      "p99_ms": 9914.0
     }
   }
 }

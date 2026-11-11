@@ -56,17 +56,17 @@ simultaneous sessions deliberately fighting over the same 10 rooms.
 
 ## Results
 
-Mean of three full runs over the 241-case dataset, the current baseline:
+Mean of three full runs over the 245-case dataset, the current baseline:
 
 | | |
 |---|---|
-| Route accuracy | **100%** across 241 multi-turn cases (no misroutes in three runs) |
-| Consumer quality / grounding (LLM judge, 0-5) | **4.99** / **4.99** |
-| RAG faithfulness / context recall | **95.9%** / **99.0%** |
-| RAG context precision / answer relevancy | **90.1%** / **83.8%** |
-| Booking tool-call success rate | **99.5%** |
+| Route accuracy | **100%** across 245 multi-turn cases (no misroutes in three runs) |
+| Consumer quality / grounding (LLM judge, 0-5) | **4.99** / **5.00** |
+| RAG faithfulness / context recall | **95.7%** / **98.6%** |
+| RAG context precision / answer relevancy | **90.2%** / **83.7%** |
+| Booking tool-call success rate | **99.3%** |
 | Stress test: 250 concurrent booking ops | **0 errors** |
-| Latency p50 (info / booking) | **5.5 s** / **5.8 s** |
+| Latency p50 (info / booking) | **5.4 s** / **5.7 s** |
 
 Double-bookings do not appear in the stress test because the schema makes them
 unstorable.

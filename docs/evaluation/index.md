@@ -1,18 +1,17 @@
 # Evaluation results
 
-Metrics collected over the 241-case dataset,
+Metrics collected over the 245-case dataset,
 [`eval/datasets/hotel_agent_eval_full.jsonl`](https://github.com/iannellis/Blue-Horizon-AI-Concierge/blob/main/eval/datasets/hotel_agent_eval_full.jsonl).
 
-**Every figure below is the mean of three full runs** on 2026-11-04 (US time; the run
-folders carry the UTC date, 2026-11-05), with the observed range across those runs
-given alongside. All three ran the same agent models, prompts,
+**Every figure below is the mean of three full runs** on 2026-11-10, with the observed
+range across those runs given alongside. All three ran the same agent models, prompts,
 and configuration: the prompt and config hashes recorded in each run's `summary.json`
 match. Single-run variance on the judge-scored metrics is large enough that a one-run
 number is misleading, which is why the repository's full-eval baseline is also set from
 a three-run average rather than a single run.
 
 Raw outputs:
-[`eval/outputs/Full-dataset-26-11-04/`](https://github.com/iannellis/Blue-Horizon-AI-Concierge/tree/main/eval/outputs/Full-dataset-26-11-04),
+[`eval/outputs/Full-dataset-26-11-10/`](https://github.com/iannellis/Blue-Horizon-AI-Concierge/tree/main/eval/outputs/Full-dataset-26-11-10),
 one subfolder per run.
 
 !!! info "These numbers are a snapshot, not a target"
@@ -46,28 +45,27 @@ Assessed once per multi-turn conversation by the LLM judge.
 
 | Metric | Score | Range across runs |
 |--------|-------|-------------------|
-| Consumer quality (0-5) | 4.986 | 4.971 - 5.000 |
-| Grounding (0-5) | 4.99 | 4.98 - 5.00 |
+| Consumer quality (0-5) | 4.989 | 4.984 - 4.996 |
+| Grounding (0-5) | 4.999 | 4.996 - 5.000 |
 | Injection resistance (0-5) | 5.00 | 5.00 - 5.00 |
 
 **Consumer quality** and **Grounding** assess response helpfulness and factual fidelity
 to retrieved context. **Injection resistance** scores how reliably the system refuses
-prompt-injection attempts, and was 5 on every conversation in all three runs. The third
-run scored 5 everywhere on all three. Grounding dropped to 3 on two conversations in the
-first run, and consumer quality dropped below 5 on six conversations in the first run and
-two in the second:
+prompt-injection attempts, and was 5 on every conversation in all three runs. Grounding
+dropped below 5 on one conversation, in the first run, and consumer quality on two
+conversations in the first run, three in the second, and one in the third:
 
-- `case_0220` (first run, 3 on both), where the judge said the second turn listed the
-  same rooms as the first although the guest had added a price cap.
-- `case_0131` (first run, 4 on consumer quality, 3 on grounding), where the judge called
-  a confirmed stay the third turn mentioned unsupported by anything earlier in the
-  conversation.
-- `case_0163` (second run, 3), where the judge said the third turn called a booking
-  already confirmed when the guest had only just given dates.
-- `case_0187` (first and second runs, 4), where the judge called the third turn confused
-  because the booking was already confirmed.
-- `case_0127`, `case_0189`, and `case_0004` (first run, 4), where the judge called a
-  turn slower or wordier than it needed to be.
+- `case_0187` (second run 3, third run 4), where the judge said the third turn called
+  the stay already confirmed when the guest restated the dates.
+- `case_0127` (first run, 3), where the judge said the agent repeated clarifying
+  questions across turns instead of checking availability.
+- `case_0067` (first run, 4 on both), where the judge said the second turn contradicted
+  itself on whether an amenity needs booking.
+- `case_0244` (second run, 4), where the judge said the reply missed airport
+  transportation and yoga. Those are the two topics past `[info.retrieval].max_queries`,
+  which the reply is meant to name as not looked up rather than answer.
+- `case_0123` (second run, 4), where the judge said the second turn repeated the first
+  turn's information.
 
 !!! warning "Near-ceiling scores measure the dataset as much as the agent"
     Grounding and injection resistance sitting at the top of the scale means these runs
@@ -83,14 +81,14 @@ Assessed at each individual exchange and averaged across all turns in the datase
 | Metric | Score | Range across runs | Scored by |
 |--------|-------|-------------------|-----------|
 | Route accuracy | 100% | 100% - 100% | code |
-| Booking - no unexpected failure rate | 100% | 100% - 100% | code |
-| Booking - tool call success rate | 99.5% | 99.3% - 99.6% | code |
+| Booking - no unexpected failure rate | 99.6% | 99.6% - 99.6% | code |
+| Booking - tool call success rate | 99.3% | 99.3% - 99.3% | code |
 | Booking - expected search pass rate | 100% | 100% - 100% | code |
-| RAG faithfulness | 95.9% | 95.3% - 96.4% | `gemini-3.5-flash-lite` |
-| RAG context recall | 99.0% | 98.3% - 99.5% | `gemini-3.5-flash-lite` |
-| RAG context precision | 90.1% | 89.7% - 90.6% | `gemini-3.5-flash-lite` |
-| RAG answer relevancy | 83.8% | 83.3% - 84.2% | `gemini-3.5-flash-lite` + `gemini-embedding-2` |
-| Info filters pass rate | 100% | 100% - 100% | code |
+| RAG faithfulness | 95.7% | 95.3% - 96.0% | `gemini-3.5-flash-lite` |
+| RAG context recall | 98.6% | 98.3% - 98.8% | `gemini-3.5-flash-lite` |
+| RAG context precision | 90.2% | 89.4% - 91.0% | `gemini-3.5-flash-lite` |
+| RAG answer relevancy | 83.7% | 83.5% - 83.8% | `gemini-3.5-flash-lite` + `gemini-embedding-2` |
+| Info filters pass rate | 99.4% | 99.2% - 100% | code |
 | Info reference subset pass rate | 100% | 100% - 100% | code |
 
 Database invariants (`db_no_double_booking`, `db_no_null_status`,
@@ -110,23 +108,29 @@ it matches "already confirmed" and "already done" as well as "is booked".
 
     [`eval/baselines/`](datasets.md#baseline-files) and `ci_check.py` use the
     **case-based** figures, so the pinned baseline values differ slightly from this
-    table. For these runs: faithfulness 0.9645 case vs 0.9592 turn, precision 0.8910 vs
-    0.9014, recall 0.9884 vs 0.9895, answer relevancy 0.8414 vs 0.8378, tool call success
-    0.9919 vs 0.9953. Route accuracy, filters, expected search, and reference subset were
-    1.0 both ways. The
+    table. For these runs: faithfulness 0.9618 case vs 0.9568 turn, precision 0.9134 vs
+    0.9019, recall 0.9858 vs 0.9862, answer relevancy 0.8407 vs 0.8368, tool call success
+    0.9879 vs 0.9931, no unexpected failure 0.9968 vs 0.9962, filters 0.9963 vs 0.9944.
+    Route accuracy, expected search, and reference subset were 1.0 both ways. The
     conversation-level judge scores above are case-based already, and match the baseline
     exactly.
 
+    Before these runs, a case with no turn scored for a RAG metric got 0.0 for that metric
+    instead of no score, so the case-based precision mean counted every case whose info
+    turns all had the "nothing matched" reference as a 0.0. That held the 241-case
+    baseline's precision at 0.891. The turn-based figure was never affected.
+
 **Route accuracy** measures how often the router correctly dispatches to the information
-or booking agent, both, or refuses. Of 723 conversations (241 cases, three runs), no
-turn was misrouted. The previous three runs misrouted one turn each, two of them
-injection attempts that reached a sub-agent instead of being refused. Those runs predate
-the injection check that now reads every guest message beside the router.
+or booking agent, both, or refuses. Of 735 conversations (245 cases, three runs), no
+turn was misrouted, as in the previous three runs. A run discarded the same day, because
+it was scored before the evaluator fix described above, sent `case_0041`'s closing
+"thanks for clarifying" to refuse.
 
 **Booking - expected search pass rate** checks the arguments of `search_rooms` calls on
-the turns labeled with an `expected_search`, which are the 32 turns of the
-attribute-search cases `case_0207` through `case_0225` and the split-routing cases that
-search. Every labeled turn passed in all three runs. The labels accept only the
+the 37 turns labeled with an `expected_search`: the attribute-search cases `case_0207`
+through `case_0225`, the split-routing cases that search, the missing-year case
+`case_0242`, and the named-room comparison `case_0243`. Every labeled turn passed in all
+three runs. The labels accept only the
 inclusive reading of a broad request, which `case_0216`'s "15th floor or higher with an
 ocean view" missed once in the previous runs (see
 [Design Decisions](../design-decisions.md#a-search-for-an-ocean-view-left-out-the-panoramic-ones)).
@@ -138,20 +142,28 @@ The check is two-sided: a write that succeeds on a turn labeled to fail is also 
 mismatch, and so is any `propose_*` call on a turn labeled `expect_no_write`, which the
 19 attribute-search cases, the search-only turns of the split-routing cases, and one
 search-only turn of `case_0169` carry (see
-[Datasets and Baselines](datasets.md#dataset-schema)). Every scored turn matched in all
-three runs, between 256 and 263 turns per run, since a turn with no proposal and no `expect_no_write` label is not scored.
+[Datasets and Baselines](datasets.md#dataset-schema)). Between 262 and 268 turns were
+scored per run, since a turn with no proposal and no `expect_no_write` label is not
+scored, and one turn per run missed: `case_0124` in the first run and `case_0121` in the
+second and third. Each asked to book a room for dates with no year. The tool refused the
+wrong year the model first tried, and the agent then asked the guest which year they
+meant instead of retrying, so the turn that expected a booking did not make one. The
+guest's next turn gave the year, and the room was booked. This began with the change
+that has the model call the tool rather than decide on its own that dates are out of
+range; the previous runs predate it.
 
 **Booking - tool call success rate** is stricter: it flags any `search_rooms`, `propose_*`,
 or `confirm_booking` call that errored on a turn not expected to fail, even when the agent
-recovered and the turn's outcome still matched. Four calls errored across the three
-runs, all the same way: `case_0121`'s first proposal for "Feb 3 to Feb 5" in every run,
-and `case_0164`'s for the same dates in the third, took a year outside the bookable
-range. `booking.txt` states how to resolve a date given without a year, so the model
-skipped a rule it had rather than lacking one. The tool refused each proposal with a
-message naming the window, and the agent retried with the right year and booked the
-room (see
-[Design Decisions](../design-decisions.md#a-wrong-year-read-as-a-taken-room)).
-The previous three runs showed this once.
+recovered and the turn's outcome still matched. Nine calls errored across the three
+runs, three per run, all the same way: a search or proposal for a date given without a
+year took a year outside the bookable range. They were `case_0242` and `case_0124` in
+the first run, `case_0121` and `case_0129` in the second, and `case_0242` and `case_0121`
+in the third. `booking.txt` states how to resolve a date given without a year, so the
+model skipped a rule it had rather than lacking one. The tool refused each call with a
+message naming the window (see
+[Design Decisions](../design-decisions.md#a-wrong-year-read-as-a-taken-room)), and the
+agent either retried with the right year or asked the guest, as described above. The
+previous three runs had four such errors.
 The
 ambiguous-column SQL errors that once held this metric below 100% came from
 the model writing its own queries, and cannot recur now that room search is a fixed
@@ -175,9 +187,9 @@ user-specified constraints (price, duration, booking requirements) when selectin
 presenting results. **Info reference subset pass rate** measures whether the expected
 source documents appear in the set of documents retrieved for a given query.
 
-The filters pass rate passed every turn in all three runs. `case_0005`'s "I only have
-20-minute", read as an exact duration rather than a cap in two of the previous three
-runs, is an intermittent miss the smoke run still showed. The rate was 96.0% before two changes to
+The filters pass rate missed one turn in each of the first two runs and none in the
+third. Both misses were `case_0005`'s "I only have 20-minute", read as an exact duration
+rather than a cap, an intermittent miss earlier runs also show. The rate was 96.0% before two changes to
 `information_parser.txt`, both from cases that missed in most runs. `case_0037` states
 one duration range for two items, and the
 parser dropped it, since its duration rules handled a duration attached to each item
@@ -194,11 +206,11 @@ Mean of the same three runs, at a `max_concurrency` of 10.
 
 | Route | p50 | p95 | p99 |
 |-------|-----|-----|-----|
-| Refuse | 1,637 | 2,297 | 2,507 |
-| Info | 5,497 | 9,128 | 11,233 |
-| Booking | 5,842 | 8,025 | 9,208 |
-| Booking + info | 5,824 | 8,443 | 8,795 |
-| Info + booking | 5,846 | 6,166 | 6,176 |
+| Refuse | 1,635 | 2,034 | 2,454 |
+| Info | 5,387 | 8,314 | 9,792 |
+| Booking | 5,676 | 7,712 | 8,818 |
+| Booking + info | 5,714 | 7,794 | 8,053 |
+| Info + booking | 5,506 | 5,833 | 5,870 |
 
 Refuse requests resolve fastest, since they are the router only. Info requests go
 through the full RAG pipeline: parse, parallel retrieval, merge, respond. Booking
@@ -208,9 +220,9 @@ included in this per-turn latency. A split turn runs both agents at once, so it 
 about as long as the slower of the two. Its rows rest on the few turns of twelve cases,
 so their tails are the least reliable figures here.
 
-Tail latency is the least stable figure here: booking p99 ranged from 8,779 ms to
-9,714 ms and info p99 from 10,499 ms to 12,279 ms across the three runs, against p50s
-that moved by under 140 ms. That
+Tail latency is the least stable figure here: booking p99 ranged from 8,300 ms to
+9,433 ms and info p99 from 8,918 ms to 10,513 ms across the three runs, against p50s
+that moved by under 180 ms. That
 spread is provider-side variance on individual reasoning calls, not contention, since
 these runs share a fixed concurrency limit. Treat p50 as the reliable number and p99 as
 indicative.

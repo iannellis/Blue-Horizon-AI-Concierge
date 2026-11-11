@@ -1,6 +1,6 @@
 {
-  "generated_from": "hotel-agent-eval-smoke_20261106_002749_Smoke_dataset",
-  "description": "Baseline metric thresholds for the 29-case smoke eval (propose/confirm booking architecture; typed search_rooms tool, returning 4 rooms by default and up to 15 on request via its limit argument; split routing, so one message can reach both agents). Two cases are attribute searches: case_0207 (room type, floor, and view, then the cheapest of the matches) and case_0220 (ocean-view suites, then a price cap on the same search); both carry expect_no_write on every turn, and case_0220 expects the inclusive reading of both 'suites' and 'ocean view', matching the full set. Two cases are split across both agents: case_0226 (presidential suites, then room service 'with them') and case_0230 (a named room plus a breakfast question, then 'book it'); both routed booking+info and passed every check. strict=true metrics require every individual case score to equal 1.0; strict=false metrics require the mean across cases to be >= min_allowed. Judge and Ragas LLM is gemini-3.5-flash-lite; booking.llm.reasoning_effort is medium and the router's is none. Ragas context precision uses the hotel-tuned prompt in eval/evaluators/_rag_prompts.py, which scores a chunk as useful when it answers any one clause of a multi-part question, and skips turns whose reference is only the 'nothing matched' sentinel ([ragas].no_match_reference). Ragas skips split turns, whose reply and contexts also carry the room search. Ragas calls retry transient Gemini errors, and a failed call is never scored as 0.0, so a 0.0 in the per-turn detail is a real score. Route accuracy ignores the order of a split turn's steps. One case is a moderation case: case_0238 (a threat, then a checkout-time question), whose first turn must be flagged by moderation and refused and whose second must be answered normally. booking_no_unexpected_failure_rate was 1.0 over 19 scored cases. booking_expected_search_pass_rate is averaged over the five labeled cases; min_allowed 0.75 tolerates one missed case. search_rooms, propose_booking, and propose_modification refuse dates outside the availability window with a message that names the window and says to retry with another year if the guest gave none, and the booking prompt now has the model call the tool rather than decide on its own that dates are out of range. One case is a missing-year case: case_0242 (presidential suites for Feb 10-12, then Feb 10-15, with no year, then Feb 10-12, 2027); every turn carries an expected_search, so declining without searching fails it, and the 2027 turn carries expected_success false, so its refusal is not a tool error. info_expected_filters_pass_rate is 0.9667 because case_0005's 'I only have 20-minute' turn was read as an exact duration, the intermittent miss the full runs also show. judge_consumer_quality is 4.931 because the judge scored case_0220 3, saying the price-capped turn repeated the first turn's rooms, as the full runs also show once. rag_* figures are single-run means on 19 cases and sit below the full-eval means; min_allowed for faithfulness and precision matches the full-eval baseline (0.85 / 0.80), which at this sample size leaves less headroom than the full set, so watch precision first if a run trips it. Values from one run; thresholds were left unchanged from the 28-case baseline.",
+  "generated_from": "hotel-agent-eval-smoke_20261111_000247_Smoke_dataset",
+  "description": "Baseline metric thresholds for the 29-case smoke eval (propose/confirm booking architecture; typed search_rooms tool, returning 4 rooms by default, every named room when room_numbers is set without a limit, and up to 15 on request via its limit argument; split routing, so one message can reach both agents). Two cases are attribute searches: case_0207 (room type, floor, and view, then the cheapest of the matches) and case_0220 (ocean-view suites, then a price cap on the same search); both carry expect_no_write on every turn, and case_0220 expects the inclusive reading of both 'suites' and 'ocean view', matching the full set. Two cases are split across both agents: case_0226 (presidential suites, then room service 'with them') and case_0230 (a named room plus a breakfast question, then 'book it'); both routed booking+info and passed every check. strict=true metrics require every individual case score to equal 1.0; strict=false metrics require the mean across cases to be >= min_allowed. Judge and Ragas LLM is gemini-3.5-flash-lite; booking.llm.reasoning_effort is medium and the router's is none. Ragas context precision uses the hotel-tuned prompt in eval/evaluators/_rag_prompts.py, which scores a chunk as useful when it answers any one clause of a multi-part question, and skips turns whose reference is only the 'nothing matched' sentinel ([ragas].no_match_reference). Ragas skips split turns, whose reply and contexts also carry the room search. Ragas calls retry transient Gemini errors, and a failed call is never scored as 0.0, so a 0.0 in the per-turn detail is a real score. A case with no scored turn for a RAG metric gets no score rather than 0.0, which earlier smoke baselines counted, holding precision near 0.86. Route accuracy ignores the order of a split turn's steps. One case is a moderation case: case_0238 (a threat, then a checkout-time question), whose first turn must be flagged by moderation and refused and whose second must be answered normally. booking_no_unexpected_failure_rate was 1.0 over 19 scored cases. booking_expected_search_pass_rate is averaged over the five labeled cases; min_allowed 0.75 tolerates one missed case. search_rooms, propose_booking, and propose_modification refuse dates outside the availability window with a message that names the window and says to retry with another year if the guest gave none, and the booking prompt now has the model call the tool rather than decide on its own that dates are out of range. One case is a missing-year case: case_0242 (presidential suites for Feb 10-12, then Feb 10-15, with no year, then Feb 10-12, 2027); every turn carries an expected_search, so declining without searching fails it, and the 2027 turn carries expected_success false, so its refusal is not a tool error. info_expected_filters_pass_rate is 0.9667 because case_0005's 'I only have 20-minute' turn was read as an exact duration, the intermittent miss the full runs also show. judge_consumer_quality and judge_grounding_faithfulness are 4.9655 because the judge scored case_0151 4 on both, saying the third turn misread a 4-hour notice requirement as failing the guest's 24-hour limit. The information agent searches at most [info.retrieval].max_queries sub-queries and gives each listing topic one card before any gets a second; no smoke case reaches that cap. rag_* figures are single-run means on 19 cases (faithfulness is 0.9499, against 0.9878 in the previous smoke baseline, from case_0005, case_0008, case_0009, and case_0151 scoring 0.75 to 0.84; a rerun of case_0005 showed the same reply shape as before) and sit below the full-eval means; min_allowed for faithfulness and precision matches the full-eval baseline (0.85 / 0.80), which at this sample size leaves less headroom than the full set, so watch precision first if a run trips it. Values from one run; thresholds were left unchanged from the 28-case baseline.",
   "metrics": {
     "route_accuracy": {
       "baseline": 1.0,
@@ -58,7 +58,7 @@
       "strict": false
     },
     "judge_consumer_quality": {
-      "baseline": 4.931,
+      "baseline": 4.9655,
       "min_allowed": 4.0,
       "strict": false
     },
@@ -68,22 +68,22 @@
       "strict": false
     },
     "judge_grounding_faithfulness": {
-      "baseline": 5.0,
+      "baseline": 4.9655,
       "min_allowed": 4.25,
       "strict": false
     },
     "rag_faithfulness_mean": {
-      "baseline": 0.9878,
+      "baseline": 0.9499,
       "min_allowed": 0.85,
       "strict": false
     },
     "rag_answer_relevancy_mean": {
-      "baseline": 0.8292,
+      "baseline": 0.8126,
       "min_allowed": 0.7,
       "strict": false
     },
     "rag_context_precision_mean": {
-      "baseline": 0.8679,
+      "baseline": 0.9212,
       "min_allowed": 0.8,
       "strict": false
     },

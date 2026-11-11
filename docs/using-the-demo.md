@@ -33,7 +33,9 @@ concierge handles each part and answers them together.
   with the exact details. The confirmation number appears only after you confirm.
 - **Messages are capped at 25 per rolling hour,** to keep the public demo affordable.
 - **Each guest can book at most 60 room-nights in any 24 hours** (one room for one night
-  is one room-night), so a few visitors cannot book out the whole hotel.
+  is one room-night), so a few visitors cannot book out the whole hotel. If you reach it
+  and want to book something else, cancel some of your most recent reservations, at the
+  top of "Your reservations". Only bookings made in the last 24 hours count.
 - **Each search shows a few rooms,** four by default. Ask for more and it shows up to 15,
   along with how many rooms matched in total.
 

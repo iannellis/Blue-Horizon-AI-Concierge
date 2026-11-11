@@ -114,6 +114,16 @@ class TestNewBooking:
         assert caught.value.total_room_nights == 61  # noqa: PLR2004
         assert caught.value.max_room_nights == _LIMIT.max_room_nights
         assert "61" in str(caught.value)
+        assert "cancel" in str(caught.value)
+
+    def test_request_over_the_limit_alone_is_not_told_to_cancel(self) -> None:
+        """No cancellation makes room for a request bigger than the limit."""
+        cur = _FakeCursor(other_nights=0, booking_in_window=False)
+        with pytest.raises(write_ops.BookingLimitError) as caught:
+            _check(cur, booking_id=None, nights_before=0, nights_after=61)
+        assert caught.value.request_room_nights == 61  # noqa: PLR2004
+        assert "alone is 61" in str(caught.value)
+        assert "cancel" not in str(caught.value)
 
 
 class TestModification:

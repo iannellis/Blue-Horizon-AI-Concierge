@@ -867,6 +867,40 @@ The loader now stamps every pre-existing booking with midnight UTC on the first 
 stand-in. This one comes from the data rather than the clock, so it is the same on every
 reload and can never fall inside the window.
 
+### The room-night limit counts the guest, not the account
+
+**Status:** open.
+
+The limit counts bookings by `customer_id`, and a signed-in account holds a seeded guest
+only while it is active. After ten idle minutes the guest may go to another account, so
+an account that comes back on a different guest gets a fresh 60 room-nights, and an
+account given a guest someone else filled starts at or near the limit. The hourly
+message limit, by contrast, counts the account, since `_visitor_key` in `ui/app.py`
+reads the provider's issuer and subject id.
+
+For now, a guest refused for room-nights already held is told to cancel some of the
+most recent reservations, which sit at the top of "Your reservations" and are the only
+ones the window counts. A request over the limit on its own is told to ask for less
+instead, since no cancellation would make room for it.
+
+Tying the limit to the account would take:
+
+- A nullable `account_key` column on `bookings`, holding a hash of the issuer and
+  subject id rather than the raw value, so no login identity is stored. Seeded bookings
+  keep NULL.
+- The UI sending that key with chat, confirm, and dismiss requests, and the API
+  trusting it only because the UI is its one caller and authenticates with the API key.
+- The key reaching the propose tools and `write_ops` through `RunnableConfig`, injected
+  server-side like `customer_id` and never a model argument. The count and the advisory
+  lock would key on it, falling back to `customer_id` when no key is sent, as in the
+  eval, stress, and test harnesses.
+
+It would not stop one person using several accounts, each of which already gets its own
+hourly allowance. A cheaper, UI-only option covers most of the same ground: hold each
+account's guest until the nightly reset rather than for ten idle minutes, and never hand
+out a guest with bookings made in the last 24 hours to another account. With 100 seeded
+guests, that caps the demo at 100 distinct accounts a day.
+
 ### The guest followed a shared link
 
 **Status:** fixed.

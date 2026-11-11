@@ -99,29 +99,51 @@ class BookingLimitError(BookingWriteError):
         window_hours: The rolling window the limit applies to.
         total_room_nights: Room-nights the guest would hold in the window
             if the write went ahead.
+        request_room_nights: Room-nights the write itself would count.
 
     """
 
     def __init__(
-        self, *, max_room_nights: int, window_hours: int, total_room_nights: int,
+        self,
+        *,
+        max_room_nights: int,
+        window_hours: int,
+        total_room_nights: int,
+        request_room_nights: int,
     ) -> None:
         """Store the counts behind a guest-facing message.
+
+        A request over the limit on its own gets no advice to cancel, since
+        no cancellation would make room for it.
 
         Args:
             max_room_nights: The limit, from `RoomNightLimit`.
             window_hours: The rolling window the limit applies to.
             total_room_nights: Room-nights the guest would hold in the
                 window if the write went ahead.
+            request_room_nights: Room-nights the write itself would count.
 
         """
-        super().__init__(
+        limit = (
             f"Each guest can book at most {max_room_nights} room-nights in "
-            f"{window_hours} hours, and this request would bring this guest "
-            f"to {total_room_nights}.",
+            f"{window_hours} hours"
         )
+        if request_room_nights > max_room_nights:
+            msg = (
+                f"{limit}, and this request alone is {request_room_nights} "
+                "room-nights. Ask for fewer rooms or nights."
+            )
+        else:
+            msg = (
+                f"{limit}, and this request would bring this guest to "
+                f"{total_room_nights}. To make room for it, cancel some of the "
+                'most recent reservations, at the top of "Your reservations".'
+            )
+        super().__init__(msg)
         self.max_room_nights = max_room_nights
         self.window_hours = window_hours
         self.total_room_nights = total_room_nights
+        self.request_room_nights = request_room_nights
 
 
 class BookingUnavailableError(Exception):
@@ -1480,6 +1502,7 @@ async def _require_room_night_allowance(  # noqa: PLR0913
             max_room_nights=limit.max_room_nights,
             window_hours=limit.window_hours,
             total_room_nights=total_room_nights,
+            request_room_nights=booking_nights,
         )
 
 

@@ -242,7 +242,11 @@ also lines up with the nightly reset. A cancelled booking does not count, since 
 `BookingWriteError`, when a write would go over. The confirm path treats it like any
 other refusal: the proposal is retired, the guest gets a `409` whose `detail` names the
 limit and the total the write would have reached, and the refusal note goes into the
-thread. `cancel_booking` is never checked, since it only releases nights. The
+thread. The message tells the guest to cancel some of the most recent reservations,
+which are the ones the window counts, unless the request alone is over the limit; then
+it says to ask for fewer rooms or nights. The limit counts the guest rather than the
+signed-in account (see
+[Design Decisions](../design-decisions.md#the-room-night-limit-counts-the-guest-not-the-account)). `cancel_booking` is never checked, since it only releases nights. The
 `ProposalStore` holds the limit and passes it to both writes, so the eval harness's
 auto-confirm applies it too.
 

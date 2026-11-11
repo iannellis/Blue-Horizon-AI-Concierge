@@ -27,63 +27,79 @@ of 10 room and date targets to force contention. Every operation went through th
 propose-then-auto-confirm path, the harness's stand-in for a human clicking Confirm, so
 this exercises real commits under load rather than just proposals.
 
-Run of 2026-10-16, in `eval/outputs/stress_20261016_204228/`. Overall status **PASS**.
-It is the first run with the typed `search_rooms` tool (2026-09-28) in place of the
-free-form `run_sql`, and the first since a refused confirm started being recorded in
-the thread (see below).
+Run of 2026-11-11, in `eval/outputs/stress_20261111_203349/`. Overall status **PASS**.
+It is the first run since `llm_concurrency` went from 15 to 25, and since the booking
+path gained the bookable-window refusal in the `propose_*` tools, the cap on model calls
+per turn, the per-guest room-night limit, and moderation and an injection check on every
+guest message. None of those refusals fired: every reply was a proposal or a "this room
+isn't available" refusal.
 
 | Result | Value |
 |--------|-------|
 | Operations completed (of 250) | 250 (0 errored) |
-| Successful bookings/modifies/cancels | 91 (36.4%) |
-| Correctly-refused conflicts | 159 (63.6%) |
+| Successful bookings/modifies/cancels | 76 (30.4%) |
+| Correctly-refused conflicts | 174 (69.6%) |
 | Double-booking violations | 0 |
 | Reservations with null status | 0 |
-| Expected bookings confirmed in DB | 29 / 29 |
-| Wall-clock elapsed | 102.7 s (2.43 ops/s) |
-| Per-operation latency (mean / median / p95) | 16.3 s / 17.3 s / 19.9 s |
+| Expected bookings confirmed in DB | 23 / 23 |
+| Wall-clock elapsed | 73.7 s (3.39 ops/s) |
+| Per-operation latency (mean / median / p95) | 10.7 s / 10.7 s / 13.1 s |
 
 Per-operation latency here is far higher than the
 [single-turn eval latency](index.md#latency-end-to-end-ms) because each stress operation
 is a full propose-then-confirm round trip under 50-way concurrency against the same
 `llm_concurrency` semaphore, not one turn on an idle system. It measures saturation
 behavior, not the latency a guest experiences. The server logs show it directly: of a
-mean 16.2 s turn, 10.9 s (67%) was spent waiting for one of the 15 semaphore slots.
+mean 10.6 s turn, 4.9 s (46%) was spent waiting for one of the 25 semaphore slots. In
+the 2026-10-16 run, with 15 slots, the wait was 10.9 s of a 16.2 s turn (67%).
 
 The high conflict rate is expected and by design. With 80% of operations targeting the
 same 10 hot slots, most of them are *supposed* to lose the race. What matters is that
 they lose it cleanly: a refusal a guest can understand, not a partial write or a raw
 database error.
 
-!!! note "An earlier run the same day failed reconciliation"
-    The first 2026-10-16 run reconciled 26 of 27 expected bookings. No write was wrong.
+The conflict rate is six points above the previous runs, and the extra conflicts are
+bookings that drew a hot slot. This run's random mix had 169 bookings, against 146 on
+2026-10-16, and 142 of them targeted a hot slot, against 115. A hot slot can be won once
+unless a cancel frees it, so the extra attempts lost: 17 hot-slot bookings won, against
+22. Bookings into other slots won 26 of 27, against 31 of 31, and modifies conflicted
+less (48, against 66). The higher `llm_concurrency` changed how hot-slot bookings lost
+rather than how many: 18 lost at confirm after a proposal, against 11, since more
+sessions searched while a slot was still free and only lost at the row lock.
+
+!!! note "A 2026-10-16 run failed reconciliation"
+    The first of two 2026-10-16 runs reconciled 26 of 27 expected bookings. No write was wrong.
     A confirm that lost its race retired the proposal but left nothing in the thread, so
     when the guest asked again the agent told them to press a Confirm button that no
     longer existed. The harness then counted that reply as a success. Both are fixed: a
     refused confirm now writes an app-authored note into the thread, and the harness
-    counts a success only when a confirm succeeded. The run above is the rerun. See
+    counts a success only when a confirm succeeded. The 2026-10-16 run in the table
+    below is the rerun. See
     [Design Decisions](../design-decisions.md#a-refused-confirm-left-the-agent-pointing-at-a-dead-proposal).
 
-!!! note "31 conflicts were flagged as suspicious"
+!!! note "51 conflicts were flagged as suspicious"
     Reconciliation flags a conflict as *suspicious* when none of the nights it targeted
     are booked in the final database state, which can mean the agent refused a room that
     was actually available. It can also happen legitimately, when a booking was made and
     then cancelled later in the same run, so the signal is informational rather than a
     failure, and the run passed reconciliation.
 
-    Of the 10 flagged operations the summary lists in detail (the detail list is capped
-    by `reconcile_max_detail`), 8 target the same hot slot: room 113, 2025-02-20 to
-    02-22. The other two target room 1309, 2025-04-04 to 04-06. The operations log shows
-    the cancel-later explanation directly for room 113: three different guests booked it
-    and then cancelled it during the run, and it ended free, so every conflict against
-    it in between reads as suspicious against the final state. Distinguishing that
+    The summary lists 10 flagged operations in detail (the detail list is capped by
+    `reconcile_max_detail`). Six target room 1111, 2025-03-13 to 03-15, three target
+    room 401, 2025-03-20 to 03-22, and one targets room 1706, 2025-04-07 to 04-09. The
+    operations log shows the cancel-later explanation directly for all three. One guest
+    booked room 1111 and cancelled it later in the run, and the same happened to room
+    1706. Room 401 was booked and cancelled once, then booked by a second guest who
+    modified the stay to another room. Each ended free, so every conflict against it in
+    between reads as suspicious against the final state. Distinguishing that
     properly from an over-refusal would need the reconciliation pass to check nights
     against the state at the time of the operation rather than the final state. That is
     not implemented.
 
-    The count is higher than in earlier runs (13 to 18) partly by construction. The
-    harness now counts any operation with no successful confirm as a conflict, including
-    one where the agent asked a clarifying question, so more operations are candidates.
+    The count is higher than in the runs before 2026-10-16 (13 to 18) partly by
+    construction. The harness now counts any operation with no successful confirm as a
+    conflict, including one where the agent asked a clarifying question, so more
+    operations are candidates. It rose again from 31 to 51 with the conflict count.
 
 ### What the earlier runs show
 
@@ -101,31 +117,38 @@ cluttering the output directory. Retrieve them with
 `git show 0e2e46a^:eval/outputs/stress_20260810_011711/stress_summary.json` (2026-08-10),
 `git show 6b7397f^:eval/outputs/stress_20260823_040837/stress_summary.json`
 (2026-08-23), and
-`git show 6b7397f:eval/outputs/stress_20260915_174520/stress_summary.json` (2026-09-15).
+`git show 6b7397f:eval/outputs/stress_20260915_174520/stress_summary.json` (2026-09-15),
+and `git show 891779f:eval/outputs/stress_20261016_204228/stress_summary.json`
+(2026-10-16).
 
-| | 2026-08-10 | 2026-08-23 | 2026-09-15 | 2026-10-16 |
-|---|---|---|---|---|
-| GiST constraint present | no | yes | yes | yes |
-| Search tool | `run_sql` | `run_sql` | `run_sql` | `search_rooms` |
-| Successes | 98 (39.2%) | 88 (35.2%) | 90 (36.0%) | 91 (36.4%) |
-| Conflicts | 152 (60.8%) | 162 (64.8%) | 160 (64.0%) | 159 (63.6%) |
-| Errors | 0 | 0 | 0 | 0 |
-| Double-booking violations | 0 | 0 | 0 | 0 |
-| Reconciliation | 26 / 26 | 22 / 22 | 24 / 24 | 29 / 29 |
-| Suspicious conflicts | 18 | 14 | 13 | 31 |
-| Mean per-operation latency | 15.0 s | 15.5 s | 43.8 s | 16.3 s |
+| | 2026-08-10 | 2026-08-23 | 2026-09-15 | 2026-10-16 | 2026-11-11 |
+|---|---|---|---|---|---|
+| GiST constraint present | no | yes | yes | yes | yes |
+| Search tool | `run_sql` | `run_sql` | `run_sql` | `search_rooms` | `search_rooms` |
+| `llm_concurrency` | 15 | 15 | 15 | 15 | 25 |
+| Successes | 98 (39.2%) | 88 (35.2%) | 90 (36.0%) | 91 (36.4%) | 76 (30.4%) |
+| Conflicts | 152 (60.8%) | 162 (64.8%) | 160 (64.0%) | 159 (63.6%) | 174 (69.6%) |
+| Errors | 0 | 0 | 0 | 0 | 0 |
+| Double-booking violations | 0 | 0 | 0 | 0 | 0 |
+| Reconciliation | 26 / 26 | 22 / 22 | 24 / 24 | 29 / 29 | 23 / 23 |
+| Suspicious conflicts | 18 | 14 | 13 | 31 | 51 |
+| Mean per-operation latency | 15.0 s | 15.5 s | 43.8 s | 16.3 s | 10.7 s |
 
 The 2026-08-10 run is the stronger evidence that the application-level locking is
 correct on its own. The later runs' zeros are expected rather than informative, since
 the constraint now makes an overlapping pair unrepresentable regardless of what the
-locking does. The success-versus-conflict split moved by up to four points between runs,
-which is ordinary variance in which sessions win contended slots, not a behavioral
-change: the workload re-randomizes its hot targets each run.
+locking does. The success-versus-conflict split moved by up to four points between the
+first four runs, which is ordinary variance in which sessions win contended slots, not a
+behavioral change: the workload re-randomizes its hot targets and its operation mix each
+run. The 2026-11-11 run's six-point move is the same variance, traced above to more
+bookings drawing a hot slot.
 
 The 2026-09-15 run's latency was nearly three times the others' under the same workload,
 concurrency, and models. With the 2026-10-16 run back at 16.3 s, that run looks like an
 outlier, most likely provider-side, rather than a regression. Its cause was never
-isolated.
+isolated. The 2026-11-11 run's drop to 10.7 s follows the semaphore wait, which fell
+from 10.9 s to 4.9 s with 25 slots instead of 15, despite the moderation and injection
+calls each turn now adds.
 
 ## What the invariant checks mean
 
@@ -183,7 +206,7 @@ or corrupted booking.
 ### Reconciliation
 
 Separately from the invariant checks, the harness reconciles every thread's expected
-final booking against the database. In the current run, all 29 threads that ended with a
+final booking against the database. In the current run, all 23 threads that ended with a
 successful book or modify had that exact room and date range sitting `Booked` in the
 database. A success here means the harness's confirm committed, never what the agent's
 reply said, so reconciliation checks the harness's bookkeeping against the database as

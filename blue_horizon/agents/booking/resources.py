@@ -492,9 +492,10 @@ class BookingSqlResources:
         ``"$user", public``, which resolves to ``public``; the paths that need
         certainty set it explicitly on their own connections.
 
-        A health-check (``SELECT 1``) is run each time a connection is
-        checked out from either pool so stale connections are discarded
-        before they reach a caller. Combined with ``max_idle``, this ensures
+        Each pool is built with ``check=AsyncConnectionPool.check_connection``,
+        so psycopg_pool runs a health-check (an empty-query round trip) each
+        time a connection is checked out, and discards a connection that fails
+        it before it reaches a caller. Combined with ``max_idle``, this ensures
         neither pool ever hands out a connection that Neon has already
         dropped due to compute suspension.
 

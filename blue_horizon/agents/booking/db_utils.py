@@ -1,8 +1,8 @@
 """Database utilities for the booking agent.
 
-Provides metadata fetching, transient-error detection, and the `search_rooms`
-tool-error text handed to the model. None of these reach a guest directly;
-see `_tool_error_message_for_model`.
+Provides metadata fetching, a startup credential check, transient-error
+detection, and the `search_rooms` tool-error text handed to the model. None
+of these reach a guest directly; see `_tool_error_message_for_model`.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from psycopg import sql
 from psycopg_pool import PoolTimeout
 
 from blue_horizon.agents.booking.search import RoomsMetadata
-from blue_horizon.agents.exceptions import OperationalError
+from blue_horizon.agents.exceptions import ConfigurationError, OperationalError
 
 # Postgres enum types used to populate the system prompt template.
 ENUM_TYPES: Final[tuple[str, ...]] = (
@@ -23,6 +23,10 @@ ENUM_TYPES: Final[tuple[str, ...]] = (
     "room_status_type",
     "room_type",
 )
+
+# libpq reports a rejected password with no SQLSTATE at connection time, so
+# this message fragment is the only signal available.
+_AUTH_REJECTED_FRAGMENT: Final = "password authentication failed"
 
 
 async def fetch_rooms_metadata(db_url: str) -> RoomsMetadata:
@@ -109,6 +113,46 @@ async def _distinct_strings(cur: psycopg.AsyncCursor[Any]) -> tuple[str, ...]:
     """
     rows = await cur.fetchall()
     return tuple(sorted(str(row[0]) for row in rows if row[0] is not None))
+
+
+async def check_credentials(url: str, label: str, *, timeout_s: float) -> None:
+    """Raise `ConfigurationError` if the database rejects a URL's password.
+
+    Opens one direct connection instead of going through a pool, because
+    `psycopg_pool` retries a rejected password internally and a checkout only
+    ever reports `PoolTimeout`, which is indistinguishable from an outage.
+    Any other failure propagates unchanged, for the caller to treat as
+    transient.
+
+    Args:
+        url: The database URL to authenticate with.
+        label: Human-readable name for the URL in the error message, such as
+            the role it should authenticate as. Deliberately not an
+            environment variable name: the same caller may be handed URLs
+            from different variables (the application's, or an eval
+            override), so only the caller's caller knows the source.
+        timeout_s: Connection timeout in seconds, rounded down to whole
+            seconds with a floor of 1, as libpq requires.
+
+    Raises:
+        ConfigurationError: If the server rejects the password.
+        psycopg.OperationalError: If the connection fails for any other
+            reason, such as the database being unreachable.
+
+    """
+    try:
+        conn = await psycopg.AsyncConnection.connect(
+            url, connect_timeout=max(1, int(timeout_s)),
+        )
+    except psycopg.OperationalError as exc:
+        if _AUTH_REJECTED_FRAGMENT in str(exc):
+            msg = (
+                f"The {label} database URL was rejected: password "
+                "authentication failed."
+            )
+            raise ConfigurationError(msg) from exc
+        raise
+    await conn.close()
 
 
 def is_transient_conn_error(exc: BaseException) -> bool:

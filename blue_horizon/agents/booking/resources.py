@@ -33,6 +33,7 @@ from blue_horizon.agents.booking import write_ops
 from blue_horizon.agents.booking.config import render_system_prompt
 from blue_horizon.agents.booking.db_utils import (
     _tool_error_message_for_model,
+    check_credentials,
     fetch_rooms_metadata,
     is_transient_conn_error,
 )
@@ -64,65 +65,11 @@ _READ_ONLY_PROBE_SQL = "UPDATE room_availability SET status = status WHERE id = 
 # arguments before this module sees them.
 SqlErrorKind = Literal["unavailable", "invalid_arguments", "unexpected"]
 
-# libpq reports a rejected password with no SQLSTATE at connection time, so
-# this message fragment is the only signal available.
-_AUTH_REJECTED_FRAGMENT = "password authentication failed"
-
-
-def _require_url(url: str, env_var: str) -> None:
-    """Raise if a required database URL is missing or blank.
-
-    An empty string passes ordinary Pydantic `str` validation, so this
-    catches the case that gets through config loading but can never
-    establish a connection. Deliberately raised as `ConfigurationError`,
-    not `OperationalError`: this process's environment will not change
-    without an operator restarting it, so retrying is pointless.
-
-    Args:
-        url: The URL value to check.
-        env_var: Name of the environment variable it came from, for the
-            error message.
-
-    Raises:
-        ConfigurationError: If `url` is empty or all whitespace.
-
-    """
-    if not url or not url.strip():
-        msg = f"{env_var} is missing or blank."
-        raise ConfigurationError(msg)
-
-
-async def _check_credentials(url: str, env_var: str, *, timeout_s: float) -> None:
-    """Raise `ConfigurationError` if the database rejects a URL's password.
-
-    Opens one direct connection instead of going through the pool, because
-    the pool retries a rejected password internally and a checkout only ever
-    reports `PoolTimeout`, which is indistinguishable from an outage. Any
-    other failure propagates unchanged, for `startup_check` to treat as
-    transient.
-
-    Args:
-        url: The database URL to authenticate with.
-        env_var: Name of the environment variable it came from, for the
-            error message.
-        timeout_s: Connection timeout in seconds.
-
-    Raises:
-        ConfigurationError: If the server rejects the password.
-        psycopg.OperationalError: If the connection fails for any other
-            reason, such as the database being unreachable.
-
-    """
-    try:
-        conn = await psycopg.AsyncConnection.connect(
-            url, connect_timeout=max(1, int(timeout_s)),
-        )
-    except psycopg.OperationalError as exc:
-        if _AUTH_REJECTED_FRAGMENT in str(exc):
-            msg = f"{env_var} was rejected: password authentication failed."
-            raise ConfigurationError(msg) from exc
-        raise
-    await conn.close()
+# How each URL is named in startup error messages. By role, not environment
+# variable: the URLs may come from the application's variables or from an
+# eval override, and this module is not told which.
+_RO_LABEL = "read-only (bh_agent_ro)"
+_RW_LABEL = "read-write (bh_agent_rw)"
 
 
 def _sql_error_result(error: str, *, error_kind: SqlErrorKind) -> dict[str, Any]:
@@ -243,27 +190,28 @@ class BookingSqlResources:
         write, fetches the rooms metadata, and from it builds the search
         argument model and renders the final system prompt.
 
+        A blank URL never reaches here: `AppConfig` and the eval overrides
+        reject one when configuration loads.
+
         Raises:
-            ConfigurationError: If either database URL is missing, blank, or
-                has its password rejected, or if the read-only pool's role is
-                not actually read-only --
-                treated as a fatal misconfiguration rather than a warning,
-                since a silently-writable "read-only" pool is exactly the
-                guarantee this design depends on. None of these resolve by
-                retrying, so they are kept out of `OperationalError`.
+            ConfigurationError: If either database URL has its password
+                rejected, or if the read-only pool's role is not actually
+                read-only -- treated as a fatal misconfiguration rather than
+                a warning, since a silently-writable "read-only" pool is
+                exactly the guarantee this design depends on. Neither
+                resolves by retrying, so both are kept out of
+                `OperationalError`.
             OperationalError: If resources cannot be initialized for a
                 transient reason (e.g. the database is unreachable).
 
         """
         try:
-            _require_url(self.pgsql_ro_db_url, "PGSQL_RO_DB_URL")
-            _require_url(self.pgsql_rw_db_url, "PGSQL_RW_DB_URL")
             timeout_s = self.config.db.pool.timeout_s
-            await _check_credentials(
-                self.pgsql_ro_db_url, "PGSQL_RO_DB_URL", timeout_s=timeout_s,
+            await check_credentials(
+                self.pgsql_ro_db_url, _RO_LABEL, timeout_s=timeout_s,
             )
-            await _check_credentials(
-                self.pgsql_rw_db_url, "PGSQL_RW_DB_URL", timeout_s=timeout_s,
+            await check_credentials(
+                self.pgsql_rw_db_url, _RW_LABEL, timeout_s=timeout_s,
             )
             await self._open_pools()
             await self._assert_read_pool_is_read_only()
@@ -549,8 +497,8 @@ class BookingSqlResources:
     async def _assert_read_pool_is_read_only(self) -> None:
         """Prove the read-only pool's role cannot write.
 
-        Guards against `PGSQL_RO_DB_URL` being misconfigured to point at the
-        same (writable) role as `PGSQL_RW_DB_URL` -- everything would
+        Guards against the read-only URL being misconfigured to point at the
+        same (writable) role as the read-write URL -- everything would
         otherwise work, and the guarantee this whole design depends on would
         be gone with nothing to notice.
 
@@ -560,7 +508,7 @@ class BookingSqlResources:
                 unreachable) -- both transient, from this method's point of
                 view.
             ConfigurationError: If the probe write is not refused. This is
-                `PGSQL_RO_DB_URL` pointed at a writable role, which no retry
+                the read-only URL pointed at a writable role, which no retry
                 fixes; only a corrected environment variable and a restart
                 do.
 
@@ -577,9 +525,9 @@ class BookingSqlResources:
         ):
             return
         msg = (
-            "PGSQL_RO_DB_URL permitted a write. It must authenticate as a "
-            "role with no write privileges (bh_agent_ro) -- refusing to "
-            "start with the read-only guarantee unverified."
+            "The read-only database URL permitted a write. It must "
+            "authenticate as a role with no write privileges (bh_agent_ro) "
+            "-- refusing to start with the read-only guarantee unverified."
         )
         raise ConfigurationError(msg)
 

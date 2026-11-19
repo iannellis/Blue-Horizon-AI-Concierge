@@ -9,7 +9,13 @@ from importlib import resources as importlib_resources
 from pathlib import Path
 from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, BeforeValidator, Field, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_PACKAGE = "blue_horizon"
@@ -50,6 +56,10 @@ def clamp(minimum: float) -> BeforeValidator:
 
 PositiveInt = Annotated[int, clamp(1), Field(ge=1)]
 NonNegInt = Annotated[int, clamp(0), Field(ge=0)]
+# Rejects, rather than coerces, an empty or all-whitespace value: an
+# environment variable set to "" passes plain `str` validation but can never
+# name a reachable service.
+NonBlankStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 class InfoRetrievalConfig(FrozenModel):
@@ -638,7 +648,10 @@ class AppConfig(BaseSettings):
         booking: Booking agent settings.
         load_data: Data ingestion settings for local loaders.
         logging: Log level and third-party loggers to quiet.
-        redis_url: Redis connection URL from environment.
+        redis_url: Redis connection URL from environment. This and both
+            booking database URLs are required and must be non-blank, so a
+            missing or empty one fails configuration loading rather than a
+            later connection attempt.
         pgsql_root_parent_db_url: PostgreSQL connection URL from environment
             (``PGSQL_ROOT_PARENT_DB_URL``), authenticated with schema-owner
             privileges against the Parent branch specifically -- the only
@@ -677,12 +690,12 @@ class AppConfig(BaseSettings):
     booking: BookingSqlConfig
     load_data: LoadDataConfig
     logging: LoggingConfig
-    redis_url: str = Field(validation_alias="REDIS_URL")
+    redis_url: NonBlankStr = Field(validation_alias="REDIS_URL")
     pgsql_root_parent_db_url: str | None = Field(
         default=None, validation_alias="PGSQL_ROOT_PARENT_DB_URL",
     )
-    pgsql_rw_db_url: str = Field(validation_alias="PGSQL_RW_DB_URL")
-    pgsql_ro_db_url: str = Field(validation_alias="PGSQL_RO_DB_URL")
+    pgsql_rw_db_url: NonBlankStr = Field(validation_alias="PGSQL_RW_DB_URL")
+    pgsql_ro_db_url: NonBlankStr = Field(validation_alias="PGSQL_RO_DB_URL")
     axiom_api_key: str | None = Field(default=None, validation_alias="AXIOM_API_KEY")
     axiom_dataset: str | None = Field(default=None, validation_alias="AXIOM_DATASET")
 

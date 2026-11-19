@@ -10,7 +10,7 @@ from typing import cast
 import pytest
 from pydantic import ValidationError
 
-from blue_horizon.config import AppConfig, NonNegInt, PositiveInt
+from blue_horizon.config import AppConfig, NonBlankStr, NonNegInt, PositiveInt
 from blue_horizon.config import FrozenModel as _FrozenModel
 
 EXPECTED_BATCH_SIZE = 64
@@ -309,6 +309,30 @@ class TestClampedTypes:
     def test_non_neg_int_passes_through_zero(self) -> None:
         """Zero is a valid value on its own and is left unchanged."""
         assert _NonNegModel(a=0).a == 0
+
+
+class _NonBlankModel(_FrozenModel):
+    """Minimal model exercising `NonBlankStr` in isolation."""
+
+    a: NonBlankStr
+
+
+class TestNonBlankStr:
+    """`NonBlankStr` rejects a value that could never name a reachable service.
+
+    Unlike the clamped integer types it does not coerce: there is no
+    sensible default URL to substitute for an empty one.
+    """
+
+    @pytest.mark.parametrize("value", ["", "   ", "\t\n"])
+    def test_blank_value_is_rejected(self, value: str) -> None:
+        """An empty or all-whitespace string fails validation."""
+        with pytest.raises(ValidationError):
+            _NonBlankModel(a=value)
+
+    def test_surrounding_whitespace_is_stripped(self) -> None:
+        """A value with stray whitespace, as from a hand-edited `.env`, is kept."""
+        assert _NonBlankModel(a=" postgresql://x ").a == "postgresql://x"
 
 
 class TestFrozenModel:

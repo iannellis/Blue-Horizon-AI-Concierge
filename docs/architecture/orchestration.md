@@ -302,9 +302,12 @@ init attempt raised:
   `except OperationalError` handlers do not swallow it) marks the failure permanent and
   sets `FAILED`. Raised only from genuinely unrecoverable sites: `startup_check`'s
   read-only-role guard (see [Booking agent](booking-agent.md#1-two-database-roles)),
-  a missing packaged prompt file, a missing or blank required database URL, Redis
-  rejecting the credentials in `REDIS_URL`, and Postgres rejecting the password in
-  either database URL. The Postgres check opens one direct connection per URL before
+  a missing packaged prompt file, Redis rejecting the credentials in `REDIS_URL`, and
+  Postgres rejecting the password in either database URL. A missing or blank
+  `REDIS_URL`, `PGSQL_RW_DB_URL`, or `PGSQL_RO_DB_URL` never gets this far:
+  `AppConfig` rejects it when configuration loads, and the eval overrides likewise
+  reject a blank value rather than treating it as unset, which would otherwise fall
+  back to the application URL. The Postgres check opens one direct connection per URL before
   the pools, because a pool retries a rejected password internally and a checkout
   only ever reports `PoolTimeout`, which looks the same as an outage. libpq gives that
   rejection no SQLSTATE, so it is matched by its message.

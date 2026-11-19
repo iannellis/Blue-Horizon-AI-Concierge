@@ -16,6 +16,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from blue_horizon.config import (
     FrozenModel,
+    NonBlankStr,
     NonNegInt,
     PositiveInt,
     read_packaged_toml,
@@ -67,6 +68,12 @@ class _EvalDbSettings(BaseSettings):
             it unset while overriding the read-write URL runs the model's
             searches against the write role, defeating the point of the
             split.
+
+            Both reject an empty or all-whitespace value instead of
+            treating it as unset. Callers combine an override with
+            ``override or app_default``, so a blank override would otherwise
+            fall back to the application URL, which in a local ``.env`` is
+            Production.
         neon_api_key: API key for authenticating with the Neon management
             API, required when resetting a Neon branch before a run.
 
@@ -79,11 +86,11 @@ class _EvalDbSettings(BaseSettings):
         frozen=True,
     )
 
-    pgsql_rw_eval_db_url: str | None = Field(
+    pgsql_rw_eval_db_url: NonBlankStr | None = Field(
         default=None,
         validation_alias="PGSQL_RW_EVAL_DB_URL",
     )
-    pgsql_ro_eval_db_url: str | None = Field(
+    pgsql_ro_eval_db_url: NonBlankStr | None = Field(
         default=None,
         validation_alias="PGSQL_RO_EVAL_DB_URL",
     )

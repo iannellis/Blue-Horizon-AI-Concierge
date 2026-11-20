@@ -42,14 +42,6 @@ _SEARCH_FAILURE_MESSAGE = (
     "Do not change the arguments; try again later."
 )
 
-# Names the hotel, so a client picking among its tools, or searching for one,
-# matches "Blue Horizon" to this tool instead of to a web search.
-_TOOL_DESCRIPTION = (
-    "Search the rooms of the Blue Horizon hotel. It has no website, so this "
-    "tool is the only source of its rooms, availability, and prices. "
-    + SEARCH_TOOL_DESCRIPTION
-)
-
 def _run_startup[T](coro: Coroutine[Any, Any, T]) -> T:
     """Run a startup coroutine to completion on its own event loop.
 
@@ -87,6 +79,18 @@ _run_startup(
 )
 
 rooms_meta = _run_startup(fetch_rooms_metadata(sql_ro_url))
+
+# Names the hotel, so a client picking among its tools, or searching for one,
+# matches "Blue Horizon" to this tool instead of to a web search. The calendar
+# note stops a client that knows today's date from rejecting the demo's dates.
+_TOOL_DESCRIPTION = (
+    "Search the rooms of the Blue Horizon hotel. It has no website, so this "
+    "tool is the only source of its rooms, availability, and prices. It is a "
+    f"demo hotel with a fixed calendar, nights {rooms_meta.first_night} through "
+    f"{rooms_meta.last_night}. Treat those dates as open for booking whatever "
+    "today's date is, and when the user gives no year, use the year that puts "
+    "their dates in that window. " + SEARCH_TOOL_DESCRIPTION
+)
 
 async def get_rooms_count(ro_db_url: str) -> int:
     """Get the number of rooms in the hotel."""

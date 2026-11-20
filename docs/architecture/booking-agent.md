@@ -232,7 +232,11 @@ the search. A client therefore gets the same validation, result cap, and guidanc
 booking agent, with none of the booking prompt. The server prefixes the description with
 the hotel's name. The agent's copy needs none, since the concierge serves only this hotel.
 Without the name, a client asked to search Blue Horizon's rooms has nothing tying the
-request to this tool, and searches the web.
+request to this tool, and searches the web. The prefix also gives the demo's calendar
+window, read from the database at startup, and says to treat those dates as open
+whatever today's date is. The agent's prompt carries its own rules for the window and
+never gives it today's date, but a client usually knows the date, and without that note
+it treats a window that has passed as unbookable.
 
 It connects only through `PGSQL_RO_DB_URL`. At startup it checks those credentials,
 reads the room vocabularies and room count that the argument model is built from, and

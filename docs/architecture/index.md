@@ -143,7 +143,8 @@ The container log is lost whenever the Space restarts, so when `AXIOM_API_KEY` a
 OTLP, using the OpenTelemetry SDK. Each record carries its message as the body, its
 level as the severity, `thread_id` and `customer_id` as attributes when they are bound,
 the source file, function, and line, any traceback, and `service.name` set to
-`blue-horizon-api`. The handler on the root logger only converts the record and queues
+`blue-horizon-api` (the MCP server, which shares this setup, passes `blue-horizon-mcp`).
+The handler on the root logger only converts the record and queues
 it; the SDK's batch processor sends from its own thread, so logging never waits on the
 network. A batch that still fails after the exporter's retries is dropped and reported
 on stderr, and the exporter's own log lines are never shipped. Shutdown sends what is

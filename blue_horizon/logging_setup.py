@@ -42,7 +42,9 @@ _LOG_FORMAT = (
 # Rendered in place of a context value that is not bound, such as a line
 # logged during startup, outside any turn.
 _UNBOUND = "-"
-# Names this process in Axiom, where the UI writes to the same dataset.
+# Names this process in Axiom, where the UI writes to the same dataset. The
+# default; another process sharing this setup, such as the MCP server, passes
+# its own.
 _SERVICE_NAME = "blue-horizon-api"
 # The SDK names its batch export thread with this prefix.
 _EXPORT_THREAD_PREFIX = "OtelBatch"
@@ -56,6 +58,7 @@ def configure_logging(
     *,
     axiom_api_key: str | None = None,
     axiom_dataset: str | None = None,
+    service_name: str = _SERVICE_NAME,
 ) -> None:
     """Install the context-aware handlers on the root logger.
 
@@ -71,6 +74,8 @@ def configure_logging(
             log to stderr only.
         axiom_dataset: Axiom dataset to ship to, or ``None`` to log to stderr
             only.
+        service_name: ``service.name`` on every shipped record, so a query
+            can tell the processes sharing a dataset apart.
 
     """
     root = logging.getLogger()
@@ -90,7 +95,11 @@ def configure_logging(
         and not any(isinstance(h, _ShippingHandler) for h in root.handlers)
     ):
         exporter = _axiom_exporter(config.axiom, axiom_api_key, axiom_dataset)
-        root.addHandler(_build_shipping_handler(config.axiom, exporter))
+        root.addHandler(
+            _build_shipping_handler(
+                config.axiom, exporter, service_name=service_name,
+            ),
+        )
     root.setLevel(config.level)
     for name in config.quiet_loggers:
         logging.getLogger(name).setLevel(logging.WARNING)
@@ -171,13 +180,17 @@ def _axiom_exporter(
 
 
 def _build_shipping_handler(
-    config: AxiomLoggingConfig, exporter: LogRecordExporter,
+    config: AxiomLoggingConfig,
+    exporter: LogRecordExporter,
+    *,
+    service_name: str = _SERVICE_NAME,
 ) -> _ShippingHandler:
     """Build the root handler that queues records for `exporter`.
 
     Args:
         config: Batch size, queue size, and flush interval.
         exporter: Where batches are sent.
+        service_name: ``service.name`` on every record it ships.
 
     Returns:
         _ShippingHandler: A handler carrying the log context filter, whose
@@ -185,7 +198,7 @@ def _build_shipping_handler(
 
     """
     provider = LoggerProvider(
-        resource=Resource.create({"service.name": _SERVICE_NAME}),
+        resource=Resource.create({"service.name": service_name}),
         # Shut down by the handler's close() instead, which logging's own
         # exit hook calls, so there is one shutdown path, not two.
         shutdown_on_exit=False,

@@ -463,6 +463,22 @@ class TestShipping:
         assert "code.function.name" in attributes
         assert record.resource.attributes["service.name"] == "blue-horizon-api"
 
+    def test_service_name_can_be_overridden(self) -> None:
+        """Another process sharing this setup ships under its own name."""
+        exporter = _RecordingExporter()
+        handler = logging_setup._build_shipping_handler(
+            _AXIOM_CONFIG, exporter, service_name="blue-horizon-mcp",
+        )
+        logger = logging.getLogger(_SHIPPED_LOGGER)
+        logger.handlers[:] = [handler]
+        logger.propagate = False
+        logger.setLevel(logging.INFO)
+        logger.info("ready")
+        handler.close()
+
+        (record,) = exporter.records
+        assert record.resource.attributes["service.name"] == "blue-horizon-mcp"
+
     def test_unbound_context_is_omitted(self) -> None:
         """Outside a turn, neither context attribute is shipped."""
         exporter = _RecordingExporter()

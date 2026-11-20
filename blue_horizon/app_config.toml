@@ -227,3 +227,9 @@ max_queue_size = 2048
 flush_interval_s = 2.0
 # Seconds one send may take, retries included, before its batch is dropped
 export_timeout_s = 10.0
+
+[mcp_server.rate_limit]
+# Shared by every caller: Horizon's gateway hides client addresses
+max_requests_per_second = 2.0
+# Requests admitted at once after an idle spell
+burst_capacity = 20

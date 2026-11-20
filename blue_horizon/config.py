@@ -634,6 +634,34 @@ class LoggingConfig(FrozenModel):
     axiom: AxiomLoggingConfig
 
 
+class McpRateLimitConfig(FrozenModel):
+    """One token bucket shared by every caller of the MCP server.
+
+    Global rather than per caller, because Prefect Horizon's gateway hides the
+    client address, so the server cannot tell callers apart.
+
+    Attributes:
+        max_requests_per_second: Sustained MCP requests per second admitted
+            across all callers.
+        burst_capacity: Most requests admitted at once after an idle spell.
+
+    """
+
+    max_requests_per_second: Annotated[float, Field(gt=0)]
+    burst_capacity: PositiveInt
+
+
+class McpServerConfig(FrozenModel):
+    """Settings read only by `mcp_server/mcp_booking.py`.
+
+    Attributes:
+        rate_limit: The server-wide request rate limit.
+
+    """
+
+    rate_limit: McpRateLimitConfig
+
+
 class AppConfig(BaseSettings):
     """Parsed application configuration container.
 
@@ -648,6 +676,7 @@ class AppConfig(BaseSettings):
         booking: Booking agent settings.
         load_data: Data ingestion settings for local loaders.
         logging: Log level and third-party loggers to quiet.
+        mcp_server: Settings for the MCP server only.
         redis_url: Redis connection URL from environment. This and both
             booking database URLs are required and must be non-blank, so a
             missing or empty one fails configuration loading rather than a
@@ -690,6 +719,7 @@ class AppConfig(BaseSettings):
     booking: BookingSqlConfig
     load_data: LoadDataConfig
     logging: LoggingConfig
+    mcp_server: McpServerConfig
     redis_url: NonBlankStr = Field(validation_alias="REDIS_URL")
     pgsql_root_parent_db_url: str | None = Field(
         default=None, validation_alias="PGSQL_ROOT_PARENT_DB_URL",

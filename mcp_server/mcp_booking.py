@@ -9,6 +9,7 @@ from typing import Any
 
 import psycopg
 from fastmcp import Context, FastMCP
+from fastmcp.server.middleware.rate_limiting import RateLimitingMiddleware
 from psycopg_pool import AsyncConnectionPool
 
 from blue_horizon.agents.booking import (
@@ -122,6 +123,13 @@ async def lifespan(
         stop_log_shipping()
 
 mcp = FastMCP("blue-horizon", lifespan=lifespan)
+mcp.add_middleware(
+    RateLimitingMiddleware(
+        max_requests_per_second=cfg.mcp_server.rate_limit.max_requests_per_second,
+        burst_capacity=cfg.mcp_server.rate_limit.burst_capacity,
+        global_limit=True,
+    ),
+)
 
 @mcp.tool(description=SEARCH_TOOL_DESCRIPTION)
 async def search_rooms(

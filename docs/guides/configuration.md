@@ -15,6 +15,7 @@ The file is structured into sections that map to the Pydantic models in
 | `[booking.limits]` | How many room-nights one guest may book in a rolling window |
 | `[load_data]` | Paths to the source data pickles, and `seeded_customer_count` |
 | `[logging]` | The API's root log level, the third-party loggers kept quiet, and the endpoint and batching for log shipping to Axiom |
+| `[mcp_server.rate_limit]` | The MCP server's request rate, shared by all callers |
 
 Neon branch management (project ID, branch name, reset tuning) lives entirely in
 `eval/`, not here - the serving app has no Neon management awareness. See
@@ -78,6 +79,13 @@ renaming a key breaks the UI even though the API's typed config would still load
   the visitor is: a signed-in visitor is counted by account id, and without auth,
   by session. The API never reads this key. See
   [Architecture](../architecture/index.md#usage-limits).
+
+**`[mcp_server.rate_limit]`** is read only by the MCP server. `max_requests_per_second`
+(default 2.0) is the sustained rate, and `burst_capacity` (default 20) is how many
+requests it admits at once after an idle spell. Every MCP request counts, not just
+`search_rooms` calls, so a client's connection handshake and tool listing use up some
+of the burst. The bucket is shared by all callers; see
+[Booking agent](../architecture/booking-agent.md#mcp-server).
 
 **`[booking.agent].default_search_results`** (default 4) is how many rooms one
 `search_rooms` call returns when the model does not set `limit`. The result also carries

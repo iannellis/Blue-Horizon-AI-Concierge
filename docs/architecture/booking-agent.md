@@ -237,6 +237,11 @@ opens a pool that `assert_pool_is_read_only` probes before the first call. The t
 that read guest data or create proposals are not exposed, so no customer data and no
 write path reach an MCP client.
 
+The server is public, so FastMCP's `RateLimitingMiddleware` caps it with one token
+bucket shared by every caller (`[mcp_server.rate_limit]`). A request over the limit gets
+an MCP error before it reaches the database. The limit is global because Horizon's
+gateway hides the client address, so the server cannot tell one caller from another.
+
 The startup reads happen at import, because the tool's schema is built from the
 vocabularies before the server starts. FastMCP imports the module from inside a running
 event loop, where `asyncio.run` raises, so `_run_startup` runs each startup coroutine on

@@ -183,6 +183,9 @@ SAMPLE_APP_CONFIG: dict[str, object] = {
             "export_timeout_s": 2.0,
         },
     },
+    "mcp_server": {
+        "rate_limit": {"max_requests_per_second": 2.0, "burst_capacity": 20},
+    },
 }
 
 

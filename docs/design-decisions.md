@@ -1353,6 +1353,27 @@ Hosting on Horizon gives up control of the HTTP server: Horizon runs its own, so
 uvicorn's proxy settings, and with them per-IP rate limiting on the resolved client
 address, are not available.
 
+### The MCP server's rate limit is global
+
+**Status:** adopted.
+
+The MCP server on Horizon is public, because requiring sign-in would mean adding every
+caller to the Horizon organization. It needed a rate limit, and the plan was a per-IP
+limit beside a global one. A temporary server that echoed the request headers showed
+that per-IP limiting is impossible there. Horizon runs servers on AWS Lambda, so the
+socket address is `127.0.0.1`, there is no `X-Forwarded-For`, and the `sourceIp` in
+the `x-amzn-request-context` header is the literal string `"gateway"`. Nothing in the
+request names the caller.
+
+Other identifiers were rejected because a caller controls them. Anyone can open a new
+MCP session, and the user agent is whatever the client sends. A limit keyed on either
+is a limit an abuser resets at will.
+
+So one token bucket covers every caller. It protects the database and the Neon usage
+behind it. It does not stop one caller from using up the budget and locking everyone
+else out; nothing short of per-caller identity could. Callers through Claude would
+share a bucket anyway, since Claude reaches MCP servers from Anthropic's addresses.
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

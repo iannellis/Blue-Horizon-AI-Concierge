@@ -6,7 +6,7 @@ Postgres itself will and will not allow -- with the application code entirely
 out of the picture. That is the point: the fixed queries in
 `blue_horizon.agents.booking.search` never write, but the grant is what
 guarantees it (see `blue_horizon/load_data/regrant_booking_agent_role.sql`
-and `blue_horizon/agents/booking/resources.py`).
+and `blue_horizon/agents/booking/db_utils.py`).
 
 Marked `db_integration` and excluded from the default `pytest` run -- see
 `.github/workflows/ci.yml`'s `db-integration-tests` job, which resets the
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.db_integration
 
 # A no-op UPDATE that matches no row -- the same probe
-# `blue_horizon.agents.booking.resources._assert_read_pool_is_read_only` uses
+# `blue_horizon.agents.booking.db_utils.assert_pool_is_read_only` uses
 # at startup to prove the read-only pool's role really cannot write.
 _READ_ONLY_PROBE_SQL = "UPDATE room_availability SET status = status WHERE room_id = -1"
 

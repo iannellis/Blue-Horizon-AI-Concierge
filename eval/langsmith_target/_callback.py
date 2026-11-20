@@ -127,7 +127,7 @@ class SearchRoomsOutput(BaseModel):
         rooms: The rooms returned, when present.
         error: Error message when the tool fails.
         error_kind: Message-independent failure classification (see
-            `resources.SqlErrorKind`), present only on failure. Lets a
+            `search_runner.SqlErrorKind`), present only on failure. Lets a
             consumer like the stress harness's outcome classifier key off
             structure instead of matching this tool's error text.
         limit_note: Note that the requested ``limit`` was clamped to the

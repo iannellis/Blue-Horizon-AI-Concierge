@@ -86,6 +86,16 @@ keeps the rules in code rather than in the prompt, which matters for any client 
 brings its own prompt, such as a future MCP server. `search.py` imports nothing from
 LangChain so that such a server can wrap it directly.
 
+How a search is run is in `search_runner.search_rooms_with_retry`, which takes the
+read-only pool and its settings as arguments, so the agent and an MCP server share it.
+Each attempt borrows a connection and sets the transaction read-only. A transient
+connection failure is retried under `[booking.db.retry]`. A failure that persists comes
+back as a result, not an exception, with `error_kind` `unavailable` (the database could
+not be reached) or `unexpected` (anything else, which is a bug, since the SQL is fixed).
+The caller supplies that result's `error` text: the agent passes the
+`DATABASE_UNAVAILABLE` text its prompt keys off, and the MCP server passes plain text,
+since its client's prompt has no rule for that marker.
+
 Rejected arguments come back as a result with `error_kind` `invalid_arguments` and a
 message naming the problem (for example, the availability window), not as an
 exception, so the model can correct itself or ask the guest. A

@@ -157,7 +157,7 @@ it records:
 | Router decision and dispatch | `orchestration/factory.py` |
 | The turn's route, outcome, duration, LLM semaphore wait, and token counts | `orchestration/manager.py` |
 | Retrieval counts per source | `information/factory.py` |
-| Every `search_rooms` call, with its arguments, match count or error, and duration | `booking/resources.py` |
+| Every `search_rooms` call, with its arguments, match count or error, and duration | `booking/search_runner.py` |
 | A `propose_*` tool's refusal, with the `booking_id` the model named, and rejected `search_rooms` arguments | `booking/factory.py` |
 | Every proposal created, confirmed, dismissed, refused, or not found | `booking/proposals.py` |
 

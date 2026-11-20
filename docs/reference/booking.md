@@ -22,6 +22,10 @@ The only code paths that write a booking.
 
 ::: blue_horizon.agents.booking.search
 
+## Search runner
+
+::: blue_horizon.agents.booking.search_runner
+
 ## Database utilities
 
 ::: blue_horizon.agents.booking.db_utils

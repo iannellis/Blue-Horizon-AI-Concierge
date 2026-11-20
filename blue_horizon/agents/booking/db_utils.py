@@ -1,13 +1,14 @@
 """Database utilities for the booking agent.
 
-Provides metadata fetching, a startup credential check, transient-error
-detection, and the `search_rooms` tool-error text handed to the model. None
+Provides metadata fetching, the startup credential and read-only checks,
+transient-error detection, and the `search_rooms` tool-error text handed to
+the model. None
 of these reach a guest directly; see `_tool_error_message_for_model`.
 """
 
 from __future__ import annotations
 
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 import psycopg
 from psycopg import sql
@@ -15,6 +16,9 @@ from psycopg_pool import PoolTimeout
 
 from blue_horizon.agents.booking.search import RoomsMetadata
 from blue_horizon.agents.exceptions import ConfigurationError, OperationalError
+
+if TYPE_CHECKING:
+    from psycopg_pool import AsyncConnectionPool
 
 # Postgres enum types used to populate the system prompt template.
 ENUM_TYPES: Final[tuple[str, ...]] = (
@@ -27,6 +31,13 @@ ENUM_TYPES: Final[tuple[str, ...]] = (
 # libpq reports a rejected password with no SQLSTATE at connection time, so
 # this message fragment is the only signal available.
 _AUTH_REJECTED_FRAGMENT: Final = "password authentication failed"
+
+# A no-op UPDATE that matches no row: used only to prove the read-only pool's
+# role is actually refused write privileges at startup. Never mutates data
+# even if the assertion this guards against has already failed.
+_READ_ONLY_PROBE_SQL: Final = (
+    "UPDATE room_availability SET status = status WHERE id = -1"
+)
 
 
 async def fetch_rooms_metadata(db_url: str) -> RoomsMetadata:
@@ -153,6 +164,42 @@ async def check_credentials(url: str, label: str, *, timeout_s: float) -> None:
             raise ConfigurationError(msg) from exc
         raise
     await conn.close()
+
+
+async def assert_pool_is_read_only(pool: AsyncConnectionPool[Any]) -> None:
+    """Prove that a read-only pool's role cannot write.
+
+    Guards against the read-only URL being misconfigured to point at the
+    same (writable) role as the read-write URL -- everything would
+    otherwise work, and the guarantee this whole design depends on would
+    be gone with nothing to notice.
+
+    Args:
+        pool: An open pool that should authenticate as `bh_agent_ro`.
+
+    Raises:
+        ConfigurationError: If the probe write is not refused. This is the
+            read-only URL pointed at a writable role, which no retry fixes;
+            only a corrected environment variable and a restart do.
+        psycopg.Error: If the probe cannot be run for another reason, such
+            as the database being unreachable.
+        psycopg_pool.PoolTimeout: If no connection can be checked out.
+
+    """
+    try:
+        async with pool.connection() as conn, conn.transaction():
+            await conn.execute(_READ_ONLY_PROBE_SQL)
+    except (
+        psycopg.errors.ReadOnlySqlTransaction,
+        psycopg.errors.InsufficientPrivilege,
+    ):
+        return
+    msg = (
+        "The read-only database URL permitted a write. It must "
+        "authenticate as a role with no write privileges (bh_agent_ro) "
+        "-- refusing to start with the read-only guarantee unverified."
+    )
+    raise ConfigurationError(msg)
 
 
 def is_transient_conn_error(exc: BaseException) -> bool:

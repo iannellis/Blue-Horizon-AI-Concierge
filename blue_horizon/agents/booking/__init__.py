@@ -11,6 +11,7 @@ from blue_horizon.agents.booking.config import (
 )
 from blue_horizon.agents.booking.db_utils import (
     ENUM_TYPES,
+    assert_pool_is_read_only,
     check_credentials,
     fetch_rooms_metadata,
     is_transient_conn_error,
@@ -33,6 +34,10 @@ from blue_horizon.agents.booking.search import (
     build_search_args_model,
     run_room_search,
 )
+from blue_horizon.agents.booking.search_runner import (
+    SqlErrorKind,
+    search_rooms_with_retry,
+)
 from blue_horizon.agents.booking.write_ops import BookingWriteError
 
 __all__ = [
@@ -46,6 +51,8 @@ __all__ = [
     "ProposalOwnershipError",
     "ProposalStore",
     "RoomsMetadata",
+    "SqlErrorKind",
+    "assert_pool_is_read_only",
     "build_booking_agent",
     "build_search_args_model",
     "check_credentials",
@@ -55,4 +62,5 @@ __all__ = [
     "load_booking_config",
     "render_system_prompt",
     "run_room_search",
+    "search_rooms_with_retry",
 ]

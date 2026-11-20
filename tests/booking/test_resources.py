@@ -4,7 +4,7 @@ No real database connection is required for most of this file: the read pool
 is a fake whose `.connection()` replays a scripted sequence of outcomes, which
 exercises the retry loop and error-kind classification (`error_kind`, so
 evaluators can assert on failure *shape* rather than matching prose -- see
-`blue_horizon.agents.booking.resources.SqlErrorKind`) directly.
+`blue_horizon.agents.booking.search_runner.SqlErrorKind`) directly.
 
 `TestConnectFailureSurfacesAsPoolTimeout` is the one exception: it drives a
 real `psycopg_pool.AsyncConnectionPool` against a connection class that always
@@ -71,7 +71,7 @@ _BOOKING_CONFIG_DICT: dict[str, Any] = {
     "limits": {"max_room_nights_per_guest": 60, "room_night_window_hours": 24},
 }
 
-_RESOURCES_LOGGER = "blue_horizon.agents.booking.resources"
+_RESOURCES_LOGGER = "blue_horizon.agents.booking.search_runner"
 _SEARCH_ARGS = build_search_args_model(
     make_rooms_metadata(),
     max_room_numbers=MAX_ROOM_NUMBERS,

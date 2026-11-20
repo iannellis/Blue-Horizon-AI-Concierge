@@ -563,7 +563,7 @@ def _last_propose_and_confirm(
 def _classify_search_outcome(tool_summary: list[dict[str, object]]) -> str | None:
     """Classify an outcome from the turn's last ``search_rooms`` call, if it failed.
 
-    Reads ``error_kind`` (see ``resources.SqlErrorKind``), a message-
+    Reads ``error_kind`` (see ``search_runner.SqlErrorKind``), a message-
     independent classification, instead of matching the tool's error text.
     Only ``"unavailable"`` -- the database itself unreachable after
     retrying, not a rejected search -- is decisive here; every other

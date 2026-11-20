@@ -20,10 +20,6 @@ eval/
 # Secrets — must never enter the image; set these as HF Space secrets instead
 .env
 
-# Build artefacts — deps are installed from deploy/requirements.txt
-pyproject.toml
-uv.lock
-
 # Data: exclude everything under data. Resets are done via Neon branches.
 data/
 

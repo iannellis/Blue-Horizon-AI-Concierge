@@ -83,6 +83,9 @@ block, which exists only for local runs. It installs dependencies from
 `pyproject.toml`, which is why `fastmcp` is a project dependency rather than a group.
 Importing `blue_horizon.agents.booking` also imports its LangChain modules, so the whole
 project's dependencies are installed even though the server never calls them.
+Horizon's build copies the repository through the root `.dockerignore`, so that file must
+not exclude `pyproject.toml` or `uv.lock`. The Space image is unaffected, since its
+`Dockerfile` copies only named paths.
 
 Set these environment variables on Horizon:
 

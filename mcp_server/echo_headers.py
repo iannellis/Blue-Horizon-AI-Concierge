@@ -10,7 +10,16 @@ this file afterward.
 from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_http_headers, get_http_request
 
-_PROXY_HEADERS = ("x-forwarded-for", "x-real-ip", "forwarded", "x-forwarded-proto")
+# Horizon runs on AWS Lambda, which puts the caller's address in the request context.
+_PROXY_HEADERS = (
+    "x-forwarded-for",
+    "x-real-ip",
+    "forwarded",
+    "x-forwarded-proto",
+    "x-amzn-request-context",
+    "user-agent",
+    "x-anthropic-client",
+)
 
 mcp = FastMCP("echo-headers")
 

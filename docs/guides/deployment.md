@@ -89,6 +89,8 @@ from the `mcp` dependency group alone, which names `fastmcp` plus the project
 dependencies the server imports. Importing `blue_horizon.agents.booking` also imports its
 LangChain modules, so those are in the group even though the server never calls them.
 `blue_horizon` itself is not installed; it is imported from the cloned repository.
+Horizon does not put the repository root on `sys.path`, so `mcp_booking.py` adds it
+before importing `blue_horizon`.
 Horizon's build copies the repository through the root `.dockerignore`, so that file must
 not exclude `mcp_server/`.
 

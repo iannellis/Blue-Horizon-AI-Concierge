@@ -2,15 +2,20 @@
 
 import asyncio
 import logging
+import sys
 from collections.abc import AsyncGenerator, Coroutine
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import psycopg
 from fastmcp import Context, FastMCP
 from fastmcp.server.middleware.rate_limiting import RateLimitingMiddleware
 from psycopg_pool import AsyncConnectionPool
+
+# Prefect Horizon neither installs blue_horizon nor puts the repo root on the path.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from blue_horizon.agents.booking import (
     SEARCH_TOOL_DESCRIPTION,

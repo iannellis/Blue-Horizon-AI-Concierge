@@ -38,11 +38,14 @@ class RequirementsTarget:
             base dependencies.
         output_path: File to write the exported requirements to, relative to
             the repository root.
+        only_groups: Export the groups alone, without the project's base
+            dependencies.
 
     """
 
     groups: tuple[str, ...]
     output_path: Path
+    only_groups: bool = False
 
 
 REQUIREMENTS_TARGETS = (
@@ -51,6 +54,11 @@ REQUIREMENTS_TARGETS = (
     # Mirrors the old `poetry export --with ui,eval`.
     RequirementsTarget(
         groups=("ui", "eval"), output_path=Path("eval/requirements.txt"),
+    ),
+    # Installed by Prefect Horizon for the MCP server.
+    RequirementsTarget(
+        groups=("mcp",), output_path=Path("mcp_server/requirements.txt"),
+        only_groups=True,
     ),
 )
 
@@ -79,8 +87,9 @@ def _export_requirements_file(target: RequirementsTarget) -> None:
     """
     command = ["uv", "export", "--format", "requirements.txt", "--no-hashes",
         "--no-header", "--no-annotate", "--no-emit-project"]
+    flag = "--only-group" if target.only_groups else "--group"
     for group in target.groups:
-        command += ["--group", group]
+        command += [flag, group]
     output_path = REPO_ROOT / target.output_path
     command += ["-o", str(output_path)]
 

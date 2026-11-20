@@ -155,7 +155,7 @@ split.
 The project targets Python 3.13 in a uv-managed environment. That environment's path is
 machine-specific and is therefore not recorded here: it lives in `AGENTS.local.md`,
 which is untracked. In a fresh clone, create one before running the commands below.
-Dependency groups are `ui`, `eval`, `notebook`, `lint`, and `docs`.
+Dependency groups are `ui`, `eval`, `mcp`, `notebook`, `lint`, and `docs`.
 
 ```bash
 ruff check --no-cache <file>

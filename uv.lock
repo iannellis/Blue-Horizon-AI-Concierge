@@ -248,7 +248,6 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi", extra = ["standard"] },
-    { name = "fastmcp" },
     { name = "httpx2" },
     { name = "langchain" },
     { name = "langchain-openai" },
@@ -286,6 +285,20 @@ lint = [
     { name = "pyright" },
     { name = "ruff" },
 ]
+mcp = [
+    { name = "fastmcp" },
+    { name = "httpx2" },
+    { name = "langchain" },
+    { name = "langchain-openai" },
+    { name = "langgraph" },
+    { name = "opentelemetry-exporter-otlp-proto-http" },
+    { name = "opentelemetry-instrumentation-logging" },
+    { name = "opentelemetry-sdk" },
+    { name = "psycopg", extra = ["binary", "pool"] },
+    { name = "pydantic-settings" },
+    { name = "python-dotenv" },
+    { name = "tenacity" },
+]
 notebook = [
     { name = "ipykernel" },
     { name = "llama-index-llms-openai" },
@@ -298,7 +311,6 @@ ui = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", extras = ["standard"], specifier = ">=0.129.0" },
-    { name = "fastmcp", specifier = ">=4.2.3,<5.0.0" },
     { name = "httpx2", specifier = ">=2.0.0,<3.0.0" },
     { name = "langchain", specifier = ">=1.1.0,<2.0.0" },
     { name = "langchain-openai", specifier = ">=1.1.0,<2.0.0" },
@@ -335,6 +347,20 @@ eval = [
 lint = [
     { name = "pyright", specifier = ">=1.1.411" },
     { name = "ruff", specifier = ">=0.14.5,<1.0.0" },
+]
+mcp = [
+    { name = "fastmcp", specifier = ">=4.2.3,<5.0.0" },
+    { name = "httpx2" },
+    { name = "langchain" },
+    { name = "langchain-openai" },
+    { name = "langgraph" },
+    { name = "opentelemetry-exporter-otlp-proto-http" },
+    { name = "opentelemetry-instrumentation-logging" },
+    { name = "opentelemetry-sdk" },
+    { name = "psycopg", extras = ["binary", "pool"] },
+    { name = "pydantic-settings" },
+    { name = "python-dotenv" },
+    { name = "tenacity" },
 ]
 notebook = [
     { name = "ipykernel", specifier = ">=7.1.0,<8.0.0" },

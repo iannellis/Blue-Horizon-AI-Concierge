@@ -79,13 +79,18 @@ mcp_server/mcp_booking.py:mcp
 ```
 
 Horizon imports the `mcp` object and ignores the file's `if __name__ == "__main__"`
-block, which exists only for local runs. It installs dependencies from
-`pyproject.toml`, which is why `fastmcp` is a project dependency rather than a group.
-Importing `blue_horizon.agents.booking` also imports its LangChain modules, so the whole
-project's dependencies are installed even though the server never calls them.
+block, which exists only for local runs.
+
+Point Horizon's requirements setting at `mcp_server/requirements.txt`. Left to itself,
+Horizon runs `uv sync` on `uv.lock`, which installs every project dependency, including
+`ml-dtypes` 0.4.1 (pulled in by `redisvl`). That version has no Python 3.13 wheel and
+Horizon's image has no compiler, so the build fails. The requirements file is exported
+from the `mcp` dependency group alone, which names `fastmcp` plus the project
+dependencies the server imports. Importing `blue_horizon.agents.booking` also imports its
+LangChain modules, so those are in the group even though the server never calls them.
+`blue_horizon` itself is not installed; it is imported from the cloned repository.
 Horizon's build copies the repository through the root `.dockerignore`, so that file must
-not exclude `pyproject.toml` or `uv.lock`. The Space image is unaffected, since its
-`Dockerfile` copies only named paths.
+not exclude `mcp_server/`.
 
 Set these environment variables on Horizon:
 
@@ -179,7 +184,8 @@ Variables: `LANGSMITH_TRACING`, `LANGCHAIN_PROJECT`, `HF_SPACE`.
 
 `deploy/requirements.txt` (the `ui` group, installed by the `Dockerfile`) and
 `eval/requirements.txt` (the `ui` and `eval` groups, installed by the CI workflows) are
-generated from `uv.lock`. Do not edit them by hand. After changing dependencies in
+generated from `uv.lock`, as is `mcp_server/requirements.txt` (the `mcp` group alone,
+without the project's dependencies, installed by Prefect Horizon). Do not edit them by hand. After changing dependencies in
 `pyproject.toml`, refresh the lock file and regenerate both:
 
 ```bash
@@ -187,7 +193,8 @@ uv lock
 uv run python scripts/export_requirements.py
 ```
 
-Commit the changed `uv.lock` and both `requirements.txt` files together.
+Commit the changed `uv.lock` and all three `requirements.txt` files together. If the MCP
+server starts importing a new package, add it to the `mcp` group.
 
 Use the script rather than a bare `uv export`. `uv export` includes the project itself by
 default, but the image copies only `blue_horizon/` and `ui/`, not `pyproject.toml` or the

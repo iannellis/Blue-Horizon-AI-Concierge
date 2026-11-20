@@ -24,10 +24,26 @@ dependencies = [
     "opentelemetry-sdk>=1.30.0,<2.0.0",
     "opentelemetry-exporter-otlp-proto-http>=1.30.0,<2.0.0",
     "opentelemetry-instrumentation-logging>=0.50b0,<1.0.0",
-    "fastmcp (>=4.2.3,<5.0.0)",
 ]
 
 [dependency-groups]
+# Exported alone to mcp_server/requirements.txt, which Prefect Horizon installs, so it
+# also names the project dependencies the server imports. Exporting them all pulls
+# ml-dtypes 0.4.1 (via redisvl), which has no Python 3.13 wheel and needs a compiler.
+mcp = [
+    "fastmcp (>=4.2.3,<5.0.0)",
+    "httpx2",
+    "langchain",
+    "langchain-openai",
+    "langgraph",
+    "opentelemetry-exporter-otlp-proto-http",
+    "opentelemetry-instrumentation-logging",
+    "opentelemetry-sdk",
+    "psycopg[binary, pool]",
+    "pydantic-settings",
+    "python-dotenv",
+    "tenacity",
+]
 ui = [
     "streamlit[auth] (>=1.48.0)",  # st.dialog(dismissible=...)
 ]

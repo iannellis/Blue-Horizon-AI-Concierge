@@ -229,7 +229,10 @@ client. It is a FastMCP server deployed on Prefect Horizon (see
 agent's pieces rather than copying them: `build_search_args_model` for the arguments,
 `SEARCH_TOOL_DESCRIPTION` for the tool description, and `search_rooms_with_retry` to run
 the search. A client therefore gets the same validation, result cap, and guidance as the
-booking agent, with none of the booking prompt.
+booking agent, with none of the booking prompt. The server prefixes the description with
+the hotel's name. The agent's copy needs none, since the concierge serves only this hotel.
+Without the name, a client asked to search Blue Horizon's rooms has nothing tying the
+request to this tool, and searches the web.
 
 It connects only through `PGSQL_RO_DB_URL`. At startup it checks those credentials,
 reads the room vocabularies and room count that the argument model is built from, and

@@ -42,6 +42,14 @@ _SEARCH_FAILURE_MESSAGE = (
     "Do not change the arguments; try again later."
 )
 
+# Names the hotel, so a client picking among its tools, or searching for one,
+# matches "Blue Horizon" to this tool instead of to a web search.
+_TOOL_DESCRIPTION = (
+    "Search the rooms of the Blue Horizon hotel. It has no website, so this "
+    "tool is the only source of its rooms, availability, and prices. "
+    + SEARCH_TOOL_DESCRIPTION
+)
+
 def _run_startup[T](coro: Coroutine[Any, Any, T]) -> T:
     """Run a startup coroutine to completion on its own event loop.
 
@@ -136,7 +144,7 @@ mcp.add_middleware(
     ),
 )
 
-@mcp.tool(description=SEARCH_TOOL_DESCRIPTION)
+@mcp.tool(description=_TOOL_DESCRIPTION)
 async def search_rooms(
     args: SearchArgs, # pyright: ignore[reportInvalidTypeForm]
     ctx: Context,

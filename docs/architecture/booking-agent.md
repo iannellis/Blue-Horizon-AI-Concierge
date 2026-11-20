@@ -96,6 +96,12 @@ The caller supplies that result's `error` text: the agent passes the
 `DATABASE_UNAVAILABLE` text its prompt keys off, and the MCP server passes plain text,
 since its client's prompt has no rule for that marker.
 
+The most rooms one search returns is not an argument to either function. The model
+class `build_search_args_model` returns carries it as `max_results`, a class attribute
+of its base `SearchArgsBase`, so the maximum quoted in `limit`'s description and the
+one `run_room_search` enforces come from one value. It is not a field, so it is absent
+from the schema and a caller cannot set it.
+
 Rejected arguments come back as a result with `error_kind` `invalid_arguments` and a
 message naming the problem (for example, the availability window), not as an
 exception, so the model can correct itself or ask the guest. A

@@ -38,8 +38,8 @@ from blue_horizon.agents.prompt_utils import load_prompt_template, prompt_resour
 
 if TYPE_CHECKING:
     import psycopg
-    from pydantic import BaseModel
 
+    from blue_horizon.agents.booking.search import SearchArgsBase
     from blue_horizon.config import BookingSqlConfig
 
 # How each URL is named in startup error messages. By role, not environment
@@ -77,7 +77,7 @@ class BookingSqlResources:
     proposals: ProposalStore
     system_prompt: str | None
     rooms_metadata: RoomsMetadata | None
-    _search_args_model: type[BaseModel] | None
+    _search_args_model: type[SearchArgsBase] | None
     _system_prompt_resource: str
 
     def __init__(
@@ -180,7 +180,7 @@ class BookingSqlResources:
         """
         return require(self.system_prompt, "BookingSqlResources")
 
-    def get_search_args_model(self) -> type[BaseModel]:
+    def get_search_args_model(self) -> type[SearchArgsBase]:
         """Get the `search_rooms` argument model built at startup.
 
         Returns:
@@ -244,7 +244,7 @@ class BookingSqlResources:
         self.write_pool = None
         self.system_prompt = None
 
-    async def search_rooms(self, args: BaseModel) -> dict[str, Any]:
+    async def search_rooms(self, args: SearchArgsBase) -> dict[str, Any]:
         """Run a room search and return a bounded result.
 
         Delegates to `search_runner.search_rooms_with_retry` with this
@@ -269,7 +269,6 @@ class BookingSqlResources:
             args,
             retry=self.config.db.retry,
             checkout_timeout_s=self.config.db.pool.timeout_s,
-            max_results=self.config.agent.max_search_results,
             failure_message=_tool_error_message_for_model(),
         )
 

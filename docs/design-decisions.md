@@ -1307,6 +1307,25 @@ rather than treated as a regression.
 The schema text now says "user" rather than "guest", since its reader is not always the
 concierge.
 
+### The search cap was passed twice and could disagree
+
+**Status:** adopted.
+
+The most rooms one search returns went in twice: to `build_search_args_model`, which
+quotes it in `limit`'s description, and again to `run_room_search` (and the retry
+wrapper around it), which enforces it. Nothing tied the two together. A caller that
+passed different values, which the MCP server could easily do since it chooses its own
+cap, would tell the model one maximum and enforce another, and the model would have no
+way to know why its `limit` was cut.
+
+**The cap now lives on the argument model.** `build_search_args_model` sets it as the
+`max_results` class attribute of the model it returns (declared on a new base,
+`SearchArgsBase`), and `run_room_search` reads it from the arguments' class. Each
+caller still chooses its own cap, as the earlier entry intended, but chooses it once.
+
+It is a class attribute rather than a field because it is policy, not an argument: a
+field would appear in the schema the model reads and could be set in a tool call.
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

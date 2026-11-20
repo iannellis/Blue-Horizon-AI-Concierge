@@ -17,7 +17,7 @@ import asyncio
 import datetime as dt
 import os
 import platform
-from typing import TYPE_CHECKING, Any, LiteralString
+from typing import Any, LiteralString
 
 import psycopg
 import pytest
@@ -28,9 +28,6 @@ from blue_horizon.agents.booking.search import (
     build_search_args_model,
     run_room_search,
 )
-
-if TYPE_CHECKING:
-    from pydantic import BaseModel
 
 pytestmark = pytest.mark.db_integration
 
@@ -91,7 +88,7 @@ def _search(meta: RoomsMetadata, **kwargs: Any) -> dict[str, Any]:  # noqa: ANN4
         The search result.
 
     """
-    model: type[BaseModel] = build_search_args_model(
+    model = build_search_args_model(
         meta,
         max_room_numbers=10,
         default_results=_DEFAULT_RESULTS,
@@ -101,7 +98,7 @@ def _search(meta: RoomsMetadata, **kwargs: Any) -> dict[str, Any]:  # noqa: ANN4
 
     async def _run() -> dict[str, Any]:
         async with await psycopg.AsyncConnection.connect(_ro_url()) as conn:
-            return await run_room_search(conn, args, max_results=_MAX_RESULTS)
+            return await run_room_search(conn, args)
 
     return asyncio.run(_run())
 

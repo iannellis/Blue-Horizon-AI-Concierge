@@ -15,9 +15,10 @@ import datetime as dt
 from typing import Any, get_args
 
 import pytest
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
 from blue_horizon.agents.booking.search import (
+    SearchArgsBase,
     SortBy,
     _limit_note,
     _query_params,
@@ -37,7 +38,7 @@ _ONE_DAY = dt.timedelta(days=1)
 
 
 @pytest.fixture(scope="module")
-def args_model() -> type[BaseModel]:
+def args_model() -> type[SearchArgsBase]:
     """Build the argument model from hand-made metadata.
 
     Returns:
@@ -52,7 +53,7 @@ def args_model() -> type[BaseModel]:
     )
 
 
-def _validate(model: type[BaseModel], **kwargs: Any) -> BaseModel:  # noqa: ANN401
+def _validate(model: type[SearchArgsBase], **kwargs: Any) -> SearchArgsBase:  # noqa: ANN401
     """Validate keyword arguments the way the tool layer does.
 
     Args:
@@ -69,13 +70,15 @@ def _validate(model: type[BaseModel], **kwargs: Any) -> BaseModel:  # noqa: ANN4
 class TestDateWindow:
     """Dates must fall inside the availability window, which crosses New Year."""
 
-    def test_first_night_accepted(self, args_model: type[BaseModel]) -> None:
+    def test_first_night_accepted(self, args_model: type[SearchArgsBase]) -> None:
         """A stay starting on the first night is valid."""
         _validate(
             args_model, check_in=FIRST_NIGHT, check_out=FIRST_NIGHT + _ONE_DAY,
         )
 
-    def test_night_before_window_rejected(self, args_model: type[BaseModel]) -> None:
+    def test_night_before_window_rejected(
+        self, args_model: type[SearchArgsBase],
+    ) -> None:
         """A stay starting the day before the window is rejected, naming it."""
         with pytest.raises(ValidationError, match="2025-01-04"):
             _validate(
@@ -84,11 +87,13 @@ class TestDateWindow:
                 check_out=FIRST_NIGHT + _ONE_DAY,
             )
 
-    def test_last_check_out_accepted(self, args_model: type[BaseModel]) -> None:
+    def test_last_check_out_accepted(self, args_model: type[SearchArgsBase]) -> None:
         """Checking out the day after the last night is valid."""
         _validate(args_model, check_in=LAST_NIGHT, check_out=LAST_NIGHT + _ONE_DAY)
 
-    def test_check_out_past_window_rejected(self, args_model: type[BaseModel]) -> None:
+    def test_check_out_past_window_rejected(
+        self, args_model: type[SearchArgsBase],
+    ) -> None:
         """Checking out two days after the last night is rejected."""
         with pytest.raises(ValidationError, match="2026-01-04"):
             _validate(
@@ -97,13 +102,13 @@ class TestDateWindow:
                 check_out=LAST_NIGHT + 2 * _ONE_DAY,
             )
 
-    def test_new_year_crossing_accepted(self, args_model: type[BaseModel]) -> None:
+    def test_new_year_crossing_accepted(self, args_model: type[SearchArgsBase]) -> None:
         """A stay from Dec 30 to Jan 2 spans two years and is valid."""
         args = _validate(args_model, check_in="2025-12-30", check_out="2026-01-02")
         assert getattr(args, "check_out") == dt.date(2026, 1, 2)  # noqa: B009
 
     def test_check_out_before_check_in_rejected(
-        self, args_model: type[BaseModel],
+        self, args_model: type[SearchArgsBase],
     ) -> None:
         """A zero-night stay is rejected."""
         with pytest.raises(ValidationError, match="after check_in"):
@@ -114,7 +119,7 @@ class TestDateWindow:
         [{"check_in": "2025-03-03"}, {"check_out": "2025-03-05"}],
     )
     def test_one_date_alone_rejected(
-        self, args_model: type[BaseModel], dates: dict[str, str],
+        self, args_model: type[SearchArgsBase], dates: dict[str, str],
     ) -> None:
         """Dates come in pairs or not at all."""
         with pytest.raises(ValidationError, match="both"):
@@ -122,14 +127,14 @@ class TestDateWindow:
 
     @pytest.mark.parametrize("price", ["min_nightly_price", "max_nightly_price"])
     def test_price_needs_dates(
-        self, args_model: type[BaseModel], price: str,
+        self, args_model: type[SearchArgsBase], price: str,
     ) -> None:
         """A nightly price bound means nothing without a stay."""
         with pytest.raises(ValidationError, match=price):
             _validate(args_model, **{price: 300})
 
     def test_price_range_with_dates_accepted(
-        self, args_model: type[BaseModel],
+        self, args_model: type[SearchArgsBase],
     ) -> None:
         """A nightly price range with a stay is valid."""
         _validate(
@@ -141,7 +146,7 @@ class TestDateWindow:
         )
 
     def test_inverted_price_range_rejected(
-        self, args_model: type[BaseModel],
+        self, args_model: type[SearchArgsBase],
     ) -> None:
         """A price floor above the price cap is rejected."""
         with pytest.raises(ValidationError, match="min_nightly_price"):
@@ -153,7 +158,7 @@ class TestDateWindow:
                 max_nightly_price=300,
             )
 
-    def test_price_with_dates_accepted(self, args_model: type[BaseModel]) -> None:
+    def test_price_with_dates_accepted(self, args_model: type[SearchArgsBase]) -> None:
         """A nightly price cap with a stay is valid."""
         _validate(
             args_model,
@@ -166,7 +171,7 @@ class TestDateWindow:
 class TestVocabulary:
     """Categorical filters accept only values from the metadata."""
 
-    def test_known_values_accepted(self, args_model: type[BaseModel]) -> None:
+    def test_known_values_accepted(self, args_model: type[SearchArgsBase]) -> None:
         """Values present in the metadata validate."""
         _validate(
             args_model,
@@ -186,20 +191,22 @@ class TestVocabulary:
         ],
     )
     def test_unknown_value_rejected(
-        self, args_model: type[BaseModel], kwargs: dict[str, list[str]],
+        self, args_model: type[SearchArgsBase], kwargs: dict[str, list[str]],
     ) -> None:
         """A value the database does not hold is rejected before any SQL."""
         with pytest.raises(ValidationError):
             _validate(args_model, **kwargs)
 
-    def test_schema_lists_allowed_values(self, args_model: type[BaseModel]) -> None:
+    def test_schema_lists_allowed_values(
+        self, args_model: type[SearchArgsBase],
+    ) -> None:
         """The model-facing schema enumerates the vocabulary."""
         schema = str(args_model.model_json_schema())
         assert "Ocean View" in schema
         assert "Mini Bar" in schema
 
     def test_too_many_room_numbers_rejected(
-        self, args_model: type[BaseModel],
+        self, args_model: type[SearchArgsBase],
     ) -> None:
         """A search may name only a bounded number of rooms."""
         with pytest.raises(ValidationError):
@@ -209,13 +216,13 @@ class TestVocabulary:
 class TestFloors:
     """Floor filters are bounded by the hotel's floors and consistent."""
 
-    def test_top_floor_accepted(self, args_model: type[BaseModel]) -> None:
+    def test_top_floor_accepted(self, args_model: type[SearchArgsBase]) -> None:
         """'Top floor' is min_floor and max_floor both at the top."""
         _validate(args_model, min_floor=20, max_floor=20)
 
     @pytest.mark.parametrize("kwargs", [{"max_floor": 21}, {"min_floor": 0}])
     def test_out_of_range_floor_rejected(
-        self, args_model: type[BaseModel], kwargs: dict[str, int],
+        self, args_model: type[SearchArgsBase], kwargs: dict[str, int],
     ) -> None:
         """A floor the hotel does not have is rejected."""
         with pytest.raises(ValidationError):
@@ -230,7 +237,7 @@ class TestFloors:
         ],
     )
     def test_inverted_range_rejected(
-        self, args_model: type[BaseModel], lower: str, upper: str,
+        self, args_model: type[SearchArgsBase], lower: str, upper: str,
     ) -> None:
         """A lower bound above its upper bound is rejected."""
         with pytest.raises(ValidationError, match=f"{lower} cannot be above"):
@@ -240,12 +247,12 @@ class TestFloors:
         "bound", ["max_occupancy", "max_square_feet"],
     )
     def test_upper_bound_alone_accepted(
-        self, args_model: type[BaseModel], bound: str,
+        self, args_model: type[SearchArgsBase], bound: str,
     ) -> None:
         """An upper bound on an undated attribute needs no other filter."""
         _validate(args_model, **{bound: 2})
 
-    def test_schema_names_the_top_floor(self, args_model: type[BaseModel]) -> None:
+    def test_schema_names_the_top_floor(self, args_model: type[SearchArgsBase]) -> None:
         """The max_floor description tells the model which floor is the top."""
         description = args_model.model_json_schema()["properties"]["max_floor"][
             "description"
@@ -295,66 +302,61 @@ class TestQuerySelection:
         for column in ("room_id", "r.status", "base_rate", "max_rate", "renovation"):
             assert column not in select_list
 
-    def test_empty_list_means_unrestricted(self, args_model: type[BaseModel]) -> None:
+    def test_empty_list_means_unrestricted(
+        self, args_model: type[SearchArgsBase],
+    ) -> None:
         """An empty filter list is passed as NULL, the same as omitting it."""
-        params = _query_params(
-            _validate(args_model, amenities=[]), max_results=MAX_RESULTS,
-        )
+        params = _query_params(_validate(args_model, amenities=[]))
         assert params["amenities"] is None
 
 
 class TestLimit:
     """The model may ask for a number of rooms, clamped to the maximum."""
 
-    def test_default_limit(self, args_model: type[BaseModel]) -> None:
+    def test_default_limit(self, args_model: type[SearchArgsBase]) -> None:
         """Without a limit, a search asks for the default number of rooms."""
-        params = _query_params(_validate(args_model), max_results=MAX_RESULTS)
+        params = _query_params(_validate(args_model))
         assert params["limit"] == DEFAULT_RESULTS
 
-    def test_limit_within_maximum_is_kept(self, args_model: type[BaseModel]) -> None:
+    def test_limit_within_maximum_is_kept(
+        self, args_model: type[SearchArgsBase],
+    ) -> None:
         """A limit up to the maximum is used as given."""
-        params = _query_params(
-            _validate(args_model, limit=MAX_RESULTS), max_results=MAX_RESULTS,
-        )
+        params = _query_params(_validate(args_model, limit=MAX_RESULTS))
         assert params["limit"] == MAX_RESULTS
 
     def test_limit_above_maximum_is_clamped(
-        self, args_model: type[BaseModel],
+        self, args_model: type[SearchArgsBase],
     ) -> None:
         """A larger limit is accepted, then clamped rather than rejected."""
-        params = _query_params(
-            _validate(args_model, limit=MAX_RESULTS + 10), max_results=MAX_RESULTS,
-        )
+        params = _query_params(_validate(args_model, limit=MAX_RESULTS + 10))
         assert params["limit"] == MAX_RESULTS
 
     def test_named_rooms_raise_unset_limit(
-        self, args_model: type[BaseModel],
+        self, args_model: type[SearchArgsBase],
     ) -> None:
         """Naming more rooms than the default returns every named room."""
         rooms = list(range(101, 101 + MAX_ROOM_NUMBERS))
-        params = _query_params(
-            _validate(args_model, room_numbers=rooms), max_results=MAX_RESULTS,
-        )
+        params = _query_params(_validate(args_model, room_numbers=rooms))
         assert params["limit"] == MAX_ROOM_NUMBERS
 
     def test_named_rooms_keep_explicit_limit(
-        self, args_model: type[BaseModel],
+        self, args_model: type[SearchArgsBase],
     ) -> None:
         """A limit the model set is kept even when it names more rooms."""
         rooms = list(range(101, 101 + MAX_ROOM_NUMBERS))
-        params = _query_params(
-            _validate(args_model, room_numbers=rooms, limit=2),
-            max_results=MAX_RESULTS,
-        )
+        params = _query_params(_validate(args_model, room_numbers=rooms, limit=2))
         assert params["limit"] == 2  # noqa: PLR2004
 
-    def test_limit_below_one_is_rejected(self, args_model: type[BaseModel]) -> None:
+    def test_limit_below_one_is_rejected(
+        self, args_model: type[SearchArgsBase],
+    ) -> None:
         """A limit of zero is a mistake the model can fix."""
         with pytest.raises(ValidationError):
             _validate(args_model, limit=0)
 
     def test_description_states_default_and_maximum(
-        self, args_model: type[BaseModel],
+        self, args_model: type[SearchArgsBase],
     ) -> None:
         """Any client's model learns the default and maximum from the schema."""
         description = args_model.model_json_schema()["properties"]["limit"][
@@ -362,6 +364,16 @@ class TestLimit:
         ]
         assert f"{DEFAULT_RESULTS} by default" in description
         assert f"At most {MAX_RESULTS}" in description
+
+    def test_maximum_is_a_class_attribute_not_a_field(
+        self, args_model: type[SearchArgsBase],
+    ) -> None:
+        """The cap travels with the model but is not an argument a caller sets."""
+        assert args_model.max_results == MAX_RESULTS
+        assert "max_results" not in args_model.model_json_schema()["properties"]
+        args = _validate(args_model, max_results=MAX_RESULTS + 10, limit=100)
+        assert args.max_results == MAX_RESULTS
+        assert _query_params(args)["limit"] == MAX_RESULTS
 
     def test_limit_note_tells_the_user(self) -> None:
         """The clamp note carries its own instruction, since MCP skips our prompt."""

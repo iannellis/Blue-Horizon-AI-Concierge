@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Final, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Final, Literal
 
 from psycopg import sql
 from psycopg.rows import dict_row
@@ -72,6 +72,30 @@ class RoomsMetadata:
 
         """
         return self.last_night + dt.timedelta(days=1)
+
+
+class SearchArgsBase(BaseModel):
+    """Base of every model `build_search_args_model` returns.
+
+    The fields themselves are added at runtime, because their allowed values
+    come from the database. What the base adds is the result cap, as a class
+    attribute rather than a field: a field would appear in the JSON schema
+    and be settable by the caller, and the cap is policy, not an argument.
+    Keeping it on the model means the number quoted in `limit`'s description
+    and the number `run_room_search` enforces cannot drift apart.
+
+    Attributes:
+        max_results: Most rooms one search returns, whatever `limit` asks
+            for. Set by `build_search_args_model`; unset on this base.
+        limit: Rooms requested. Declared here for type checkers only; the
+            field itself is defined by `build_search_args_model`.
+
+    """
+
+    max_results: ClassVar[int]
+
+    if TYPE_CHECKING:
+        limit: int
 
 
 # Room columns every search returns. Internal identifiers, the room-level
@@ -206,7 +230,7 @@ def build_search_args_model(
     max_room_numbers: int,
     default_results: int,
     max_results: int,
-) -> type[BaseModel]:
+) -> type[SearchArgsBase]:
     """Build the `search_rooms` argument model from database metadata.
 
     Categorical fields are `Literal` types over the values the database
@@ -221,11 +245,13 @@ def build_search_args_model(
         meta: Search vocabulary and bounds loaded at startup.
         max_room_numbers: Maximum length of the `room_numbers` list.
         default_results: Rooms returned when the model does not set `limit`.
-        max_results: Most rooms one search returns, quoted in `limit`'s
-            description.
+        max_results: Most rooms one search returns. Quoted in `limit`'s
+            description and stored as the model's `max_results`, which
+            `run_room_search` enforces.
 
     Returns:
-        A Pydantic model class whose instances are valid search arguments.
+        A `SearchArgsBase` subclass whose instances are valid search
+        arguments.
 
     """
     window = (
@@ -238,8 +264,9 @@ def build_search_args_model(
     view_types = _optional_list_of(meta.view_types)
     floor_bounds: dict[str, Any] = {"ge": meta.min_floor, "le": meta.max_floor}
 
-    return create_model(
+    model = create_model(
         "SearchRoomsArgs",
+        __base__=SearchArgsBase,
         __doc__="Filters for a room search. Omit a filter to leave it unrestricted.",
         __validators__={"_check_consistency": _consistency_validator(meta)},
         check_in=(
@@ -397,6 +424,8 @@ def build_search_args_model(
             ),
         ),
     )
+    model.max_results = max_results
+    return model
 
 
 def _optional_list_of(values: Sequence[str]) -> Any:  # noqa: ANN401
@@ -504,17 +533,16 @@ def date_window_problem(
 
 async def run_room_search(
     conn: AsyncConnection[Any],
-    args: BaseModel,
-    *,
-    max_results: int,
+    args: SearchArgsBase,
 ) -> dict[str, Any]:
     """Run a room search on an open connection.
 
     Args:
         conn: Connection to run the query on. The caller owns its lifetime,
             transaction, and retry policy.
-        args: An instance of the model from `build_search_args_model`.
-        max_results: Most rooms to return, whatever `args.limit` asks for.
+        args: An instance of the model from `build_search_args_model`. Its
+            class's `max_results` caps the rooms returned, whatever
+            `args.limit` asks for.
 
     Returns:
         `{"status": "ok", "matching_count": n, "rooms": [...]}`, where `n`
@@ -526,7 +554,8 @@ async def run_room_search(
         `max_results`.
 
     """
-    params = _query_params(args, max_results=max_results)
+    max_results = args.max_results
+    params = _query_params(args)
     dated = params["check_in"] is not None
     query = select_search_query(sort_by=params["sort_by"], dated=dated)
     async with conn.cursor(row_factory=dict_row) as cur:
@@ -539,22 +568,21 @@ async def run_room_search(
         "matching_count": matching_count,
         "rooms": [_room_result(row) for row in rows],
     }
-    requested: int = args.limit  # pyright: ignore[reportAttributeAccessIssue]
-    if requested > max_results:
-        result["limit_note"] = _limit_note(requested, max_results)
+    if args.limit > max_results:
+        result["limit_note"] = _limit_note(args.limit, max_results)
     return result
 
 
-def _query_params(args: BaseModel, *, max_results: int) -> dict[str, Any]:
+def _query_params(args: SearchArgsBase) -> dict[str, Any]:
     """Turn search arguments into query parameters.
 
     An empty list means "no restriction", the same as an omitted filter. When
     the model names rooms without setting `limit`, the limit rises to the
-    number of rooms named, so every named room comes back.
+    number of rooms named, so every named room comes back. The limit is then
+    capped at the model's `max_results`.
 
     Args:
         args: Validated search arguments.
-        max_results: Ceiling applied to the limit.
 
     Returns:
         Mapping of every named placeholder in the search SQL to its value.
@@ -567,7 +595,7 @@ def _query_params(args: BaseModel, *, max_results: int) -> dict[str, Any]:
     if "limit" not in args.model_fields_set and params["room_numbers"]:
         # Named rooms all come back unless the model chose a smaller number.
         params["limit"] = max(params["limit"], len(params["room_numbers"]))
-    params["limit"] = min(params["limit"], max_results)
+    params["limit"] = min(params["limit"], args.max_results)
     return params
 
 

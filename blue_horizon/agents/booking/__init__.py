@@ -31,6 +31,7 @@ from blue_horizon.agents.booking.resources import BookingSqlResources
 from blue_horizon.agents.booking.search import (
     SEARCH_TOOL_DESCRIPTION,
     RoomsMetadata,
+    SearchArgsBase,
     build_search_args_model,
     run_room_search,
 )
@@ -51,6 +52,7 @@ __all__ = [
     "ProposalOwnershipError",
     "ProposalStore",
     "RoomsMetadata",
+    "SearchArgsBase",
     "SqlErrorKind",
     "assert_pool_is_read_only",
     "build_booking_agent",

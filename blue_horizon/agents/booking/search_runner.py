@@ -31,8 +31,8 @@ from blue_horizon.agents.booking.search import run_room_search
 
 if TYPE_CHECKING:
     from psycopg_pool import AsyncConnectionPool
-    from pydantic import BaseModel
 
+    from blue_horizon.agents.booking.search import SearchArgsBase
     from blue_horizon.config import DbRetryConfig
 
 logger = logging.getLogger(__name__)
@@ -54,13 +54,12 @@ _CONN_ERRORS = (
 )
 
 
-async def search_rooms_with_retry(  # noqa: PLR0913
+async def search_rooms_with_retry(
     pool: AsyncConnectionPool[Any],
-    args: BaseModel,
+    args: SearchArgsBase,
     *,
     retry: DbRetryConfig,
     checkout_timeout_s: float,
-    max_results: int,
     failure_message: str,
 ) -> dict[str, Any]:
     """Run a room search and return a bounded result.
@@ -72,10 +71,9 @@ async def search_rooms_with_retry(  # noqa: PLR0913
     Args:
         pool: An open pool authenticating as the read-only role.
         args: A validated instance of the model `build_search_args_model`
-            returns.
+            returns. Its class's `max_results` caps the rooms returned.
         retry: Transient retry policy: attempt count and backoff.
         checkout_timeout_s: Seconds to wait for a connection from *pool*.
-        max_results: Hard cap on the number of rooms returned.
         failure_message: The ``error`` text of a failed search. It is
             written for whoever reads the result: the booking agent's text
             carries a marker its system prompt keys off, which a client
@@ -101,10 +99,7 @@ async def search_rooms_with_retry(  # noqa: PLR0913
         ):
             with attempt:
                 result = await _search_once(
-                    pool,
-                    args,
-                    checkout_timeout_s=checkout_timeout_s,
-                    max_results=max_results,
+                    pool, args, checkout_timeout_s=checkout_timeout_s,
                 )
                 # The arguments, never the rooms: the counts are all an
                 # audit needs to see what the model looked at.
@@ -166,10 +161,9 @@ def _is_retryable(exc: BaseException) -> bool:
 
 async def _search_once(
     pool: AsyncConnectionPool[Any],
-    args: BaseModel,
+    args: SearchArgsBase,
     *,
     checkout_timeout_s: float,
-    max_results: int,
 ) -> dict[str, Any]:
     """Run the search exactly once without any retry logic.
 
@@ -177,7 +171,6 @@ async def _search_once(
         pool: An open pool authenticating as the read-only role.
         args: Validated search arguments.
         checkout_timeout_s: Seconds to wait for a connection from *pool*.
-        max_results: Hard cap on the number of rooms returned.
 
     Returns:
         `run_room_search`'s result.
@@ -198,7 +191,7 @@ async def _search_once(
         # engage, but it costs nothing and covers the window between a
         # misconfiguration and the next restart's startup assertion.
         await conn.execute("SET TRANSACTION READ ONLY")
-        return await run_room_search(conn, args, max_results=max_results)
+        return await run_room_search(conn, args)
 
 
 def _timing(started: float) -> dict[str, int]:

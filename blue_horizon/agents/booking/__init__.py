@@ -13,6 +13,7 @@ from blue_horizon.agents.booking.db_utils import (
     ENUM_TYPES,
     check_credentials,
     fetch_rooms_metadata,
+    is_transient_conn_error,
 )
 from blue_horizon.agents.booking.factory import (
     build_booking_agent,
@@ -27,6 +28,7 @@ from blue_horizon.agents.booking.proposals import (
 )
 from blue_horizon.agents.booking.resources import BookingSqlResources
 from blue_horizon.agents.booking.search import (
+    SEARCH_TOOL_DESCRIPTION,
     RoomsMetadata,
     build_search_args_model,
     run_room_search,
@@ -35,6 +37,7 @@ from blue_horizon.agents.booking.write_ops import BookingWriteError
 
 __all__ = [
     "ENUM_TYPES",
+    "SEARCH_TOOL_DESCRIPTION",
     "BookingSqlResources",
     "BookingWriteError",
     "Proposal",
@@ -48,6 +51,7 @@ __all__ = [
     "check_credentials",
     "database_unavailable_this_turn",
     "fetch_rooms_metadata",
+    "is_transient_conn_error",
     "load_booking_config",
     "render_system_prompt",
     "run_room_search",

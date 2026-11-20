@@ -173,11 +173,30 @@ _RANGE_BOUNDS: Final = (
     ("min_nightly_price", "max_nightly_price"),
 )
 
-# A guest's broad request ("a suite", "an ocean view") also covers the values whose
+# How to use the search, for any caller. It lives here rather than in a system
+# prompt because an MCP client brings its own prompt; `booking.txt` keeps only
+# the concierge's own policy.
+SEARCH_TOOL_DESCRIPTION: Final = (
+    "Search the hotel's rooms. With check_in and check_out, returns only rooms "
+    "free and priced for every night of the stay, with the stay's total price. "
+    "Without dates, searches room attributes in general. Returns matching_count "
+    "(every matching room) and a few example rooms, or up to `limit` rooms, so "
+    "use matching_count to answer 'how many' questions. When the user refines "
+    "or re-sorts earlier results ('of those', 'only the cheaper ones'), search "
+    "again with the earlier search's filters and dates plus the new one, not "
+    "by the room numbers already shown. An empty result is a "
+    "valid answer: say no rooms matched, and offer to relax a filter. An "
+    "invalid_arguments error names the problem: fix the arguments and search "
+    "once more, or ask the user if the fix depends on what they want. Searches "
+    "cannot answer analytical questions such as average prices, price trends, "
+    "or which dates are cheapest."
+)
+
+# A user's broad request ("a suite", "an ocean view") also covers the values whose
 # names contain it; the closest single value alone drops rooms they asked for.
 _ANY_OF_COVERAGE: Final = (
-    " List every value that is a kind of what the guest asked for, including each "
-    "value whose name contains the requested one, unless the guest wants only that one."
+    " List every value that is a kind of what the user asked for, including each "
+    "value whose name contains the requested one, unless the user wants only that one."
 )
 
 
@@ -196,7 +215,7 @@ def build_search_args_model(
 
     `limit` has no upper bound here. A request above `max_results` is clamped
     by `run_room_search`, which says so in its result, rather than rejected,
-    so a guest asking for "every room" still gets rooms back.
+    so a user asking for "every room" still gets rooms back.
 
     Args:
         meta: Search vocabulary and bounds loaded at startup.
@@ -238,7 +257,7 @@ def build_search_args_model(
             Field(
                 default=None,
                 description=(
-                    "Check-out date (ISO date), exclusive: the guest does not stay "
+                    "Check-out date (ISO date), exclusive: the user does not stay "
                     "that night. Requires check_in. Omit both dates for questions "
                     "about rooms in general."
                 ),
@@ -249,7 +268,13 @@ def build_search_args_model(
             Field(
                 default=None,
                 max_length=max_room_numbers,
-                description="Only these room numbers.",
+                description=(
+                    "Only these room numbers. Use only when the user picks out "
+                    "specific rooms. To narrow or re-sort earlier results, repeat "
+                    "that search's filters and dates plus the new filter instead: "
+                    "earlier results are only the first few of matching_count, and "
+                    "leaving out the dates skips the availability check."
+                ),
             ),
         ),
         room_types=(
@@ -361,7 +386,13 @@ def build_search_args_model(
                     "number, lowest first. Add '_desc' for highest first, e.g. "
                     "'price_desc' for the most expensive stay first. Price "
                     "ordering needs dates; without them results are in room "
-                    "number order."
+                    "number order. 'Largest' is 'square_feet_desc', 'cheapest' "
+                    "is 'price' and 'most expensive' is 'price_desc' (both with "
+                    "dates), and 'high floor' is 'floor_desc' or a min_floor near "
+                    "the top. A sort only orders the few rooms that come back; a "
+                    "range the user gives (a price band, a size limit) belongs in "
+                    "the matching min_ and max_ filters, which decide which rooms "
+                    "match."
                 ),
             ),
         ),
@@ -466,7 +497,7 @@ def date_window_problem(
     return (
         f"Dates {check_in} to {check_out} are out of range. Availability covers "
         f"nights {meta.first_night} through {meta.last_night} "
-        f"(latest check-out {meta.last_check_out}). If the guest gave no year, "
+        f"(latest check-out {meta.last_check_out}). If the user gave no year, "
         "retry with the year that puts these dates inside that period."
     )
 

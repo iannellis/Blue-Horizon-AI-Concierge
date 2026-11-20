@@ -47,14 +47,25 @@ The allowed values for room type, bed type, amenity, and view type are read from
 database at startup (`db_utils.fetch_rooms_metadata`) and become `Literal` types in the
 tool's argument model, so the schema the model sees lists every legal value, and an
 unknown one is rejected before any SQL runs. The same startup read supplies the floor
-range and the availability window, which bound the floor and date fields and are
-rendered into the system prompt. Nothing about the data's dates is hardcoded.
+range and the availability window, which bound the floor and date fields. The window is
+also rendered into the system prompt for its date rules. Nothing about the data's dates
+is hardcoded.
 
-The descriptions of `room_types`, `bed_types`, and `view_types` tell the model to list
-every value that is a kind of what the guest asked for, including each value whose name
-contains the requested one. A broad request such as "a suite" or "an ocean view" then
-reaches the premium variants too. The guidance lives in the tool schema rather than
-`booking.txt`, so a client that brings its own prompt still gets it.
+How to search is written into the tool itself, in `search.py`, not into `booking.txt`,
+so a client that brings its own prompt, such as an MCP server, gets the same guidance:
+
+| Where | What it says |
+|---|---|
+| `SEARCH_TOOL_DESCRIPTION` | What dates do, that `matching_count` answers "how many", that refining earlier results repeats that search's filters and dates rather than searching by room number, that an empty result is a valid answer, how to recover from `invalid_arguments`, and that a search cannot answer analytical questions such as average prices |
+| `room_types`, `bed_types`, `view_types` | List every value that is a kind of what the user asked for, including each value whose name contains the requested one, so "a suite" or "an ocean view" reaches the premium variants too |
+| `sort_by` | Which value "largest", "cheapest", "most expensive", and "high floor" mean, and that a range the user gives belongs in the `min_` and `max_` filters, since a sort only orders the rooms returned |
+| `room_numbers` | Search by room number only when the user picks out specific rooms; to narrow earlier results, repeat that search's filters and dates |
+| `max_floor`, `limit`, `check_in` | "Top floor", the result maximum, and the availability window |
+
+`booking.txt` keeps only what belongs to the concierge: what to tell a guest when the
+database is unreachable, how to offer an alternative when a search cannot answer, and a
+limit on searches per message. The descriptions say "user" rather than "guest" because
+the caller is not always the concierge.
 
 `blue_horizon/agents/booking/search.py` then runs one of two fixed queries, one for a
 dated stay and one without dates, with the filter values bound as parameters. Each

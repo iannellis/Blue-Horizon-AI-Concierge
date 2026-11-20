@@ -1265,6 +1265,48 @@ the router also refuses abuse. **The eval now records what each turn flagged**, 
 `moderation_flag_pass` fails a case when moderation's flags differ from its
 `expect_flagged` labels, in either direction.
 
+### Search guidance moved from the prompt into the tool
+
+**Status:** adopted; the smoke eval passes every gate against it.
+
+An MCP server wrapping `search.py` would show a client's model the `search_rooms`
+schema and description, but nothing from `booking.txt`, because the client brings its
+own prompt. Most of the prompt's "Searching rooms" section was about the tool rather
+than the concierge: what dates do, how sorts differ from filters, which `sort_by` value
+"largest" or "cheapest" means, what `matching_count` is for, how to recover from
+`invalid_arguments`, and what a search cannot answer. A server would either lose that
+guidance or have to copy it out of `booking.txt` and keep the copy in step.
+
+**That guidance now lives in `search.py`,** in a `SEARCH_TOOL_DESCRIPTION` shared by
+the agent and any other caller, and in the `sort_by` and `room_numbers` field
+descriptions. Several bullets were already restated by the schema (the top floor, the
+`limit` maximum, the date fields, `matching_count`) and were simply deleted from the
+prompt. `booking.txt` keeps the concierge's own rules: the `DATABASE_UNAVAILABLE`
+reply, offering a dated search when a question cannot be answered, and the cap on
+searches per message. The renderer no longer fills in the top floor or the result
+limits, since the prompt no longer mentions them.
+
+This revises [the refine rule's placement](#a-follow-up-search-narrowed-to-the-rooms-already-shown),
+which kept it in the prompt rather than the tool result because a single search cannot
+see the conversation. That reasoning still rules out the result, but not the tool
+description. The first version put the rule only in the `room_numbers` field
+description, on the theory that the model reads it while choosing arguments. It did
+not hold: a follow-up of the form "of those, which is the biggest?" searched by the
+room numbers just shown, dropping the earlier amenities and dates, in 3 of 4 runs, where
+the previous prompt passed 3 of 3. The model commits to narrowing before it reads that
+one field, and the field text did not name the refining phrasings the prompt bullet
+had. Adding the rule, with those phrasings, to `SEARCH_TOOL_DESCRIPTION` brought it back
+to 3 of 3.
+
+A missing-year case also tried the wrong year on its first search more often than
+before (5 of 7 runs across both versions, against 1 of 3 on the previous prompt). The
+year rule itself stayed in `booking.txt` unchanged, the tool's date-window error usually
+corrects the year on the next call, and the samples are small, so it is noted here
+rather than treated as a regression.
+
+The schema text now says "user" rather than "guest", since its reader is not always the
+concierge.
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

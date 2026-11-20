@@ -558,12 +558,7 @@ class BookingSqlResources:
             self.rooms_metadata = meta
 
             template = load_prompt_template(self._system_prompt_resource)
-            self.system_prompt = render_system_prompt(
-                template=template,
-                default_results=agent_cfg.default_search_results,
-                max_results=agent_cfg.max_search_results,
-                meta=meta,
-            )
+            self.system_prompt = render_system_prompt(template=template, meta=meta)
 
         except ConfigurationError:
             raise

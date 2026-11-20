@@ -38,7 +38,10 @@ from psycopg.rows import dict_row
 from blue_horizon.agents._lifecycle import require
 from blue_horizon.agents._llm import build_chat_model
 from blue_horizon.agents.booking import write_ops
-from blue_horizon.agents.booking.search import date_window_problem
+from blue_horizon.agents.booking.search import (
+    SEARCH_TOOL_DESCRIPTION,
+    date_window_problem,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -54,14 +57,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _SEARCH_TOOL_NAME = "search_rooms"
-
-_SEARCH_TOOL_DESCRIPTION = (
-    "Search the hotel's rooms. With check_in and check_out, returns only rooms "
-    "free and priced for every night of the stay, with the stay's total price. "
-    "Without dates, searches room attributes in general. Returns matching_count "
-    "(every matching room) and a few example rooms, or up to `limit` rooms, so "
-    "use matching_count to answer 'how many' questions."
-)
 
 
 class BookingRoomRequest(TypedDict):
@@ -177,7 +172,7 @@ def build_booking_agent(
     search_rooms = StructuredTool.from_function(
         coroutine=_search_rooms,
         name=_SEARCH_TOOL_NAME,
-        description=_SEARCH_TOOL_DESCRIPTION,
+        description=SEARCH_TOOL_DESCRIPTION,
         args_schema=search_args_model,
         handle_validation_error=_invalid_arguments_result,
     )

@@ -30,38 +30,27 @@ def load_booking_config(config_path: Path | str | None = None) -> BookingSqlConf
     return app_config.booking
 
 
-def render_system_prompt(
-    *,
-    template: Template,
-    default_results: int,
-    max_results: int,
-    meta: RoomsMetadata,
-) -> str:
+def render_system_prompt(*, template: Template, meta: RoomsMetadata) -> str:
     """Render the system prompt template with runtime substitutions.
 
-    The searchable values themselves are not rendered: the `search_rooms`
-    tool schema lists them, so the prompt needs only the bounds a guest's
-    wording has to be mapped onto.
+    Only the availability window is rendered, for the prompt's date rules.
+    How to search, the searchable values, the top floor, and the result
+    limits are all in the `search_rooms` tool schema and description
+    (`search.py`), which an MCP client also sees.
 
     Args:
         template: String Template loaded from the booking prompt resource.
-        default_results: Rooms a search returns when the model does not set
-            `limit`.
-        max_results: Most rooms one search returns.
-        meta: Rooms metadata supplying the date window and top floor.
+        meta: Rooms metadata supplying the date window.
 
     Returns:
         Rendered system prompt string with all placeholders substituted.
 
     """
     return template.safe_substitute(
-        default_search_results=default_results,
-        max_search_results=max_results,
         first_night=meta.first_night.isoformat(),
         last_night=meta.last_night.isoformat(),
         last_check_out=meta.last_check_out.isoformat(),
         first_month_day=f"{meta.first_night:%B} {meta.first_night.day}",
         first_year=meta.first_night.year,
         last_year=meta.last_night.year,
-        max_floor=meta.max_floor,
     )

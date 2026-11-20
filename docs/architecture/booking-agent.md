@@ -83,8 +83,8 @@ rate columns, and renovation dates are never selected.
 This bounds what one search can cost. The free-form `run_sql` tool it replaced capped
 rows, not size: a single aggregated row could carry millions of characters. It also
 keeps the rules in code rather than in the prompt, which matters for any client that
-brings its own prompt, such as a future MCP server. `search.py` imports nothing from
-LangChain so that such a server can wrap it directly.
+brings its own prompt, such as the [MCP server](#mcp-server). `search.py` imports
+nothing from LangChain so that such a server can wrap it directly.
 
 How a search is run is in `search_runner.search_rooms_with_retry`, which takes the
 read-only pool and its settings as arguments, so the agent and an MCP server share it.
@@ -220,6 +220,27 @@ defenses hold.
 `list_my_bookings` takes its `customer_id` from `RunnableConfig`, injected by the
 server. The parameter is invisible to the model, so the model cannot ask for another
 guest's reservations by passing a different id.
+
+## MCP server
+
+`mcp_server/mcp_booking.py` exposes `search_rooms`, and only `search_rooms`, to any MCP
+client. It is a FastMCP server deployed on Prefect Horizon (see
+[Deployment](../guides/deployment.md#mcp-server-on-prefect-horizon)). It reuses the
+agent's pieces rather than copying them: `build_search_args_model` for the arguments,
+`SEARCH_TOOL_DESCRIPTION` for the tool description, and `search_rooms_with_retry` to run
+the search. A client therefore gets the same validation, result cap, and guidance as the
+booking agent, with none of the booking prompt.
+
+It connects only through `PGSQL_RO_DB_URL`. At startup it checks those credentials,
+reads the room vocabularies and room count that the argument model is built from, and
+opens a pool that `assert_pool_is_read_only` probes before the first call. The tools
+that read guest data or create proposals are not exposed, so no customer data and no
+write path reach an MCP client.
+
+The startup reads happen at import, because the tool's schema is built from the
+vocabularies before the server starts. FastMCP imports the module from inside a running
+event loop, where `asyncio.run` raises, so `_run_startup` runs each startup coroutine on
+a worker thread with its own loop.
 
 ## Concurrency and double-booking
 

@@ -1326,6 +1326,33 @@ caller still chooses its own cap, as the earlier entry intended, but chooses it 
 It is a class attribute rather than a field because it is policy, not an argument: a
 field would appear in the schema the model reads and could be set in a tool call.
 
+### The MCP server runs on FastMCP and Prefect Horizon
+
+**Status:** adopted.
+
+The MCP server is hosted on Prefect Horizon rather than as a second Hugging Face Docker
+Space beside the concierge, because Hugging Face no longer offers Docker Spaces on its
+free tier and Horizon hosts personal FastMCP servers for free. Horizon runs FastMCP
+servers, so the server is written with FastMCP 4, which is built on the official `mcp`
+SDK.
+
+**Startup reads run on a worker thread.** The tool's schema is built from the room
+vocabularies, so they are read at import, before the server starts. A plain
+`asyncio.run` there fails with "asyncio.run() cannot be called from a running event
+loop": FastMCP imports the server module from inside its own loop, and Horizon loads it
+the same way. Moving the reads into the lifespan would leave the schema without its
+vocabularies, so `_run_startup` keeps them at import and runs each one on a worker
+thread with a fresh event loop.
+
+**Horizon gets no read-write credential.** `load_app_config()` requires
+`PGSQL_RW_DB_URL`, which the server never uses. On Horizon it is set to the read-only
+URL, so a credential that can write bookings or read customers never leaves the
+project's own hosts.
+
+Hosting on Horizon gives up control of the HTTP server: Horizon runs its own, so
+uvicorn's proxy settings, and with them per-IP rate limiting on the resolved client
+address, are not available.
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

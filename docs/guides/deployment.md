@@ -67,6 +67,40 @@ Both processes run as user `user` (uid 1000) rather than root. `data/` is exclud
 the image entirely, since resets are performed via Neon branches rather than by
 reloading from source files.
 
+## MCP server on Prefect Horizon
+
+The [MCP server](../architecture/booking-agent.md#mcp-server) is deployed separately,
+on [Prefect Horizon](https://horizon.prefect.io), which hosts personal FastMCP servers
+for free. Horizon clones the whole repository, because the server imports
+`blue_horizon`, but runs only the entrypoint:
+
+```
+mcp_server/mcp_booking.py:mcp
+```
+
+Horizon imports the `mcp` object and ignores the file's `if __name__ == "__main__"`
+block, which exists only for local runs. It installs dependencies from
+`pyproject.toml`, which is why `fastmcp` is a project dependency rather than a group.
+Importing `blue_horizon.agents.booking` also imports its LangChain modules, so the whole
+project's dependencies are installed even though the server never calls them.
+
+Set these environment variables on Horizon:
+
+| Variable | Value |
+|---|---|
+| `PGSQL_RO_DB_URL` | The read-only (`bh_agent_ro`) URL |
+| `PGSQL_RW_DB_URL` | The same read-only URL |
+| `REDIS_URL` | Any non-blank placeholder |
+| `AXIOM_API_KEY`, `AXIOM_DATASET` | Optional, to ship logs as service `blue-horizon-mcp` |
+
+`load_app_config()` requires `PGSQL_RW_DB_URL` and `REDIS_URL`, but the server uses
+neither. Giving it the read-only URL in place of the read-write one keeps every
+credential that can write to the database off a third-party host.
+
+To check the server loads before pushing, run `fastmcp inspect
+mcp_server/mcp_booking.py:mcp` from the repository root. It imports the module, so it
+runs the startup database reads and builds the tool schema.
+
 ## Continuous integration
 
 [`.github/workflows/ci.yml`](https://github.com/iannellis/Blue-Horizon-AI-Concierge/blob/main/.github/workflows/ci.yml)

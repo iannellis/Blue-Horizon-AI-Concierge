@@ -115,6 +115,7 @@ is dismantling a guarantee.
 | `blue_horizon/agents/booking/proposals.py` | In-process `ProposalStore`, propose to confirm/dismiss lifecycle |
 | `blue_horizon/agents/booking/search.py` | `search_rooms` argument model and its fixed queries; no LangChain imports, so an MCP server can reuse it |
 | `blue_horizon/agents/booking/search_runner.py` | `search_rooms_with_retry`: runs a search on a given read-only pool with retry, logging, and `error_kind` classification; shared by `BookingSqlResources` and the MCP server |
+| `mcp_server/mcp_booking.py` | FastMCP server exposing only `search_rooms` over `PGSQL_RO_DB_URL`, deployed on Prefect Horizon |
 | `blue_horizon/api/app.py` | FastAPI app, SSE streaming, the confirm and dismiss endpoints |
 | `blue_horizon/logging_setup.py` | `configure_logging()` and `log_context()`, which puts `thread_id` and `customer_id` on every log line in a turn; ships records to Axiom when `AXIOM_API_KEY` and `AXIOM_DATASET` are set |
 | `blue_horizon/load_data/` | Redis and PostgreSQL loaders, plus `schema.sql`, `maintenance_booking_guard.sql`, and `regrant_booking_agent_role.sql` |

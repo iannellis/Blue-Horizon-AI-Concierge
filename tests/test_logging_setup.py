@@ -138,7 +138,7 @@ def _context_fields() -> tuple[object, object]:
 
 def _shipping_logger(
     exporter: _RecordingExporter, config: AxiomLoggingConfig = _AXIOM_CONFIG,
-) -> tuple[logging.Logger, logging.Handler]:
+) -> tuple[logging.Logger, logging_setup._ShippingHandler]:
     """Build a non-propagating logger whose only handler ships to `exporter`.
 
     Args:
@@ -146,8 +146,8 @@ def _shipping_logger(
         config: Batching settings for the processor.
 
     Returns:
-        tuple[logging.Logger, logging.Handler]: The logger, and its handler,
-        which the caller closes to flush.
+        tuple[logging.Logger, logging_setup._ShippingHandler]: The logger, and
+        its handler, which the caller shuts down to flush.
 
     """
     handler = logging_setup._build_shipping_handler(config, exporter)
@@ -452,7 +452,7 @@ class TestShipping:
         logger, handler = _shipping_logger(exporter)
         with log_context(thread_id=_THREAD_ID, customer_id=_CUSTOMER_ID):
             logger.info("proposal %s confirmed", "p-1")
-        handler.close()
+        handler.shutdown()
 
         (record,) = exporter.records
         attributes = _attributes(record)
@@ -474,7 +474,7 @@ class TestShipping:
         logger.propagate = False
         logger.setLevel(logging.INFO)
         logger.info("ready")
-        handler.close()
+        handler.shutdown()
 
         (record,) = exporter.records
         assert record.resource.attributes["service.name"] == "blue-horizon-mcp"
@@ -484,7 +484,7 @@ class TestShipping:
         exporter = _RecordingExporter()
         logger, handler = _shipping_logger(exporter)
         logger.info("startup")
-        handler.close()
+        handler.shutdown()
 
         (record,) = exporter.records
         assert "thread_id" not in _attributes(record)
@@ -499,13 +499,13 @@ class TestShipping:
             raise ValueError(msg)  # noqa: TRY301
         except ValueError:
             logger.exception("write failed")
-        handler.close()
+        handler.shutdown()
 
         (record,) = exporter.records
         assert "ValueError: boom" in str(_attributes(record)["exception.stacktrace"])
 
     def test_batches_respect_batch_size(self) -> None:
-        """No batch exceeds `batch_size`, and closing sends every record."""
+        """No batch exceeds `batch_size`, and shutting down sends every record."""
         exporter = _RecordingExporter()
         config = _AXIOM_CONFIG.model_copy(
             update={"batch_size": 2, "flush_interval_s": 30.0},
@@ -513,7 +513,7 @@ class TestShipping:
         logger, handler = _shipping_logger(exporter, config)
         for n in range(5):
             logger.info("line %d", n)
-        handler.close()
+        handler.shutdown()
 
         assert all(len(batch) <= config.batch_size for batch in exporter.batches)
         assert [r.log_record.body for r in exporter.records] == [
@@ -528,7 +528,7 @@ class TestShipping:
         logger, handler = _shipping_logger(exporter)
         logger.warning("lost line")
         with caplog.at_level(logging.ERROR):
-            handler.close()
+            handler.shutdown()
 
         messages = [r.getMessage() for r in caplog.records]
         assert any("Exception while exporting" in m for m in messages)
@@ -539,7 +539,6 @@ class TestShipping:
         logger, handler = _shipping_logger(exporter)
         handler.close()
         logger.info("after close")
-        assert isinstance(handler, logging_setup._ShippingHandler)
         handler.shutdown()
 
         assert [r.log_record.body for r in exporter.records] == ["after close"]

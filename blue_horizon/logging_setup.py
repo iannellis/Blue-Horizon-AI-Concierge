@@ -219,13 +219,14 @@ def _build_shipping_handler(
 class _ShippingHandler(LoggingHandler):
     """The OpenTelemetry logging handler, owning its logger provider.
 
-    `close` sends what is queued but leaves the provider running.
-    `logging.config.dictConfig`, which uvicorn calls as it starts, closes every
-    existing handler yet leaves it on the root logger. The MCP server installs
-    its handlers before uvicorn starts, so a `close` that shut the provider
-    down left a handler that dropped every later record. The provider is shut
-    down by `shutdown`, which `stop_log_shipping` calls, or by its own exit
-    hook.
+    `close`, inherited, leaves the provider alone. `logging.config.dictConfig`,
+    which uvicorn calls as it starts, closes every existing handler yet leaves
+    it on the root logger, and does so holding logging's module lock. The MCP
+    server installs its handlers before uvicorn starts. A `close` that shut the
+    provider down left a handler that dropped every later record, and one that
+    flushed deadlocked, because the export thread logs too and waits on that
+    lock. The provider is shut down by `shutdown`, which `stop_log_shipping`
+    calls, or by its own exit hook.
     """
 
     def __init__(self, provider: LoggerProvider) -> None:
@@ -237,11 +238,6 @@ class _ShippingHandler(LoggingHandler):
         """
         super().__init__(logger_provider=provider, log_code_attributes=True)
         self._provider = provider
-
-    def close(self) -> None:
-        """Send what is queued, keeping the provider running."""
-        self._provider.force_flush()
-        super().close()
 
     def shutdown(self) -> None:
         """Send what is queued and shut the provider down."""

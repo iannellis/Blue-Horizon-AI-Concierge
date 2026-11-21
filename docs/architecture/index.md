@@ -148,10 +148,11 @@ The handler on the root logger only converts the record and queues
 it; the SDK's batch processor sends from its own thread, so logging never waits on the
 network. A batch that still fails after the exporter's retries is dropped and reported
 on stderr, and the exporter's own log lines are never shipped. Shutdown sends what is
-still queued. Closing the handler only sends what is queued; it does not stop shipping.
-uvicorn's startup closes every handler already installed but leaves them on the root
-logger, and the MCP server installs its handlers before uvicorn starts, so a close that
-stopped shipping dropped every record after startup. Shipping stops in
+still queued. Closing the handler leaves shipping alone. uvicorn's startup closes every
+handler already installed, while holding `logging`'s lock, but leaves them on the root
+logger, and the MCP server installs its handlers before uvicorn starts. A close that
+stopped shipping dropped every record after startup, and one that sent the queue
+deadlocked, since the export thread logs too and waits on that lock. Shipping stops in
 `stop_log_shipping`, or at exit.
 
 The log is written so that a turn can be audited without a LangSmith trace. At `INFO`

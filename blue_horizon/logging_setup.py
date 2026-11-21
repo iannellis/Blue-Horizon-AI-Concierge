@@ -197,11 +197,10 @@ def _build_shipping_handler(
         batch processor thread is already running.
 
     """
+    # Shuts itself down at exit, since the handler's close() does not; see
+    # `_ShippingHandler`.
     provider = LoggerProvider(
         resource=Resource.create({"service.name": service_name}),
-        # Shut down by the handler's close() instead, which logging's own
-        # exit hook calls, so there is one shutdown path, not two.
-        shutdown_on_exit=False,
     )
     provider.add_log_record_processor(
         BatchLogRecordProcessor(
@@ -220,8 +219,12 @@ def _build_shipping_handler(
 class _ShippingHandler(LoggingHandler):
     """The OpenTelemetry logging handler, owning its logger provider.
 
-    Owning the provider lets `close` flush and shut it down exactly once,
-    whether shutdown comes from the API's lifespan or from logging's exit
+    `close` sends what is queued but leaves the provider running.
+    `logging.config.dictConfig`, which uvicorn calls as it starts, closes every
+    existing handler yet leaves it on the root logger. The MCP server installs
+    its handlers before uvicorn starts, so a `close` that shut the provider
+    down left a handler that dropped every later record. The provider is shut
+    down by `shutdown`, which `stop_log_shipping` calls, or by its own exit
     hook.
     """
 
@@ -234,13 +237,15 @@ class _ShippingHandler(LoggingHandler):
         """
         super().__init__(logger_provider=provider, log_code_attributes=True)
         self._provider = provider
-        self._closed = False
 
     def close(self) -> None:
-        """Send what is queued and shut the provider down, once."""
-        if not self._closed:
-            self._closed = True
-            self._provider.shutdown()
+        """Send what is queued, keeping the provider running."""
+        self._provider.force_flush()
+        super().close()
+
+    def shutdown(self) -> None:
+        """Send what is queued and shut the provider down."""
+        self._provider.shutdown()
         super().close()
 
 
@@ -270,7 +275,7 @@ def stop_log_shipping() -> None:
     root = logging.getLogger()
     for handler in [h for h in root.handlers if isinstance(h, _ShippingHandler)]:
         root.removeHandler(handler)
-        handler.close()
+        handler.shutdown()
 
 
 @contextmanager

@@ -533,6 +533,17 @@ class TestShipping:
         messages = [r.getMessage() for r in caplog.records]
         assert any("Exception while exporting" in m for m in messages)
 
+    def test_records_after_close_still_ship(self) -> None:
+        """A dictConfig call, as uvicorn makes, closes the handler but keeps it."""
+        exporter = _RecordingExporter()
+        logger, handler = _shipping_logger(exporter)
+        handler.close()
+        logger.info("after close")
+        assert isinstance(handler, logging_setup._ShippingHandler)
+        handler.shutdown()
+
+        assert [r.log_record.body for r in exporter.records] == ["after close"]
+
     def test_close_is_safe_to_repeat(self) -> None:
         """Closing twice, as the lifespan and logging's exit hook may, is harmless."""
         _, handler = _shipping_logger(_RecordingExporter())

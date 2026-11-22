@@ -81,6 +81,7 @@ nav:
   - Home: index.md
   - Goals: goals.md
   - Using the Demo: using-the-demo.md
+  - Using the MCP Server: using-the-mcp-server.md
   - Architecture:
       - architecture/index.md
       - Orchestration: architecture/orchestration.md

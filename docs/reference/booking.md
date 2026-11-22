@@ -37,3 +37,7 @@ The only code paths that write a booking.
 ## Configuration
 
 ::: blue_horizon.agents.booking.config
+
+## MCP server
+
+::: mcp_server.mcp_booking

@@ -118,6 +118,9 @@ Full documentation is at
 - **[Using the Demo](https://iannellis.github.io/Blue-Horizon-AI-Concierge/using-the-demo/)**
   explains what to expect from the live demo, what you can search for, and has a demo
   video.
+- **[Using the MCP Server](https://iannellis.github.io/Blue-Horizon-AI-Concierge/using-the-mcp-server/)**
+  explains how to connect an MCP client to the room search at
+  `https://blue-horizon.fastmcp.app/mcp`, and what it returns.
 - **[Goals](https://iannellis.github.io/Blue-Horizon-AI-Concierge/goals/)** explains what
   the project set out to demonstrate, what is deliberately out of scope, and the
   constraints it was built under.

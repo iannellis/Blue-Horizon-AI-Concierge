@@ -64,3 +64,7 @@ used, only Hugging Face sign-in works.
 
 [Using the Demo](using-the-demo.md) explains what to expect, what you can search for,
 and has a demo video.
+
+Room search is also exposed to any MCP client at `https://blue-horizon.fastmcp.app/mcp`.
+[Using the MCP Server](using-the-mcp-server.md) explains how to connect and what it
+returns.

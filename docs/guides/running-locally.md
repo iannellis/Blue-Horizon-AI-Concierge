@@ -17,6 +17,7 @@ The project's dependency groups, from `pyproject.toml`:
 |---|---|
 | `ui` | The Streamlit UI. Required to run the app |
 | `eval` | The evaluation harness, stress test, and the test suite |
+| `mcp` | The MCP server |
 | `notebook` | The exploration notebooks |
 | `lint` | `ruff` and `pyright` |
 | `docs` | Building this site |
@@ -190,6 +191,28 @@ streamlit run ui/app.py
 
 The UI connects to `http://localhost:8000` by default. Override with the
 `BLUE_HORIZON_API_URL` environment variable.
+
+## Running the MCP server
+
+The [MCP server](../architecture/booking-agent.md#mcp-server) is independent of the API
+and the UI, and needs only steps 2 and 3 above, plus the `mcp` dependency group:
+
+```bash
+uv sync --group mcp
+python mcp_server/mcp_booking.py
+```
+
+It serves Streamable HTTP at `http://127.0.0.1:7860/mcp`, so any MCP client can connect
+as described in [Using the MCP Server](../using-the-mcp-server.md#connecting). It
+connects through `PGSQL_RO_DB_URL` only, so a local `.env` pointed at Production is safe
+here. `load_app_config()` still requires `PGSQL_RW_DB_URL` and `REDIS_URL` to be set,
+though the server uses neither.
+
+The server reads the room vocabularies and room count at import, so it fails at startup,
+before serving anything, if the database is unreachable. Unlike the API, it needs no
+`--reload` on Windows: the script runs its own event loop as `SelectorEventLoop`, which
+`psycopg`'s async mode requires. To check that the module loads and see the tool schema
+without starting a server, run `fastmcp inspect mcp_server/mcp_booking.py:mcp`.
 
 ## Notebooks
 

@@ -12,19 +12,25 @@ The system is composed of an **orchestration layer** that routes between two age
 Both sit behind the [orchestration graph](orchestration.md), which classifies each
 incoming message, dispatches it, and maintains conversation history.
 
+Separately, an **[MCP server](booking-agent.md#mcp-server)** exposes the booking agent's
+room search, and nothing else, to any MCP client. It reuses the same search code over the
+same read-only role, without the router, the information agent, or any write path.
+
 ## Runtime topology
 
 | Component | Technology | Role |
 |---|---|---|
 | Agent backend | LangGraph + FastAPI | Routing, RAG, typed room search, proposal lifecycle |
 | Chat UI | Streamlit | Guest session, stage indicator, confirmation dialog |
+| MCP server | FastMCP on Prefect Horizon | Read-only `search_rooms` for MCP clients |
 | Vector store | Redis (via LlamaIndex) | FAQ, amenities, and services indices |
 | Relational store | PostgreSQL on [Neon](https://neon.tech) | Rooms, availability, customers, bookings |
 | Embeddings and chat | OpenAI | `text-embedding-3-small`, `gpt-5.6-luna` |
 | Judge and RAG scoring | Google Gemini | Evaluation only, never in the serving path |
 
-Both processes run in a single container under `supervisord` in the deployed
-configuration. See [Deployment and CI](../guides/deployment.md).
+The backend and the UI run in a single container under `supervisord` in the deployed
+configuration. The MCP server is deployed on its own, on Prefect Horizon. See
+[Deployment and CI](../guides/deployment.md).
 
 ## Repository structure
 
@@ -35,6 +41,7 @@ blue_horizon/          # Main application package
     booking/           # Read-only typed room search + server-owned booking writes
       factory.py         # Agent/tool construction: search_rooms (read-only) + propose_* tools
       search.py          # search_rooms argument model and its two fixed, parameterized queries
+      search_runner.py   # Runs a search with retry; shared with the MCP server
       write_ops.py       # commit_booking / cancel_booking / modify_booking -- the only writers
       proposals.py       # In-process ProposalStore: propose -> confirm/dismiss lifecycle
       receipts.py        # App-authored confirmation/cancellation/modification receipt text
@@ -50,6 +57,10 @@ blue_horizon/          # Main application package
 
 ui/
   app.py               # Streamlit chat UI: guest session, proposal dialog, reservations panel
+
+mcp_server/
+  mcp_booking.py       # FastMCP server exposing only search_rooms, read-only
+  requirements.txt     # The mcp dependency group, for Prefect Horizon's build
 
 deploy/                # Docker/deployment configuration
   supervisord.conf     # Runs FastAPI + Streamlit under supervisord

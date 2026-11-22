@@ -1,4 +1,12 @@
-"""Provide an MCP server to search rooms in the Blue Horizon hotel."""
+"""Provide an MCP server to search rooms in the Blue Horizon hotel.
+
+Exposes the booking agent's `search_rooms`, and nothing else, over
+`PGSQL_RO_DB_URL`. Importing the module checks the read-only credentials and
+reads the room vocabularies and room count from the database, because the
+tool's argument schema is built from them before the server starts. Prefect
+Horizon imports the `mcp` object; running the file directly serves it locally
+over HTTP.
+"""
 
 import asyncio
 import logging
@@ -93,7 +101,22 @@ _TOOL_DESCRIPTION = (
 )
 
 async def get_rooms_count(ro_db_url: str) -> int:
-    """Get the number of rooms in the hotel."""
+    """Get the number of rooms in the hotel.
+
+    The count caps both `room_numbers` and `limit` in the tool's argument
+    model, so a client can ask for every room but no more.
+
+    Args:
+        ro_db_url: The read-only (`bh_agent_ro`) database URL.
+
+    Returns:
+        int: The number of rows in `rooms`.
+
+    Raises:
+        ValueError: If the count query returns no row.
+        psycopg.Error: If the database cannot be reached or queried.
+
+    """
     async with (
             await psycopg.AsyncConnection.connect(ro_db_url) as conn,
             conn.cursor() as cur,
@@ -119,7 +142,27 @@ SearchArgs = build_search_args_model(
 async def lifespan(
     _server: FastMCP[Any],
 ) -> AsyncGenerator[dict[str, AsyncConnectionPool[Any]]]:
-    """Startup and shutdown the connection pool when the server starts and stops."""
+    """Open the read-only connection pool for the server's lifetime.
+
+    The pool is proven unable to write before the first tool call. Log
+    shipping stops when the server shuts down, whether or not startup
+    succeeded.
+
+    Args:
+        _server: The FastMCP server being started. Unused.
+
+    Yields:
+        dict[str, AsyncConnectionPool[Any]]: The lifespan context, with the
+            open pool under ``"pool"``.
+
+    Raises:
+        psycopg_pool.PoolTimeout: If the pool cannot open its minimum
+            connections within 10 seconds.
+        ConfigurationError: If `PGSQL_RO_DB_URL` authenticates as a role
+            that can write.
+        psycopg.Error: If the read-only probe cannot be run.
+
+    """
     pool_cfg = cfg.booking.db.pool
     try:
         async with AsyncConnectionPool(
@@ -153,7 +196,23 @@ async def search_rooms(
     args: SearchArgs, # pyright: ignore[reportInvalidTypeForm]
     ctx: Context,
 ) -> dict[str, Any]:
-    """Search for room information in the Blue Horizon hotel."""
+    """Search for room information in the Blue Horizon hotel.
+
+    FastMCP validates `args` against `SearchArgs` before this runs, so a
+    client with invalid filters gets an MCP error naming the problem. Log
+    lines from the search carry the MCP session id as their `thread_id`.
+
+    Args:
+        args: The validated search filters.
+        ctx: The FastMCP request context, holding the session id and the
+            lifespan's pool.
+
+    Returns:
+        dict[str, Any]: ``status="ok"`` with ``matching_count`` and
+            ``rooms``, or ``status="error"`` with ``error`` and
+            ``error_kind`` when the search fails on the server.
+
+    """
     db_cfg = cfg.booking.db
     with log_context(thread_id=f"mcp:{ctx.session_id}"):
         return await search_rooms_with_retry(
@@ -166,4 +225,8 @@ async def search_rooms(
 
 # Local runs only: Prefect Horizon imports `mcp` and ignores this block.
 if __name__ == "__main__":
-    mcp.run(transport="http", host="127.0.0.1", port=7860)
+    # mcp.run() would start Windows' default Proactor loop, which psycopg rejects.
+    asyncio.run(
+        mcp.run_async(transport="http", host="127.0.0.1", port=7860),
+        loop_factory=_LOOP,
+    )

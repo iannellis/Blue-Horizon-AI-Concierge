@@ -318,8 +318,11 @@ class InfoRagResources:
         _ = self._get_catalog_retriever(source=Source.AMENITIES, filters=None)
         await self._validate_vector_dims()
 
+        catalog_categories = await self._fetch_catalog_categories()
         try:
-            self.system_prompt = await asyncio.to_thread(self._render_system_prompt)
+            self.system_prompt = await asyncio.to_thread(
+                self._render_system_prompt, catalog_categories,
+            )
         except Exception as exc:
             msg = "Failed to render system prompt"
             raise OperationalError(msg) from exc
@@ -342,8 +345,41 @@ class InfoRagResources:
         finally:
             await self.redis_async.connection_pool.disconnect()  # type: ignore[misc]
 
-    def _render_system_prompt(self) -> str:
+    async def _fetch_catalog_categories(self) -> list[str]:
+        """Read every amenity category and service type from the Redis indexes.
+
+        Top-k retrieval can never enumerate the whole catalog, so these names
+        are what lets a "what do you offer?" question get a complete answer.
+        `FT.AGGREGATE` is used over `FT.TAGVALS` because it keeps the case.
+
+        Returns:
+            list[str]: Sorted, deduplicated category and service type names.
+
+        Raises:
+            OperationalError: If either aggregation fails.
+
+        """
+        names: set[str] = set()
+        for source, field in (
+            (Source.AMENITIES, "category"),
+            (Source.SERVICES, "service_type"),
+        ):
+            try:
+                reply = await self.redis_async.execute_command(
+                    "FT.AGGREGATE", source.value, "*", "GROUPBY", "1", f"@{field}",
+                )
+            except Exception as exc:
+                msg = f"Catalog category lookup failed for index '{source.value}'"
+                raise OperationalError(msg) from exc
+            # Reply is [count, [field, value], ...]; a row lacking the field has none.
+            names.update(row[1] for row in (reply or [])[1:] if len(row) > 1 and row[1])
+        return sorted(names)
+
+    def _render_system_prompt(self, catalog_categories: list[str]) -> str:
         """Render and return the system prompt string.
+
+        Args:
+            catalog_categories: Category and service type names for the prompt.
 
         Returns:
             str: Rendered system prompt.
@@ -354,6 +390,7 @@ class InfoRagResources:
         """
         return build_system_prompt(
             top_k=self.top_k,
+            catalog_categories=catalog_categories,
             prompt_resource=self._system_prompt_resource,
         )
 

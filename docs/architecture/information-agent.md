@@ -37,6 +37,14 @@ When a message asks for listings on several topics, the respond prompt gives eac
 with a relevant result one card before any topic gets a second, and names the topics
 that did not fit in `top_k` cards.
 
+An overview question such as "what services do you offer?" names no topic, so top-k
+retrieval can only return a few arbitrary items. To answer it in full, `startup_check`
+reads every amenity `category` and service `service_type` from the Redis indexes
+(`FT.AGGREGATE ... GROUPBY`) and renders them into the respond prompt as
+`$catalog_categories`. For an overview question the prompt lists those names instead of
+cards. They are read once per process, so a catalog reload takes effect on the next
+restart.
+
 Every retrieval goes through one Redis client per process, on a blocking connection
 pool capped at `[info.redis].max_connections`. When every connection is busy, a
 retrieval waits for one to be released rather than opening another, so parallel

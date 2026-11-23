@@ -1374,6 +1374,26 @@ behind it. It does not stop one caller from using up the budget and locking ever
 else out; nothing short of per-caller identity could. Callers through Claude would
 share a bucket anyway, since Claude reaches MCP servers from Anthropic's addresses.
 
+### An overview question returned two arbitrary items
+
+**Status:** adopted.
+
+Asked "what sort of services does the hotel offer?", the information agent answered
+with a spa treatment and room service. Nothing was broken: the parser produced one
+broad query, each retriever returned its `top_k` nearest neighbours, and the prompt
+capped the reply at `top_k` cards. Nearest-neighbour search cannot enumerate a catalog,
+and with 34 amenities in 8 categories and 25 services in 6 types, no `top_k` small
+enough to keep specific answers sharp could cover it. Raising it would have filled
+specific answers with near-duplicates (the spa has four lengths of the same massage)
+and still guaranteed nothing.
+
+**The category names now come from Redis at startup** and are rendered into the
+respond prompt, which lists them for an overview question and keeps cards for
+everything else. This adds no node, tool, or round trip, so the information agent stays
+the [fixed workflow](#the-information-agent-is-a-workflow-not-an-agent) it was. A
+hand-written FAQ entry listing the categories was rejected because it would be a second
+copy of the catalog with nothing keeping it in step.
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

@@ -28,11 +28,18 @@ def load_info_config(config_path: Path | str | None = None) -> InfoRagConfig:
     return app_config.info
 
 
-def build_system_prompt(*, top_k: int, prompt_resource: str) -> str:
+def build_system_prompt(
+    *,
+    top_k: int,
+    catalog_categories: list[str],
+    prompt_resource: str,
+) -> str:
     """Render the system prompt with runtime substitutions.
 
     Args:
         top_k: Maximum number of retrieval items referenced by the prompt.
+        catalog_categories: Every amenity category and service type in the
+            catalog, so overview questions can be answered in full.
         prompt_resource: Package resource path to the prompt template file.
 
     Returns:
@@ -44,4 +51,7 @@ def build_system_prompt(*, top_k: int, prompt_resource: str) -> str:
 
     """
     template = load_prompt_template(prompt_resource)
-    return template.safe_substitute(top_k=top_k)
+    return template.safe_substitute(
+        top_k=top_k,
+        catalog_categories=", ".join(catalog_categories),
+    )

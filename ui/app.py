@@ -48,7 +48,7 @@ from opentelemetry.sdk.resources import Resource
 
 if TYPE_CHECKING:
     from opentelemetry.sdk._logs.export import LogRecordExporter
-    from streamlit.delta_generator import DeltaGenerator
+    from streamlit.elements.lib.mutable_status_container import StatusContainer
 
 load_dotenv()
 
@@ -1219,7 +1219,7 @@ class ChatTurnResult:
 
 def _handle_stream_event(
     event: dict[str, Any],
-    status: DeltaGenerator,
+    status: StatusContainer,
     pending_proposal: dict[str, Any] | None,
 ) -> tuple[dict[str, Any] | None, ChatTurnResult | None]:
     """Apply one SSE event to the status widget.

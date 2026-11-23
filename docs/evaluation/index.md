@@ -185,7 +185,9 @@ accounts for a measurable part of the remaining gap.
 **Info filters pass rate** measures whether the information agent correctly honours
 user-specified constraints (price, duration, booking requirements) when selecting and
 presenting results. **Info reference subset pass rate** measures whether the expected
-source documents appear in the set of documents retrieved for a given query.
+source documents appear in the set of documents retrieved for a given query. A turn
+labeled `reference_in_reply` is checked against the reply alone, which is how the
+catalog-overview cases verify that every category is named.
 
 The filters pass rate missed one turn in each of the first two runs and none in the
 third. Both misses were `case_0005`'s "I only have 20-minute", read as an exact duration

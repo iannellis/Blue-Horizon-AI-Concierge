@@ -193,6 +193,10 @@ class ExampleTurn(BaseModel):
             Accepts the legacy aliases ``expected_answer``/``ground_truth``
             for datasets that used those names instead; whichever of the
             three keys is present first (in that order) wins.
+        reference_in_reply: Whether the reference snippets must appear in the
+            reply itself. By default the subset check also searches the
+            retrieved contexts, which would let a reply that drops an item
+            pass whenever retrieval surfaced it.
         expected_route: Expected router decision: "info", "booking", "refuse",
             or a split turn's steps joined by "+" in the order asked.
         expected_filters: Expected amenity/service filters for this turn,
@@ -221,6 +225,7 @@ class ExampleTurn(BaseModel):
         default=None,
         validation_alias=AliasChoices("reference", "expected_answer", "ground_truth"),
     )
+    reference_in_reply: bool = False
     expected_route: str | None = None
     expected_filters: dict[str, Any] | None = None
     expected_search: dict[str, Any] | list[dict[str, Any]] | None = None

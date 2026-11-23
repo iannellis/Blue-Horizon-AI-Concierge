@@ -26,6 +26,8 @@ def eval_info_reference_subset(
 ) -> list[dict[str, Any]]:
     """Evaluate whether expected reference snippets appear in retrieval contexts.
 
+    A turn labeled `reference_in_reply` is matched against the reply alone.
+
     Args:
         run: LangSmith run object containing turn outputs.
         example: LangSmith example object containing dataset turns.
@@ -60,7 +62,11 @@ def eval_info_reference_subset(
         if not expected_snippets:
             continue
         turn_output = turn_outputs[idx]
-        candidate_text = _build_reference_candidate_text(turn_output)
+        candidate_text = (
+            turn_output.assistant_text or ""
+            if example_turn.reference_in_reply
+            else _build_reference_candidate_text(turn_output)
+        )
         matched, missing_snippets = _reference_subset_match(
             expected_snippets,
             candidate_text,

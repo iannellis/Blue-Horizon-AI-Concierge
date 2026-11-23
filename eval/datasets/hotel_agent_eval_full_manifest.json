@@ -1,18 +1,18 @@
 {
   "dataset_file": "eval/datasets/hotel_agent_eval_full.jsonl",
-  "num_cases": 245,
+  "num_cases": 249,
   "distribution": {
-    "info_only": 76,
+    "info_only": 80,
     "rooms_only": 96,
     "mixed": 73
   },
   "turn_counts": {
-    "total_turns": 582,
-    "info_turns": 210,
+    "total_turns": 587,
+    "info_turns": 215,
     "rooms_turns": 321,
     "refuse_turns": 45,
     "split_turns": 8,
-    "labeled_filter_turns": 40,
+    "labeled_filter_turns": 41,
     "labeled_search_turns": 37
   },
   "refuse_coverage": {
@@ -20,13 +20,13 @@
     "turns_with_refuse": 45
   },
   "expected_filters_coverage": {
-    "cases_with_any_expected_filters": 30,
-    "turns_with_expected_filters": 40
+    "cases_with_any_expected_filters": 31,
+    "turns_with_expected_filters": 41
   },
   "expected_filters_key_usage": {
     "booking_required": 5,
     "min_price": 0,
-    "max_price": 38,
+    "max_price": 39,
     "max_notice_hours": 31,
     "min_duration_minutes": 32,
     "max_duration_minutes": 39
@@ -115,7 +115,8 @@
       "case_0188",
       "case_0190",
       "case_0194",
-      "case_0196"
+      "case_0196",
+      "case_0248"
     ],
     "case_ids_with_notice_constraints": [
       "case_0002",
@@ -207,7 +208,8 @@
       "case_0188",
       "case_0190",
       "case_0194",
-      "case_0196"
+      "case_0196",
+      "case_0248"
     ],
     "case_ids_with_booking_required_constraints": [
       "case_0005",

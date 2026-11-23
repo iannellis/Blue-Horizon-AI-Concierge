@@ -40,6 +40,7 @@ Each line in a JSONL dataset file is a single JSON object:
 | `turns[].expect_flagged` | No | `eval_moderation_flags` | What moderation should flag on this turn: `"message"` or `"reply"`. Unlabeled turns must not be flagged |
 | `turns[].injection_grade_rubric` | No | none | Describes the expected behavior on an injection turn for human readers. No evaluator reads it; the judge's prompt holds the general rule instead |
 | `turns[].reference` | No | `eval_llm_rubrics`, `eval_info_reference_subset`, `eval_rag_metrics_info_turns` | Ground-truth or reference answer |
+| `turns[].reference_in_reply` | No | `eval_info_reference_subset` | `true` to match the reference snippets against the reply alone, not the retrieved contexts |
 | `turns[].expected_filters` | No | `eval_info_expected_filters` | Filters the info-agent parser should extract |
 | `turns[].expected_search` | No | `eval_booking_expected_search` | Arguments a `search_rooms` call in this turn should use: a partial spec, or a list of alternative specs |
 | `turns[].expected_success` | No | `eval_booking_outcome_and_invariants` | `false` if a write attempted on this turn should be refused; `true` or absent if it should succeed |
@@ -232,6 +233,19 @@ up, never as something the hotel lacks. `case_0245` asks for listings on two top
 one has far more matches, so the reply should give each topic a card before either gets
 a second. Neither has a deterministic check; only the judge grades the reply. Both are in
 the full set only.
+
+`case_0246` asks what the hotel offers in general, phrased without the words "services"
+or "amenities". The reply should list every catalog category, read from Redis at
+startup, rather than cards for a few nearest neighbours. The reference is that list, so
+the judge can tell a complete overview from a partial one. Its turn sets
+`reference_in_reply`, so `eval_info_reference_subset` also fails any reply that drops a
+category, even one present in a retrieved item's metadata; the first turn of
+`case_0249` does the same. `case_0247` to `case_0249`
+guard the other side of that rule. `case_0247` says "services" but names the spa, so it
+should get cards, not the list. `case_0248` is broad but has a price cap, so it should
+get filtered cards; its `expected_filters` give it a deterministic check. `case_0249`
+asks for the overview and then drills into one category, which should return to cards.
+All four are in the full set only.
 
 ### Uploading a dataset to LangSmith
 

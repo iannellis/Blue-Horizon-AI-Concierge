@@ -381,3 +381,33 @@ class TestEvalInfoReferenceSubset:
         results = eval_info_reference_subset(run, example, cfg=cfg)
         scores = {r["key"]: r.get("score") for r in results}
         assert scores.get("info_reference_subset_turns") == 2.0  # noqa: PLR2004
+
+    def test_reference_in_reply_ignores_contexts(self) -> None:
+        """A reply-only turn fails when a snippet is only in the contexts."""
+        run = _make_run([{
+            "contexts_used": ["Name: Kids Club\n[Metadata: category: Childcare]"],
+            "assistant_text": "We offer Spa Services.",
+        }])
+        example = _make_example([{
+            "user": "What do you offer?",
+            "reference": "Spa Services | Childcare",
+            "reference_in_reply": True,
+        }])
+        results = eval_info_reference_subset(run, example, cfg=_make_cfg())
+        scores = {r["key"]: r.get("score") for r in results}
+        assert scores.get("info_reference_subset_pass_rate") == 0.0
+
+    def test_reference_in_reply_passes_when_reply_has_every_snippet(self) -> None:
+        """A reply-only turn passes when the reply names every snippet."""
+        run = _make_run([{
+            "contexts_used": [],
+            "assistant_text": "We offer Spa Services and Childcare.",
+        }])
+        example = _make_example([{
+            "user": "What do you offer?",
+            "reference": "Spa Services | Childcare",
+            "reference_in_reply": True,
+        }])
+        results = eval_info_reference_subset(run, example, cfg=_make_cfg())
+        scores = {r["key"]: r.get("score") for r in results}
+        assert scores.get("info_reference_subset_pass_rate") == 1.0

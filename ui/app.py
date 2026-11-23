@@ -69,6 +69,7 @@ _DOCS_URL = "https://iannellis.github.io/Blue-Horizon-AI-Concierge"
 _PRIVACY_POLICY_URL = f"{_DOCS_URL}/privacy/"
 _TERMS_URL = f"{_DOCS_URL}/terms/"
 _DEMO_GUIDE_URL = f"{_DOCS_URL}/using-the-demo/"
+_MCP_GUIDE_URL = f"{_DOCS_URL}/using-the-mcp-server/"
 
 _API_BASE: str = os.getenv("BLUE_HORIZON_API_URL", "http://127.0.0.1:8000").rstrip("/")
 # Sign-in providers as (secrets.toml section name, button label), in button
@@ -962,6 +963,10 @@ def _render_login_page() -> None:
         "Using the concierge for the first time? Visit "
         f"[Using the Demo]({_DEMO_GUIDE_URL}) to see what to expect and what "
         "you can ask.",
+    )
+    st.markdown(
+        "The hotel's room search is also an MCP server, which MCP clients can use"
+        f"without signing in here. See [Using the MCP Server] ({_MCP_GUIDE_URL}).",
     )
     for name, label in _AUTH_PROVIDERS:
         st.button(

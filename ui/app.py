@@ -966,7 +966,7 @@ def _render_login_page() -> None:
     )
     st.markdown(
         "The hotel's room search is also an MCP server, which MCP clients can use"
-        f"without signing in here. See [Using the MCP Server] ({_MCP_GUIDE_URL}).",
+        f"without signing in here. See [Using the MCP Server]({_MCP_GUIDE_URL}).",
     )
     for name, label in _AUTH_PROVIDERS:
         st.button(

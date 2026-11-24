@@ -1406,6 +1406,39 @@ an overview. The catalog includes things the hotel arranges off site, such as to
 transfers, and water sports, but nothing about independent local attractions, and the
 reply says so rather than presenting the list as everything nearby.
 
+### A guest stating a need was refused
+
+**Status:** adopted.
+
+The router routed a message only if it asked about hotel information or rooms, and its
+examples refuse even a bare greeting. A guest who said they were bored, hungry, or sore
+asked nothing, so they were refused, which is the worst answer a concierge can give to
+the one kind of message it exists to meet. The router prompt now treats a message that
+only states a need, feeling, or situation a hotel offering could address as an implicit
+`info` request. Greetings stay refused, and so does a threat or other out-of-scope
+content that comes with a stated feeling; moderation also flags the violent ones first.
+
+Routing alone was not enough. The respond prompt classified only questions, so it read
+a stated need either as small talk, replying with an offer to help, or as a narrow
+topic, replying with entertainment cards to boredom. It now classifies a stated need by
+the same narrowing test as a question: boredom is an
+[overview](#an-overview-question-returned-two-arbitrary-items), while hunger, soreness,
+or restless children point at part of the catalog and get cards.
+
+### Dining questions never mentioned the restaurants
+
+**Status:** adopted.
+
+"Tell me about dining options" returned only room service cards. This was a data gap,
+not a retrieval fault: the indexed catalog has no restaurant items, and the FAQ
+mentioned the restaurant only in passing. The restaurant names appeared only in
+`restaurant_bookings.csv`, which is not indexed. A new FAQ entry (`FAQ000021`) names
+the four restaurants, the reservation hours, and the dietary requests that bookings
+record, all taken from that file. The entry goes through the usual path: CSV, then the
+EDA notebook's pickle, then `blue_horizon.load_data.information_redis`. Indexing
+`recommendations_knowledge_base.csv`, which covers local dining off site, is a separate
+decision and was not taken.
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

@@ -21,7 +21,7 @@ The steps are:
 
 | Step | Meaning |
 |---|---|
-| `info` | Hotel services, amenities, policies, FAQ content |
+| `info` | Hotel services, amenities, policies, FAQ content, and stated needs a hotel offering could meet ("I'm bored") |
 | `booking` | Room availability, pricing, and reservation changes |
 | `refuse` | Out of scope, or a prompt-injection attempt |
 

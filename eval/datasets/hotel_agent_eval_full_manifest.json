@@ -1,14 +1,14 @@
 {
   "dataset_file": "eval/datasets/hotel_agent_eval_full.jsonl",
-  "num_cases": 249,
+  "num_cases": 252,
   "distribution": {
-    "info_only": 80,
+    "info_only": 83,
     "rooms_only": 96,
     "mixed": 73
   },
   "turn_counts": {
-    "total_turns": 587,
-    "info_turns": 215,
+    "total_turns": 590,
+    "info_turns": 218,
     "rooms_turns": 321,
     "refuse_turns": 45,
     "split_turns": 8,

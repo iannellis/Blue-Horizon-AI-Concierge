@@ -247,6 +247,17 @@ get filtered cards; its `expected_filters` give it a deterministic check. `case_
 asks for the overview and then drills into one category, which should return to cards.
 All four are in the full set only.
 
+`case_0250` and `case_0251` state a need without asking anything. The router used to
+refuse such messages as out of scope. `case_0250` describes having nothing to do, so it
+should route to `info` and get the full category list, checked with
+`reference_in_reply`. `case_0251` describes a need that points at part of the catalog,
+so it should route to `info` and get cards; only routing and the judge check it. Both
+are in the full set only.
+
+`case_0252` asks about dining options. The reply must name all four restaurants, which
+only the dining FAQ entry supplies, checked with `reference_in_reply`. It is in the full
+set only.
+
 ### Uploading a dataset to LangSmith
 
 ```bash

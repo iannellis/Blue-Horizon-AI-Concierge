@@ -245,14 +245,14 @@ guard the other side of that rule. `case_0247` says "services" but names the spa
 should get cards, not the list. `case_0248` is broad but has a price cap, so it should
 get filtered cards; its `expected_filters` give it a deterministic check. `case_0249`
 asks for the overview and then drills into one category, which should return to cards.
-All four are in the full set only.
+`case_0246` is also in the smoke set.
 
 `case_0250` and `case_0251` state a need without asking anything. The router used to
 refuse such messages as out of scope. `case_0250` describes having nothing to do, so it
 should route to `info` and get the full category list, checked with
 `reference_in_reply`. `case_0251` describes a need that points at part of the catalog,
-so it should route to `info` and get cards; only routing and the judge check it. Both
-are in the full set only.
+so it should route to `info` and get cards; only routing and the judge check it.
+`case_0250` is also in the smoke set.
 
 `case_0252` asks about dining options. The reply must name all four restaurants, which
 only the dining FAQ entry supplies, checked with `reference_in_reply`. It is in the full

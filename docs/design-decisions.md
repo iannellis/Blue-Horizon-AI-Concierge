@@ -1394,6 +1394,18 @@ the [fixed workflow](#the-information-agent-is-a-workflow-not-an-agent) it was. 
 hand-written FAQ entry listing the categories was rejected because it would be a second
 copy of the catalog with nothing keeping it in step.
 
+The first version of the rule defined an overview as a question "with no specific
+topic", and it missed questions about activities, things to do, or the area around the
+hotel: the model read each generic word as a topic and returned cards, sometimes under
+a facilities FAQ answer. The exploratory rule also still listed "What amenities are
+there?" as a card example, which is itself an overview question. The rule now gives a
+concrete test instead: a message narrows the catalog only if it names a category, an
+item, a purpose or audience that points at part of the catalog, or a constraint. It
+also forbids FAQ answers in an overview reply and treats a question about the area as
+an overview. The catalog includes things the hotel arranges off site, such as tours,
+transfers, and water sports, but nothing about independent local attractions, and the
+reply says so rather than presenting the list as everything nearby.
+
 ### Tooling choices
 
 | Choice | Replaced | Reason |

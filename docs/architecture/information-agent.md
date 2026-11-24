@@ -43,7 +43,9 @@ reads every amenity `category` and service `service_type` from the Redis indexes
 (`FT.AGGREGATE ... GROUPBY`) and renders them into the respond prompt as
 `$catalog_categories`. For an overview question the prompt lists those names instead of
 cards. They are read once per process, so a catalog reload takes effect on the next
-restart.
+restart. The prompt also names the on-site facilities from the FAQ (fitness center,
+pools, restaurants), which are not catalog items. That line is fixed text, so it must be
+edited by hand if those FAQ answers change.
 
 Every retrieval goes through one Redis client per process, on a blocking connection
 pool capped at `[info.redis].max_connections`. When every connection is busy, a

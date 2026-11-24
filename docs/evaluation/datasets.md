@@ -41,6 +41,7 @@ Each line in a JSONL dataset file is a single JSON object:
 | `turns[].injection_grade_rubric` | No | none | Describes the expected behavior on an injection turn for human readers. No evaluator reads it; the judge's prompt holds the general rule instead |
 | `turns[].reference` | No | `eval_llm_rubrics`, `eval_info_reference_subset`, `eval_rag_metrics_info_turns` | Ground-truth or reference answer |
 | `turns[].reference_in_reply` | No | `eval_info_reference_subset` | `true` to match the reference snippets against the reply alone, not the retrieved contexts |
+| `turns[].skip_rag` | No | `eval_rag_metrics_info_turns` | `true` to leave the turn out of every Ragas metric, for a reply meant to come from the system prompt rather than retrieval, such as a catalog overview |
 | `turns[].expected_filters` | No | `eval_info_expected_filters` | Filters the info-agent parser should extract |
 | `turns[].expected_search` | No | `eval_booking_expected_search` | Arguments a `search_rooms` call in this turn should use: a partial spec, or a list of alternative specs |
 | `turns[].expected_success` | No | `eval_booking_outcome_and_invariants` | `false` if a write attempted on this turn should be refused; `true` or absent if it should succeed |

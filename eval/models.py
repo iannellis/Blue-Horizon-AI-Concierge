@@ -197,6 +197,10 @@ class ExampleTurn(BaseModel):
             reply itself. By default the subset check also searches the
             retrieved contexts, which would let a reply that drops an item
             pass whenever retrieval surfaced it.
+        skip_rag: Whether Ragas skips this turn. Set it on a turn whose reply
+            is meant to come from the system prompt rather than from
+            retrieval, such as a catalog overview, where every Ragas metric
+            would score the missing retrieval rather than the reply.
         expected_route: Expected router decision: "info", "booking", "refuse",
             or a split turn's steps joined by "+" in the order asked.
         expected_filters: Expected amenity/service filters for this turn,
@@ -226,6 +230,7 @@ class ExampleTurn(BaseModel):
         validation_alias=AliasChoices("reference", "expected_answer", "ground_truth"),
     )
     reference_in_reply: bool = False
+    skip_rag: bool = False
     expected_route: str | None = None
     expected_filters: dict[str, Any] | None = None
     expected_search: dict[str, Any] | list[dict[str, Any]] | None = None

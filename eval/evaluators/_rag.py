@@ -43,7 +43,7 @@ if TYPE_CHECKING:
     from langsmith.schemas import Example, Run
 
     from eval.config import EvalConfig, RagasConfig
-    from eval.models import TurnOutput
+    from eval.models import ExampleTurn, TurnOutput
 
 try:  # Optional dependency for Gemini clients used by Ragas.
     from google import genai as _genai
@@ -176,7 +176,7 @@ async def eval_rag_metrics_info_turns(
             {
                 "key": "rag_metrics_skipped",
                 "score": 1.0,
-                "comment": "No info/RAG turns in run",
+                "comment": "No RAG turns in run",
             },
         ]
 
@@ -195,7 +195,7 @@ async def eval_rag_metrics_info_turns(
 
     for idx in range(total_turns):
         turn_output = turn_outputs[idx]
-        if not _rag_is_eligible_turn(turn_output):
+        if not _rag_is_eligible_turn(turn_output, example_turns[idx]):
             continue
         question = truncate(
             example_turns[idx].user,
@@ -254,7 +254,7 @@ async def eval_rag_metrics_info_turns(
             {
                 "key": "rag_metrics_skipped",
                 "score": 1.0,
-                "comment": "No info/RAG turns in run",
+                "comment": "No RAG turns in run",
             },
         ]
 
@@ -478,22 +478,25 @@ def _is_transient_gemini_error(exc: BaseException) -> bool:
     return False
 
 
-def _rag_is_eligible_turn(turn_output: TurnOutput) -> bool:
+def _rag_is_eligible_turn(turn_output: TurnOutput, example_turn: ExampleTurn) -> bool:
     """Determine whether a turn should be scored by Ragas.
 
     A turn split across both agents is not scored: its reply also carries
     the booking agent's section and its contexts the room search results,
     which a reference written for the info part would mark as irrelevant
     or unsupported. The judge and the reference-subset check still see it.
+    Neither is a turn the dataset labels ``skip_rag``.
 
     Args:
         turn_output: Parsed turn output from the run outputs.
+        example_turn: The dataset turn the output answers.
 
     Returns:
-        True only when the agent routed the turn to the info path.
+        True only when the agent routed the turn to the info path and the
+        dataset does not exclude it.
 
     """
-    return turn_output.route_pred == "info"
+    return turn_output.route_pred == "info" and not example_turn.skip_rag
 
 
 def _rag_prepare_contexts(

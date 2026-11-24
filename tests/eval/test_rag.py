@@ -22,11 +22,13 @@ from eval.config import RagasConfig
 from eval.evaluators._rag import (
     _build_retrying,
     _is_transient_gemini_error,
+    _rag_is_eligible_turn,
     _rag_mean_or_comment,
     _rag_reference_is_no_match,
     _rag_score_turn,
 )
 from eval.evaluators._rag_prompts import PartialCoverageContextPrecisionPrompt
+from eval.models import ExampleTurn, TurnOutput
 
 SENTINEL = "I could not find exactly what you requested"
 EXPECTED_EXAMPLE_COUNT = 4
@@ -393,3 +395,24 @@ def test_unscored_case_mean_is_none_not_zero() -> None:
 def test_scored_case_mean_has_no_comment() -> None:
     """A case with scored turns gets their mean and no comment."""
     assert _rag_mean_or_comment([0.5, 1.0], "No references") == (0.75, None)
+
+
+@pytest.mark.parametrize(
+    ("route", "skip_rag", "eligible"),
+    [("info", False, True), ("info", True, False), ("booking", False, False)],
+)
+def test_rag_eligibility_needs_info_route_and_no_skip_label(
+    route: str,
+    skip_rag: bool,  # noqa: FBT001
+    eligible: bool,  # noqa: FBT001
+) -> None:
+    """Only an info-routed turn the dataset does not label ``skip_rag`` is scored.
+
+    Args:
+        route: The route the agent took.
+        skip_rag: The dataset turn's ``skip_rag`` label.
+        eligible: Whether the turn should be scored.
+
+    """
+    turn = TurnOutput(route_pred=route)
+    assert _rag_is_eligible_turn(turn, ExampleTurn(skip_rag=skip_rag)) is eligible

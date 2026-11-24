@@ -35,7 +35,7 @@ twice in one turn.
 
 Refusals never reach a sub-agent. They return `[orchestration.messages].refusal`
 verbatim, so a refusal costs the router's and the check's parallel LLM calls rather than
-a full pipeline: this is why the refuse route's p50 latency is roughly a quarter of the
+a full pipeline: this is why the refuse route's p95 latency is roughly a quarter of the
 other two.
 
 ### Injection check

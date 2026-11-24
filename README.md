@@ -66,7 +66,7 @@ Mean of three full runs over the 245-case dataset, the current baseline:
 | RAG context precision / answer relevancy | **90.2%** / **83.7%** |
 | Booking tool-call success rate | **99.3%** |
 | Stress test: 250 concurrent booking ops | **0 errors** |
-| Latency p50 (info / booking) | **5.4 s** / **5.7 s** |
+| Latency p95 (info / booking) | **8.3 s** / **7.7 s** |
 
 Double-bookings do not appear in the stress test because the schema makes them
 unstorable.
